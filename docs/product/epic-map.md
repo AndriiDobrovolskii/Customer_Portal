@@ -20,7 +20,7 @@
 * Manage Roles  
 * View Audit Information
 
-### Epic 6 — Feedback / Support
+### Epic 4 — Feedback / Support
 
 * Support Tickets  
 * Ticket Replies  
