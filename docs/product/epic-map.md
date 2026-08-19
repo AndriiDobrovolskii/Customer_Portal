@@ -20,18 +20,6 @@
 * Manage Roles  
 * View Audit Information
 
-### Epic 4 — Product Catalog
-
-* Browse Products  
-* Search Products  
-* Manage Categories
-
-### Epic 5 — Orders
-
-* Create Order  
-* View Order  
-* Cancel Order
-
 ### Epic 6 — Feedback / Support
 
 * Support Tickets  
