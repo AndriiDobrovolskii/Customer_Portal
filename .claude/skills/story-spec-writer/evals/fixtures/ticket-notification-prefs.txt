@@ -1,0 +1,20 @@
+Ticket: Notification Preferences Center
+
+Summary: Customers keep emailing support asking us to stop sending them SMS
+promos. We want a self-serve page where they can manage what they get
+notified about.
+
+What needs to be true when this ships:
+
+- User can open a "Notification Preferences" page from their account
+  settings menu.
+- The page shows toggles for each notification channel: Email, SMS, Push.
+- User can turn each channel on/off independently per notification
+  category (Order updates, Promotions, Product recommendations).
+- Changes save automatically, no separate "Save" button.
+- If a user turns off all channels for "Order updates," they should be
+  warned first, since that includes shipping/delivery notices.
+- SMS toggle should be disabled (greyed out) if the user has no phone
+  number on file, with a note explaining why.
+- The system should notify the user appropriately when their preferences
+  have been updated.

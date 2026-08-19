@@ -1,0 +1,59 @@
+{
+  "skill_name": "story-spec-reviewer",
+  "evals": [
+    {
+      "id": 1,
+      "name": "missing-ac-password-reset",
+      "prompt": "Can you review this spec against its original story? Story: .claude/skills/story-spec-reviewer/evals/fixtures/US-201-password-reset.md, Spec: .claude/skills/story-spec-reviewer/evals/fixtures/US-201-spec.md",
+      "expected_output": "A markdown review report saved to docs/reviews/US-201-spec-review.md. The report should catch that AC4 (expired/used reset link handling) is not actually implemented anywhere in the spec, even though the spec's own traceability matrix claims FR-3 covers it — FR-3 only describes the valid-link path. AC4 should be marked Missing or Partially Covered, not Covered, and this should push the verdict to Fail.",
+      "files": [
+        ".claude/skills/story-spec-reviewer/evals/fixtures/US-201-password-reset.md",
+        ".claude/skills/story-spec-reviewer/evals/fixtures/US-201-spec.md"
+      ],
+      "assertions": [
+        "Output markdown file exists under docs/reviews/",
+        "AC Coverage table includes all 4 ACs (AC1-AC4) from the source story exactly once",
+        "AC4 is marked Missing or Partially Covered, not Covered — the reviewer does not trust the spec's own traceability matrix claim without checking the actual FR-3 text",
+        "The finding about AC4 cites the exact AC4 text and explains that FR-3 only covers the valid-link case, not the expired/used-link case",
+        "Overall Verdict is Fail, with rationale referencing the missing/partial AC4 coverage",
+        "No new requirement text is proposed to fill the gap — the report describes the gap, it does not draft a fix"
+      ]
+    },
+    {
+      "id": 2,
+      "name": "scope-creep-order-cancellation",
+      "prompt": "Please review the spec for order cancellation against the original story. Story: .claude/skills/story-spec-reviewer/evals/fixtures/US-305-order-cancellation.md, Spec: .claude/skills/story-spec-reviewer/evals/fixtures/US-305-spec.md",
+      "expected_output": "A markdown review report saved to docs/reviews/US-305-spec-review.md that flags FR-5 (partial cancellation of individual line items) as scope creep, since the original story and its ACs only ever describe cancelling the whole order, never individual line items. It should also flag the Non-Functional Requirements section's '2 business days' refund SLA as scope creep / invented content, since no timing requirement appears anywhere in the source story. All 4 real ACs (AC1-AC4) should be correctly marked Covered since FR-1 through FR-4 do legitimately implement them.",
+      "files": [
+        ".claude/skills/story-spec-reviewer/evals/fixtures/US-305-order-cancellation.md",
+        ".claude/skills/story-spec-reviewer/evals/fixtures/US-305-spec.md"
+      ],
+      "assertions": [
+        "Output markdown file exists under docs/reviews/",
+        "AC1-AC4 are all marked Covered, correctly pointing at FR-1 through FR-4",
+        "A Scope Creep finding calls out FR-5 (partial/line-item cancellation) as not traceable to any AC or business context in the source story",
+        "A Scope Creep finding calls out the invented '2 business days' refund SLA in the Non-Functional Requirements section as not present in the source story",
+        "Overall Verdict is 'Pass with Issues' (not Fail, since no AC is missing and no contradiction exists — but not a clean Pass, since scope creep was found)",
+        "No finding attempts to rewrite or trim FR-5 itself — the report only flags it"
+      ]
+    },
+    {
+      "id": 3,
+      "name": "vague-statement-and-missing-edge-case-bulk-invoice",
+      "prompt": "Review this generated spec against the original bulk invoice download story and tell me if it's ready to build. Story: .claude/skills/story-spec-reviewer/evals/fixtures/US-410-bulk-invoice-download.md, Spec: .claude/skills/story-spec-reviewer/evals/fixtures/US-410-spec.md",
+      "expected_output": "A markdown review report saved to docs/reviews/US-410-spec-review.md. It should flag FR-1's phrase 'make the download available promptly' as a non-verifiable/ambiguous statement (no defined time bound or file format), and should surface a missing edge case around what happens when a very large number of invoices fall within the selected date range (bundling a very large single file), since AC1's 'all invoices within that range are bundled into a single downloadable file' reasonably implies this operational boundary needs addressing. AC1-AC3 should all be marked Covered since the FRs do implement the letter of each AC.",
+      "files": [
+        ".claude/skills/story-spec-reviewer/evals/fixtures/US-410-bulk-invoice-download.md",
+        ".claude/skills/story-spec-reviewer/evals/fixtures/US-410-spec.md"
+      ],
+      "assertions": [
+        "Output markdown file exists under docs/reviews/",
+        "AC1-AC3 are all marked Covered",
+        "An Ambiguities & Non-Verifiable Statements finding quotes FR-1's 'promptly' language (or the undefined file format) and explains why it can't be verified/tested as written",
+        "A Missing Edge Cases finding raises the large-volume / large-file-size scenario for bulk invoice bundling, tied back to AC1's 'all invoices within that range' language",
+        "Overall Verdict is 'Pass with Issues', not Fail (no AC is missing and no contradiction exists) and not a clean Pass (ambiguity and edge-case findings exist)",
+        "The report does not invent a specific fix (e.g. does not assert a specific file format or a specific invoice-count threshold as if it were fact) — gaps are phrased as findings/questions, not resolved"
+      ]
+    }
+  ]
+}

@@ -1,0 +1,49 @@
+{
+  "skill_name": "story-spec-writer",
+  "evals": [
+    {
+      "id": 1,
+      "name": "labeled-acs-guest-checkout",
+      "prompt": "Can you write a spec for the guest checkout story? It's at .claude/skills/story-spec-writer/evals/fixtures/story-142-guest-checkout.md",
+      "expected_output": "A markdown spec saved to docs/specifications/, with one FR per AC (AC1-AC4 preserved as-is since the source already labels them), a traceability matrix quoting all 4 ACs verbatim, and no invented requirements (e.g. no invented password strength rules, no invented email template details).",
+      "files": [".claude/skills/story-spec-writer/evals/fixtures/story-142-guest-checkout.md"],
+      "assertions": [
+        "Output markdown file exists under docs/specifications/",
+        "Traceability matrix includes all 4 source ACs (AC1-AC4), preserving the source's own labels rather than renumbering them",
+        "Each AC's quoted text in the traceability matrix matches the source verbatim (not paraphrased)",
+        "Every Functional Requirement cites at least one 'Derived from: AC-n' style reference",
+        "No Non-Functional Requirements or Out of Scope section is present (source states none)",
+        "No fabricated specifics appear that aren't in the source (e.g. password complexity rules, specific email template layout/branding, session/cookie details)"
+      ]
+    },
+    {
+      "id": 2,
+      "name": "unlabeled-acs-notification-prefs",
+      "prompt": "We've got this notification preferences ticket, can you turn it into a proper spec doc? File is at .claude/skills/story-spec-writer/evals/fixtures/ticket-notification-prefs.txt",
+      "expected_output": "A markdown spec in docs/specifications/ where the skill assigns its own AC-1..AC-7 IDs (source has no IDs) while quoting the original bullet text verbatim in the traceability matrix. The vague final bullet ('notify the user appropriately when preferences updated') should NOT be turned into an invented mechanism (e.g. should not invent 'toast notification' or 'confirmation email') — it should be flagged as an Open Question about what 'appropriately' means.",
+      "files": [".claude/skills/story-spec-writer/evals/fixtures/ticket-notification-prefs.txt"],
+      "assertions": [
+        "Output markdown file exists under docs/specifications/",
+        "AC IDs are assigned sequentially by the skill (source has none) and each is paired with its verbatim source bullet in the traceability matrix",
+        "All 7 source bullets appear exactly once in the traceability matrix",
+        "The vague 'notify the user appropriately' bullet is surfaced as an Open Question, not resolved into an invented specific notification mechanism",
+        "The 'warn user before disabling all Order updates channels' bullet and the 'SMS toggle disabled with no phone number' bullet each appear as their own Functional Requirement"
+      ]
+    },
+    {
+      "id": 3,
+      "name": "vague-nfrs-bulk-export",
+      "prompt": "Turn STORY-88 into a formal spec. It's saved at .claude/skills/story-spec-writer/evals/fixtures/story-88-bulk-export.md",
+      "expected_output": "A markdown spec in docs/specifications/ that does not invent concrete values for the vague criteria ('handled gracefully' for 500+ invoices, 'should be fast') — these should become Open Questions rather than invented numeric thresholds. The undefined export file format (csv/zip/pdf never specified) should also be an Open Question, not assumed. The PM note deferring email-link delivery to a future version should show up as an Out of Scope item since it's explicitly stated in the source.",
+      "files": [".claude/skills/story-spec-writer/evals/fixtures/story-88-bulk-export.md"],
+      "assertions": [
+        "Output markdown file exists under docs/specifications/",
+        "'Handled gracefully' (500+ invoices) and 'should be fast' are surfaced as Open Questions rather than given invented numeric thresholds (e.g. no invented 'under 3 seconds' or 'max 10,000 rows' claims)",
+        "The export file format (never specified in source: csv/zip/pdf) is flagged as an Open Question rather than assumed and stated as fact",
+        "An Out of Scope section exists and includes the PM's note about deferring email-link delivery for very large exports",
+        "All 6 numbered source ACs appear in the traceability matrix exactly once",
+        "The 'only admins can see bulk export controls' criterion is preserved as its own Functional Requirement, not merged away or dropped"
+      ]
+    }
+  ]
+}
