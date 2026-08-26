@@ -1,0 +1,42 @@
+repos:
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.16.4
+    hooks:
+      - id: ruff
+        args: [--fix]
+      - id: ruff-format
+
+  - repo: local
+    hooks:
+      - id: mypy
+        name: mypy (strict)
+        entry: uv run --no-sync mypy app tests
+        language: system
+        pass_filenames: false
+        types: [python]
+
+      - id: lint-imports
+        name: import-linter (layering contracts)
+        entry: uv run --no-sync lint-imports
+        language: system
+        pass_filenames: false
+        types: [python]
+
+      - id: unit-tests
+        name: unit tests
+        entry: uv run --no-sync python -m pytest tests/unit -m unit -q
+        language: system
+        pass_filenames: false
+        types: [python]
+
+      - id: no-mock-in-integration-tests
+        name: no unittest.mock in integration tests
+        language: pygrep
+        entry: '\b(unittest\.mock|mock\.patch|patch\.object|AsyncMock|MagicMock|monkeypatch\.setattr)\b'
+        files: ^tests/integration/.*\.py$
+
+  - repo: https://github.com/Yelp/detect-secrets
+    rev: v1.5.0
+    hooks:
+      - id: detect-secrets
+        args: ["--baseline", ".secrets.baseline"]
