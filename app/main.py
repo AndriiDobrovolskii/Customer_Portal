@@ -8,6 +8,7 @@ from fastapi.responses import JSONResponse
 
 from app.api.v1.router import router as api_v1_router
 from app.core.config import get_settings
+from app.core.problem_details import ProblemError
 from app.db.session import create_engine_and_sessionmaker
 from app.modules.users.exceptions import DuplicateEmailError, RegistrationValidationError
 
@@ -47,6 +48,22 @@ async def registration_validation_error_handler(
                 {"field": error.field, "message": error.message, "code": error.code}
                 for error in exc.errors
             ]
+        },
+    )
+
+
+@app.exception_handler(ProblemError)
+async def problem_error_handler(request: Request, exc: ProblemError) -> JSONResponse:
+    return JSONResponse(
+        status_code=exc.status,
+        media_type="application/problem+json",
+        headers=exc.headers,
+        content={
+            "type": f"https://portal.internal/errors/{exc.type_slug}",
+            "title": exc.title,
+            "status": exc.status,
+            "detail": exc.detail,
+            "instance": request.url.path,
         },
     )
 
