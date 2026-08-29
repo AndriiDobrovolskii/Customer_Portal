@@ -1,9 +1,9 @@
 # Specification: Logout
 
-**Source:** docs/backlog/US-2.2-logout.md
+**Source:** docs/stories/US-2.2-logout.md
 **Story ID:** US-006
 **Generated:** 2026-08-22
-**Status:** Draft (refined 2026-08-22 per docs/reviews/US-006-spec-review.md)
+**Status:** Draft (refined 2026-08-22 per docs/reviews/specifications/US-006-spec-review.md)
 
 ## Summary
 

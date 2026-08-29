@@ -1,6 +1,6 @@
 # Spec Review: Update Profile
 
-**Original Story:** docs/backlog/US-1.3-update-profile.md
+**Original Story:** docs/stories/US-1.3-update-profile.md
 **Spec Reviewed:** docs/specifications/US-003-update-profile-spec.md
 **Story ID:** US-003
 **Reviewed:** 2026-08-15

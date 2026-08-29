@@ -1,6 +1,6 @@
 # Specification: Verify Email
 
-**Source:** docs/backlog/US-1.2-verify-email.md
+**Source:** docs/stories/US-1.2-verify-email.md
 **Story ID:** US-002
 **Generated:** 2026-08-15
 **Status:** Draft (Open Questions resolved 2026-08-15)
@@ -93,7 +93,7 @@ Given a user account created more than 7 days ago with `email_verified = false`,
 
 ## Clarifications & Decisions
 
-The following points were left undefined by the source story (US-002) or flagged by spec review (`docs/reviews/US-002-spec-review.md`) and were resolved by explicit stakeholder decision on 2026-08-15, rather than derived directly from AC text. They supersede the prior "Open Questions" section.
+The following points were left undefined by the source story (US-002) or flagged by spec review (`docs/reviews/specifications/US-002-spec-review.md`) and were resolved by explicit stakeholder decision on 2026-08-15, rather than derived directly from AC text. They supersede the prior "Open Questions" section.
 
 1. **Concurrent token consumption** — VE-AC1/VE-AC3 don't address simultaneous requests consuming the same token (review finding). Decision: token consumption is enforced atomically at the data layer (e.g. a single conditional update that both checks `consumed_at IS NULL` and sets it), so at most one concurrent request for the same token can succeed; any other concurrent request receives the invalid-token response. See FR-1, FR-3.
 2. **Malformed or missing email on resend** — VE-AC7–VE-AC9 assume a well-formed email is submitted (review finding). Decision: if the `email` field is missing or not a syntactically valid email address, the resend endpoint returns `HTTP 400` with a `problem+json` body of type `.../errors/invalid-request`, using the Error Envelope shape defined in the source story. Because this check happens before any account lookup, it does not leak account-existence information and remains compatible with the anti-enumeration requirement in VE-AC8/VE-AC9. See FR-8.

@@ -1,9 +1,9 @@
 # Specification: Manage Roles
 
-**Source:** docs/backlog/US-3.2-manage-roles.md
+**Source:** docs/stories/US-3.2-manage-roles.md
 **Story ID:** US-012
 **Generated:** 2026-08-22
-**Status:** Draft (refined 2026-08-22 per docs/reviews/US-012-spec-review.md)
+**Status:** Draft (refined 2026-08-22 per docs/reviews/specifications/US-012-spec-review.md)
 
 ## Summary
 

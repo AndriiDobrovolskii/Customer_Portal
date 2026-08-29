@@ -1,6 +1,6 @@
 # Spec Review: Ticket Resolution
 
-**Original Story:** docs/backlog/US-4.3-ticket-resolution.md
+**Original Story:** docs/stories/US-4.3-ticket-resolution.md
 **Spec Reviewed:** docs/specifications/US-016-ticket-resolution-spec.md
 **Story ID:** US-016 (source story numbered US-4.3)
 **Reviewed:** 2026-08-22

@@ -1,6 +1,6 @@
 # Spec Review: View Audit Information
 
-**Original Story:** docs/backlog/US-3.3-view-audit-information.md
+**Original Story:** docs/stories/US-3.3-view-audit-information.md
 **Spec Reviewed:** docs/specifications/US-013-view-audit-information-spec.md
 **Story ID:** US-3.3 (source) / US-013 (spec numbering)
 **Reviewed:** 2026-08-22

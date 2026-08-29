@@ -1,6 +1,6 @@
 # Spec Review: Ticket Replies
 
-**Original Story:** docs/backlog/US-4.2-ticket-replies.md
+**Original Story:** docs/stories/US-4.2-ticket-replies.md
 **Spec Reviewed:** docs/specifications/US-015-ticket-replies-spec.md
 **Story ID:** US-015 (source story numbered US-4.2)
 **Reviewed:** 2026-08-22

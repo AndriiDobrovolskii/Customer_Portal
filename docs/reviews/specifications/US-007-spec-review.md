@@ -1,6 +1,6 @@
 # Spec Review: Refresh Token
 
-**Original Story:** docs/backlog/US-2.3-refresh-token.md
+**Original Story:** docs/stories/US-2.3-refresh-token.md
 **Spec Reviewed:** docs/specifications/US-007-refresh-token-spec.md
 **Story ID:** US-2.3 (source) / US-007 (spec)
 **Reviewed:** 2026-08-22

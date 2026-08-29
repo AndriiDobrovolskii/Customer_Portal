@@ -1,9 +1,9 @@
 # Specification: Multi-Factor Authentication (TOTP)
 
-**Source:** docs/backlog/US-2.5-mfa-totp.md
+**Source:** docs/stories/US-2.5-mfa-totp.md
 **Story ID:** US-009
 **Generated:** 2026-08-22
-**Status:** Draft (refined 2026-08-22 per docs/reviews/US-009-spec-review.md)
+**Status:** Draft (refined 2026-08-22 per docs/reviews/specifications/US-009-spec-review.md)
 
 ## Summary
 

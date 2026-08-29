@@ -1,6 +1,6 @@
 # Spec Review: Manage Users
 
-**Original Story:** docs/backlog/US-3.1-manage-users.md
+**Original Story:** docs/stories/US-3.1-manage-users.md
 **Spec Reviewed:** docs/specifications/US-011-manage-users-spec.md
 **Story ID:** US-011 (source backlog file uses US-3.1, covering slices US-3.1.1–US-3.1.5)
 **Reviewed:** 2026-08-22

@@ -1,6 +1,6 @@
 # Specification: Deactivate Account
 
-**Source:** docs/backlog/US-1.4-deactivate-account.md
+**Source:** docs/stories/US-1.4-deactivate-account.md
 **Story ID:** US-004
 **Generated:** 2026-08-15
 **Status:** Draft (Open Questions resolved 2026-08-15)
@@ -93,7 +93,7 @@ Given an admin deactivates a user through the (separately specified) admin endpo
 
 ## Clarifications & Decisions
 
-The following points were left undefined by the source story (US-004) or flagged by spec review (`docs/reviews/US-004-spec-review.md`) and were resolved by explicit stakeholder decision on 2026-08-15, rather than derived directly from AC text. They supersede the prior "Open Questions" section.
+The following points were left undefined by the source story (US-004) or flagged by spec review (`docs/reviews/specifications/US-004-spec-review.md`) and were resolved by explicit stakeholder decision on 2026-08-15, rather than derived directly from AC text. They supersede the prior "Open Questions" section.
 
 1. **Reactivation vs. permanent-deletion race at the grace-period boundary** — DA-AC8 and DA-AC9 don't address a reactivation login and the deletion job running concurrently on the same account (review finding). Decision: the deletion job's operation is conditioned on the account still being deactivated with `deactivated_at` older than 30 days at transaction time; if reactivation commits first, the job is a no-op for that row. If the job commits first, a concurrent reactivation attempt no longer finds an active user and is treated as an unrecognized-account login, returning the standard invalid-credentials response (no new response type introduced). See FR-8, FR-9.
 2. **Concurrent deactivation requests** — DA-AC1/DA-AC3 describe sequential behavior only (review finding). Decision: deactivation is enforced atomically at the data layer (a conditional update scoped to `status = 'active'`), so at most one of two concurrent requests can succeed; the other receives the `409 already-deactivated` response from FR-3. See FR-1.

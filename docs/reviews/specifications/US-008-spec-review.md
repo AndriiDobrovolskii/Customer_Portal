@@ -1,6 +1,6 @@
 # Spec Review: Password Reset
 
-**Original Story:** docs/backlog/US-2.4-password-reset.md
+**Original Story:** docs/stories/US-2.4-password-reset.md
 **Spec Reviewed:** docs/specifications/US-008-password-reset-spec.md
 **Story ID:** US-2.4 (backlog) / US-008 (spec)
 **Reviewed:** 2026-08-22

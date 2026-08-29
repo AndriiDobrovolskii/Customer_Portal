@@ -1,6 +1,6 @@
 # Spec Review: Support Tickets (Create)
 
-**Original Story:** docs/backlog/US-4.1-create-ticket.md
+**Original Story:** docs/stories/US-4.1-create-ticket.md
 **Spec Reviewed:** docs/specifications/US-014-support-tickets-spec.md
 **Story ID:** US-014 (source story numbered US-4.1)
 **Reviewed:** 2026-08-22

@@ -1,9 +1,9 @@
 # Specification: View Audit Information
 
-**Source:** docs/backlog/US-3.3-view-audit-information.md
+**Source:** docs/stories/US-3.3-view-audit-information.md
 **Story ID:** US-013
 **Generated:** 2026-08-22
-**Status:** Draft (refined 2026-08-22 per docs/reviews/US-013-spec-review.md)
+**Status:** Draft (refined 2026-08-22 per docs/reviews/specifications/US-013-spec-review.md)
 
 ## Summary
 

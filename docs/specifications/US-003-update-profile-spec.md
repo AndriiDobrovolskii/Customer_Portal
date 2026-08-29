@@ -1,6 +1,6 @@
 # Specification: Update Profile
 
-**Source:** docs/backlog/US-1.3-update-profile.md
+**Source:** docs/stories/US-1.3-update-profile.md
 **Story ID:** US-003
 **Generated:** 2026-08-15
 **Status:** Draft (Open Questions resolved 2026-08-15)
@@ -106,7 +106,7 @@ Given an expired, already-consumed, or unknown token, when `POST /v1/profile/con
 
 ## Clarifications & Decisions
 
-The following points were left undefined by the source story (US-003) or flagged by spec review (`docs/reviews/US-003-spec-review.md`) and were resolved by explicit stakeholder decision on 2026-08-15, rather than derived directly from AC text. They supersede the prior "Open Questions" section.
+The following points were left undefined by the source story (US-003) or flagged by spec review (`docs/reviews/specifications/US-003-spec-review.md`) and were resolved by explicit stakeholder decision on 2026-08-15, rather than derived directly from AC text. They supersede the prior "Open Questions" section.
 
 1. **Duplicate new-email address** — UP-AC9/UP-AC10 don't address a requested new email already registered to another account (review finding). Decision: the check is case-insensitive, consistent with the duplicate-email handling established for registration (`docs/specifications/US-001-register-user-spec.md`, FR-2), runs after `current_password` verification succeeds, and returns `409 Conflict` without setting `pending_email` on a match. See FR-9, FR-10.
 2. **Concurrent email-change token consumption** — UP-AC11/UP-AC12 don't address simultaneous confirm requests for the same token (review finding). Decision: consumption is enforced atomically at the data layer, mirroring the equivalent decision for Verify Email (`docs/specifications/US-002-verify-email-spec.md`, Clarification #1). See FR-11.

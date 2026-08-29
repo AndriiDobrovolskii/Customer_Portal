@@ -1,9 +1,9 @@
 # Specification: Password Reset
 
-**Source:** docs/backlog/US-2.4-password-reset.md
+**Source:** docs/stories/US-2.4-password-reset.md
 **Story ID:** US-008
 **Generated:** 2026-08-22
-**Status:** Draft (refined 2026-08-22 per docs/reviews/US-008-spec-review.md)
+**Status:** Draft (refined 2026-08-22 per docs/reviews/specifications/US-008-spec-review.md)
 
 ## Summary
 

@@ -1,6 +1,6 @@
 # Spec Review: Deactivate Account
 
-**Original Story:** docs/backlog/US-1.4-deactivate-account.md
+**Original Story:** docs/stories/US-1.4-deactivate-account.md
 **Spec Reviewed:** docs/specifications/US-004-deactivate-account-spec.md
 **Story ID:** US-004
 **Reviewed:** 2026-08-15

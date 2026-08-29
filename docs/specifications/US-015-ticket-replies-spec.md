@@ -1,9 +1,9 @@
 # Specification: Ticket Replies
 
-**Source:** docs/backlog/US-4.2-ticket-replies.md
+**Source:** docs/stories/US-4.2-ticket-replies.md
 **Story ID:** US-015
 **Generated:** 2026-08-22
-**Status:** Draft (refined 2026-08-22 per docs/reviews/US-015-spec-review.md)
+**Status:** Draft (refined 2026-08-22 per docs/reviews/specifications/US-015-spec-review.md)
 
 ## Summary
 

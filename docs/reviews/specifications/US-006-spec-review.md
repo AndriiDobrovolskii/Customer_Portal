@@ -1,6 +1,6 @@
 # Spec Review: Logout
 
-**Original Story:** docs/backlog/US-2.2-logout.md
+**Original Story:** docs/stories/US-2.2-logout.md
 **Spec Reviewed:** docs/specifications/US-006-logout-spec.md
 **Story ID:** US-006
 **Reviewed:** 2026-08-22

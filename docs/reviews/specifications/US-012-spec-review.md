@@ -1,6 +1,6 @@
 # Spec Review: Manage Roles
 
-**Original Story:** docs/backlog/US-3.2-manage-roles.md
+**Original Story:** docs/stories/US-3.2-manage-roles.md
 **Spec Reviewed:** docs/specifications/US-012-manage-roles-spec.md
 **Story ID:** US-012 (spec's own Story ID field; the backlog story itself is filed as US-3.2)
 **Reviewed:** 2026-08-22

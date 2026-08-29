@@ -69,7 +69,7 @@ execute.
 | Migrations | Alembic | `>=1.14` | Single linear history, `async` env, autogenerate `Rewriter` enforcing idempotency (§4.9.2). |
 | Cache / Sessions | **Valkey** | `>=7.2` | Redis-protocol compatible. Async client only, injected (§3.6). |
 | Auth | JWT (OAuth2 Password Flow) | `pyjwt>=2.8` | HS256 or RS256 per settings — never hardcoded. |
-| Password hashing | bcrypt | `>=4.1` | Via `passlib[bcrypt]` or `bcrypt` directly. Cost factor from settings. |
+| Password hashing | Argon2id | `argon2-cffi>=23.1` | Via `argon2.PasswordHasher`. Time/memory/parallelism cost from settings. |
 
 > **Valkey note:** Valkey is a Redis fork. Use the **asyncio** interface of a protocol-compatible
 > client (`redis.asyncio` / `valkey-py`). Importing the synchronous client anywhere in application
@@ -263,7 +263,7 @@ app/
 ├── main.py                     # app factory, lifespan, middleware, exception handlers
 ├── core/
 │   ├── config.py               # Settings (pydantic-settings) + get_settings()
-│   ├── security.py             # bcrypt hashing, JWT encode/decode
+│   ├── security.py             # Argon2id hashing, JWT encode/decode
 │   ├── exceptions.py           # domain exception hierarchy
 │   ├── dependencies.py         # domain-free helpers ONLY: pagination, request id (see §3.8)
 │   └── logging.py              # structured logging setup
@@ -308,7 +308,7 @@ def get_by_email(self, email: str) -> User | None:
     return self._session.query(User).filter_by(email=email).first()   # sync + legacy API
 ```
 
-CPU-bound or unavoidably blocking third-party calls (e.g. `bcrypt.hashpw`) MUST be offloaded:
+CPU-bound or unavoidably blocking third-party calls (e.g. `PasswordHasher.hash`/`.verify`) MUST be offloaded:
 
 ```python
 hashed = await anyio.to_thread.run_sync(hash_password, plain_password)
@@ -709,7 +709,9 @@ class Settings(BaseSettings):
     jwt_algorithm: str = "HS256"
     access_token_ttl_seconds: int = 900
     refresh_token_ttl_seconds: int = 1_209_600
-    bcrypt_rounds: int = 12
+    argon2_time_cost: int = 3
+    argon2_memory_cost_kb: int = 65536
+    argon2_parallelism: int = 4
 
 @lru_cache
 def get_settings() -> Settings:
@@ -1198,7 +1200,7 @@ Violating any rule below invalidates the entire contribution regardless of its o
    as such (see the `disallow_any_explicit` note in §2.3) — silently omitting a documented setting
    without that verification and note is still a violation.
 
-**Security addenda (non-negotiable):** passwords are stored only as bcrypt hashes — never
+**Security addenda (non-negotiable):** passwords are stored only as Argon2id hashes — never
 plaintext, never reversible encryption, never a fast hash like MD5/SHA-1/SHA-256; tokens, hashes,
 and PII are never logged or returned in responses; all user input crosses the boundary as a
 validated Pydantic schema with `extra="forbid"`; privilege fields are never client-writable; all

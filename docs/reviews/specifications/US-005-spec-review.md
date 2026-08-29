@@ -1,6 +1,6 @@
 # Spec Review: Login
 
-**Original Story:** docs/backlog/US-2.1-login.md
+**Original Story:** docs/stories/US-2.1-login.md
 **Spec Reviewed:** docs/specifications/US-005-login-spec.md
 **Story ID:** US-005 (spec's own Story ID field; the backlog story itself is filed as US-2.1)
 **Reviewed:** 2026-08-22

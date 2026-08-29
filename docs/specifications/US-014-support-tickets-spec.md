@@ -1,9 +1,9 @@
 # Specification: Support Tickets (Create)
 
-**Source:** docs/backlog/US-4.1-create-ticket.md
+**Source:** docs/stories/US-4.1-create-ticket.md
 **Story ID:** US-014
 **Generated:** 2026-08-22
-**Status:** Draft (refined 2026-08-22 per docs/reviews/US-014-spec-review.md)
+**Status:** Draft (refined 2026-08-22 per docs/reviews/specifications/US-014-spec-review.md)
 
 ## Summary
 

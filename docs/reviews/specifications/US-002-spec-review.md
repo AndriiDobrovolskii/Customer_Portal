@@ -1,6 +1,6 @@
 # Spec Review: Verify Email
 
-**Original Story:** docs/backlog/US-1.2-verify-email.md
+**Original Story:** docs/stories/US-1.2-verify-email.md
 **Spec Reviewed:** docs/specifications/US-002-verify-email-spec.md
 **Story ID:** US-002
 **Reviewed:** 2026-08-15

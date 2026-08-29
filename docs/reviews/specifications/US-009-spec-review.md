@@ -1,6 +1,6 @@
 # Spec Review: Multi-Factor Authentication (TOTP)
 
-**Original Story:** docs/backlog/US-2.5-mfa-totp.md
+**Original Story:** docs/stories/US-2.5-mfa-totp.md
 **Spec Reviewed:** docs/specifications/US-009-mfa-totp-spec.md
 **Story ID:** US-009 (source backlog file uses US-2.5)
 **Reviewed:** 2026-08-22

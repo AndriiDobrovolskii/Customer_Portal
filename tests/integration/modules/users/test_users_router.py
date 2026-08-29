@@ -30,7 +30,7 @@ async def test_register_valid_input_returns_201_with_location_and_body(
     assert body["status"] == "PENDING_VERIFICATION"
 
 
-async def test_register_persists_bcrypt_hash_not_plaintext(
+async def test_register_persists_argon2id_hash_not_plaintext(
     client: AsyncClient, db_session: AsyncSession
 ) -> None:
     # Arrange
@@ -43,7 +43,7 @@ async def test_register_persists_bcrypt_hash_not_plaintext(
     result = await db_session.execute(select(User).where(User.email == "hash.check@example.com"))
     user = result.scalar_one()
     assert user.hashed_password != "Str0ng!Pass1"
-    assert user.hashed_password.startswith("$2b$")
+    assert user.hashed_password.startswith("$argon2id$")
 
 
 async def test_register_duplicate_email_same_case_returns_409(client: AsyncClient) -> None:

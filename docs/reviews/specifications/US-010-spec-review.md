@@ -1,6 +1,6 @@
 # Spec Review: Active Session Management
 
-**Original Story:** docs/backlog/US-2.6-active-sessions.md
+**Original Story:** docs/stories/US-2.6-active-sessions.md
 **Spec Reviewed:** docs/specifications/US-010-active-session-management-spec.md
 **Story ID:** US-010 (backlog story numbered US-2.6)
 **Reviewed:** 2026-08-22

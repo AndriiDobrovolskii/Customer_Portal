@@ -28,7 +28,7 @@ Propose, never execute unilaterally: new or upgraded dependencies, auth scheme c
 | DB | PostgreSQL `>=15`, SQLAlchemy `2.0` async, `asyncpg` | `Mapped[]`/`mapped_column()`; `psycopg2` forbidden. |
 | Migrations | Alembic `>=1.14` | Async env; autogenerate `Rewriter` enforces idempotency. |
 | Cache / sessions | **Valkey** `>=7.2` (Redis-protocol fork) | Async client only, always injected. |
-| Auth | `pyjwt>=2.8`, bcrypt `>=4.1` | Algorithm and cost factor from settings. |
+| Auth | `pyjwt>=2.8`, `argon2-cffi>=23.1` | Algorithm is Argon2id; time/memory/parallelism cost from settings. |
 | Tests | pytest, pytest-asyncio, httpx + `ASGITransport`, pytest-cov, testcontainers | Real PG + Valkey. |
 | Gates | Ruff (lint + format), Mypy `strict`, import-linter `>=2.3` | Zero findings, zero errors, zero broken contracts. |
 
@@ -64,7 +64,7 @@ alembic upgrade head && alembic downgrade -1 && alembic upgrade head   # proves 
 
 **Transactions.** The service owns the transaction — repositories may `flush()`, never `commit()`. One commit per business operation. Cache writes happen **after** the commit.
 
-**Async I/O.** Every I/O call is `await`ed on an async client — DB, Valkey, HTTP, files. Blocking work (`bcrypt.hashpw`) goes through `anyio.to_thread.run_sync`. Forbidden in any request path: `requests`, `time.sleep`, `psycopg2`, sync Valkey clients, `session.query()`.
+**Async I/O.** Every I/O call is `await`ed on an async client — DB, Valkey, HTTP, files. Blocking work (`PasswordHasher.hash`/`.verify`) goes through `anyio.to_thread.run_sync`. Forbidden in any request path: `requests`, `time.sleep`, `psycopg2`, sync Valkey clients, `session.query()`.
 
 ## 4. Code Conventions
 
@@ -132,4 +132,4 @@ Do not report a task complete until all seven are verified with real command out
 8. **Unilateral scope or dependency changes** — new dependencies, frameworks, layers, directory restructuring, CI edits, edits to this file, or opportunistic refactors of untouched code.
 9. **Bypassing the gate** — `--no-verify`/`-n`, `SKIP=<hook>`, `pre-commit uninstall`, deleting or downgrading a hook, narrowing mypy to one file, adding `exclude:` patterns, deleting an import-linter contract or adding `ignore_imports`, setting `exhaustive = false`, or dodging a contract via `if TYPE_CHECKING:`, a function-body import, or `importlib`. **Reporting a check as passing without running it is the most serious violation here — it silently disables every other rule in this file.** Config drift counts too: a `pyproject.toml` that quietly ships a narrower ruff rule set, a per-module (not wildcarded) import-linter contract, or a dropped mypy extension is the same violation committed instead of typed at the CLI — the one exception is a flag verified genuinely incompatible with this stack and recorded as such (see ARCHITECTURE.md §2.3's `disallow_any_explicit` note).
 
-**Security, non-negotiable:** passwords stored only as bcrypt hashes — never plaintext, reversible encryption, or a fast hash; tokens, hashes, and PII never logged or returned; all input arrives as a validated schema with `extra="forbid"`; privilege fields never client-writable; all SQL built through SQLAlchemy constructs with bound parameters — no string interpolation, ever.
+**Security, non-negotiable:** passwords stored only as Argon2id hashes — never plaintext, reversible encryption, or a fast hash; tokens, hashes, and PII never logged or returned; all input arrives as a validated schema with `extra="forbid"`; privilege fields never client-writable; all SQL built through SQLAlchemy constructs with bound parameters — no string interpolation, ever.

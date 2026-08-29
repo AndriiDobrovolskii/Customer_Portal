@@ -1,9 +1,9 @@
 # Specification: Active Session Management
 
-**Source:** docs/backlog/US-2.6-active-sessions.md
+**Source:** docs/stories/US-2.6-active-sessions.md
 **Story ID:** US-010
 **Generated:** 2026-08-22
-**Status:** Draft (refined 2026-08-22 per docs/reviews/US-010-spec-review.md)
+**Status:** Draft (refined 2026-08-22 per docs/reviews/specifications/US-010-spec-review.md)
 
 ## Summary
 

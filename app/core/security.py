@@ -1,13 +1,17 @@
-import bcrypt
 from anyio import to_thread
+from argon2 import PasswordHasher
 
 from app.core.config import get_settings
 
 
 def _hash_password_sync(password: str) -> str:
     settings = get_settings()
-    salt = bcrypt.gensalt(rounds=settings.bcrypt_rounds)
-    return bcrypt.hashpw(password.encode("utf-8"), salt).decode("utf-8")
+    hasher = PasswordHasher(
+        time_cost=settings.argon2_time_cost,
+        memory_cost=settings.argon2_memory_cost_kb,
+        parallelism=settings.argon2_parallelism,
+    )
+    return hasher.hash(password)
 
 
 async def hash_password(password: str) -> str:
