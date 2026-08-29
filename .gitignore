@@ -30,3 +30,6 @@ desktop.ini
 
 # Claude skill development workspace (not part of the product)
 .claude/skills/story-spec-writer-workspace/
+
+# Local dev GUI for manual API testing (not part of the product)
+dev-gui/

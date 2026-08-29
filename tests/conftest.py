@@ -10,7 +10,8 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncConnection, AsyncSession
 from testcontainers.community.postgres import PostgresContainer
 
-from app.core.database import dispose_engine, get_db_session, get_engine, init_engine
+from app.db.dependencies import get_db_session
+from app.db.session import create_engine_and_sessionmaker
 from app.main import app
 
 
@@ -22,8 +23,14 @@ def postgres_url() -> Iterator[str]:
 
 @pytest.fixture(scope="session", autouse=True)
 def _database(postgres_url: str) -> Iterator[None]:
+    # httpx's ASGITransport never runs the app's `lifespan`, so the engine and
+    # session factory that lifespan would normally set on app.state are wired
+    # here instead — same objects, same app.state attributes, test-only entry
+    # point. See ARCHITECTURE.md §3.6 (singletons live on app.state).
     os.environ["DATABASE_URL"] = postgres_url
-    init_engine(postgres_url)
+    engine, session_factory = create_engine_and_sessionmaker(postgres_url)
+    app.state.db_engine = engine
+    app.state.db_session_factory = session_factory
 
     alembic_cfg = Config("alembic.ini")
     command.upgrade(alembic_cfg, "head")
@@ -31,12 +38,12 @@ def _database(postgres_url: str) -> Iterator[None]:
     yield
 
     command.downgrade(alembic_cfg, "base")
-    asyncio.run(dispose_engine())
+    asyncio.run(engine.dispose())
 
 
 @pytest.fixture
 async def db_connection() -> AsyncIterator[AsyncConnection]:
-    engine = get_engine()
+    engine = app.state.db_engine
     async with engine.connect() as connection:
         yield connection
 
@@ -92,7 +99,7 @@ async def cleanup_users() -> AsyncIterator[list[str]]:
     yield emails_to_delete
     if not emails_to_delete:
         return
-    engine = get_engine()
+    engine = app.state.db_engine
     async with engine.begin() as connection:
         await connection.execute(
             text("DELETE FROM users WHERE lower(email) = ANY(:emails)"),

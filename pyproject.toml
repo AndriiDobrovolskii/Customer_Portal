@@ -42,7 +42,7 @@ line-length = 100
 extend-exclude = [".claude"]
 
 [tool.ruff.lint]
-select = ["E", "F", "I", "UP", "B", "SIM", "TID", "ASYNC"]
+select = ["E", "W", "F", "I", "N", "UP", "B", "C4", "SIM", "ASYNC", "S", "T20", "ANN", "RUF"]
 
 [tool.ruff.lint.flake8-tidy-imports.banned-api]
 "os.environ".msg = "Use app.core.config.get_settings() instead of os.environ directly."
@@ -51,14 +51,21 @@ select = ["E", "F", "I", "UP", "B", "SIM", "TID", "ASYNC"]
 # Test fixtures legitimately set env vars to configure the process under test
 # (e.g. pointing alembic's CLI at the ephemeral testcontainer database) — this
 # is fixture wiring, not application runtime config, so the rule doesn't apply.
+# S101/S105/S106: assertions and literal password fixtures are the normal shape
+# of a test suite, not a real secret or a production assert-for-control-flow.
 [tool.ruff.lint.per-file-ignores]
-"tests/**" = ["TID251"]
+"tests/**" = ["TID251", "S101", "S105", "S106"]
+# alembic's process_revision_directives callback signature is untyped upstream;
+# this mirrors the documented mypy `Any` exemption for these two functions only.
+"migrations/env.py" = ["ANN401"]
 
 [tool.mypy]
 strict = true
 python_version = "3.12"
 plugins = ["pydantic.mypy"]
 exclude = ["migrations/"]
+warn_unused_ignores = true
+warn_return_any = true
 
 [[tool.mypy.overrides]]
 module = "testcontainers.*"
@@ -87,49 +94,71 @@ show_missing = true
 root_package = "app"
 include_external_packages = true
 
+# ---------------------------------------------------------------- Contract 1
+# Per-module layers. Wildcarded so a new module under app.modules is covered
+# automatically, with no manual contract edit required (AGENTS.md §7.9 config-
+# drift note).
 [[tool.importlinter.contracts]]
-name = "Users module layers"
+name = "Module layers: router -> dependencies -> service -> repository|cache -> models|schemas"
 type = "layers"
 layers = [
     "router",
-    "dependencies",
+    "(dependencies)",
     "service",
-    "repository",
-    "models",
-    "schemas",
+    "repository | (cache)",
+    "models | schemas",
+    "(exceptions)",
 ]
-containers = ["app.modules.users"]
+containers = ["app.modules.*"]
 exhaustive = true
 exhaustive_ignores = ["__init__"]
 
+# ---------------------------------------------------------------- Contract 2
+# Top-level direction: app.core is generic infrastructure and may never import
+# a domain module.
 [[tool.importlinter.contracts]]
-name = "Router stays free of persistence infrastructure"
-type = "forbidden"
-source_modules = ["app.modules.users.router"]
-forbidden_modules = [
-    "sqlalchemy",
-    "app.core.database",
-    "app.modules.users.repository",
-    "app.modules.users.models",
-]
-# dependencies.py is the composition root: it is explicitly allowed to bridge
-# router -> infrastructure. These edges are the intended DI wiring, not a leak;
-# what this contract forbids is router.py *itself* naming infra directly.
-ignore_imports = [
-    "app.modules.users.dependencies -> app.core.database",
-    "app.modules.users.dependencies -> app.modules.users.repository",
-    "app.modules.users.dependencies -> sqlalchemy",
-    "app.modules.users.service -> app.modules.users.models",
+name = "Top-level layers: main -> api -> modules -> db -> core"
+type = "layers"
+layers = [
+    "app.main",
+    "app.api",
+    "app.modules",
+    "app.db",
+    "app.core",
 ]
 
+# ---------------------------------------------------------------- Contract 3
+# Routers speak Pydantic, never infrastructure. allow_indirect_imports is
+# mandatory here (not ignore_imports, which §7.9 forbids for this purpose):
+# router -> dependencies -> repository -> sqlalchemy is legitimate DI wiring,
+# and the flag restricts the check to *direct* imports, which is the actual
+# rule.
 [[tool.importlinter.contracts]]
-name = "Service stays free of web framework"
+name = "Routers must not touch persistence infrastructure"
 type = "forbidden"
-source_modules = ["app.modules.users.service"]
-forbidden_modules = ["fastapi", "starlette"]
+source_modules = ["app.modules.*.router"]
+forbidden_modules = ["sqlalchemy", "asyncpg", "app.db"]
+allow_indirect_imports = true
+
+[[tool.importlinter.contracts]]
+name = "Services must not import the web framework or raw infrastructure clients"
+type = "forbidden"
+source_modules = ["app.modules.*.service"]
+forbidden_modules = ["fastapi", "starlette", "asyncpg", "app.db"]
+allow_indirect_imports = true
 
 [[tool.importlinter.contracts]]
 name = "Repository stays free of web framework"
 type = "forbidden"
-source_modules = ["app.modules.users.repository"]
+source_modules = ["app.modules.*.repository"]
 forbidden_modules = ["fastapi", "starlette"]
+
+# ---------------------------------------------------------------- Contract 4
+# Configuration is read through get_settings(), never os.environ (mirrors the
+# ruff TID251 banned-api rule at the import-linter level).
+[[tool.importlinter.contracts]]
+name = "Only core.config may read the environment"
+type = "forbidden"
+source_modules = ["app.modules", "app.api", "app.db"]
+forbidden_modules = ["os", "dotenv"]
+allow_indirect_imports = true

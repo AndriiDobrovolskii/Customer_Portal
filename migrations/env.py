@@ -10,7 +10,7 @@ from sqlalchemy.engine import Connection
 from sqlalchemy.ext.asyncio import async_engine_from_config
 
 from app.core.config import get_settings
-from app.core.database import Base
+from app.db.base import Base
 from app.modules.users import models as users_models  # noqa: F401  # registers User with Base
 
 # this is the Alembic Config object, which provides

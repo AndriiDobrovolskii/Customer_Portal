@@ -3,24 +3,37 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
+from app.api.v1.router import router as api_v1_router
 from app.core.config import get_settings
-from app.core.database import dispose_engine, init_engine
-from app.core.exceptions import DuplicateEmailError, RegistrationValidationError
-from app.modules.users.router import router as users_router
+from app.db.session import create_engine_and_sessionmaker
+from app.modules.users.exceptions import DuplicateEmailError, RegistrationValidationError
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     settings = get_settings()
-    init_engine(settings.database_url)
+    engine, session_factory = create_engine_and_sessionmaker(settings.database_url)
+    app.state.db_engine = engine
+    app.state.db_session_factory = session_factory
     yield
-    await dispose_engine()
+    await engine.dispose()
 
 
 app = FastAPI(title="Customer Portal", lifespan=lifespan)
-app.include_router(users_router)
+app.include_router(api_v1_router)
+
+# Local-only allowance for the gitignored dev-gui/ test page, served via
+# `python -m http.server 5500 --directory dev-gui`. Not a public API concern.
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["http://localhost:5500", "http://127.0.0.1:5500"],
+    allow_methods=["*"],
+    allow_headers=["*"],
+    expose_headers=["Location"],
+)
 
 
 @app.exception_handler(RegistrationValidationError)

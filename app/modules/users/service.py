@@ -2,9 +2,11 @@ import string
 from typing import Protocol
 
 from email_validator import EmailNotValidError, validate_email
+from pydantic import SecretStr
 
-from app.core.exceptions import DuplicateEmailError, FieldError, RegistrationValidationError
+from app.core.exceptions import FieldError
 from app.core.security import hash_password
+from app.modules.users.exceptions import DuplicateEmailError, RegistrationValidationError
 from app.modules.users.models import User
 from app.modules.users.schemas import UserCreate, UserRead, UserStatus
 
@@ -37,7 +39,8 @@ def _validate_email(email: str | None, errors: list[FieldError]) -> str | None:
     return result.normalized
 
 
-def _validate_password(password: str | None, errors: list[FieldError]) -> str | None:
+def _validate_password(secret: SecretStr | None, errors: list[FieldError]) -> str | None:
+    password = secret.get_secret_value() if secret is not None else ""
     if not password:
         errors.append(
             FieldError(field="password", message="Password is required.", code="REQUIRED")
@@ -77,11 +80,8 @@ class UserService:
         normalized_email = _validate_email(payload.email, errors)
         valid_password = _validate_password(payload.password, errors)
 
-        if errors:
+        if errors or normalized_email is None or valid_password is None:
             raise RegistrationValidationError(errors=errors)
-
-        assert normalized_email is not None
-        assert valid_password is not None
 
         hashed_password = await hash_password(valid_password)
 

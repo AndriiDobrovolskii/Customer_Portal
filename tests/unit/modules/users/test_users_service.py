@@ -3,7 +3,7 @@ from datetime import UTC, datetime
 
 import pytest
 
-from app.core.exceptions import DuplicateEmailError, RegistrationValidationError
+from app.modules.users.exceptions import DuplicateEmailError, RegistrationValidationError
 from app.modules.users.models import User
 from app.modules.users.schemas import UserCreate, UserStatus
 from app.modules.users.service import UserService

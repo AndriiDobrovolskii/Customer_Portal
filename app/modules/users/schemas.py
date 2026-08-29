@@ -2,7 +2,7 @@ import uuid
 from datetime import datetime
 from enum import StrEnum
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, SecretStr
 
 
 class UserStatus(StrEnum):
@@ -13,7 +13,7 @@ class UserCreate(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     email: str | None = None
-    password: str | None = None
+    password: SecretStr | None = None
 
 
 class UserRead(BaseModel):
