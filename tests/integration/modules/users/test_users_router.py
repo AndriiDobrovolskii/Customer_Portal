@@ -1,5 +1,6 @@
 import asyncio
 import uuid
+from datetime import timedelta
 
 import pytest
 from httpx import AsyncClient
@@ -7,6 +8,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.main import app
+from app.modules.email_verification.models import EmailVerificationToken
 from app.modules.users.models import User
 
 pytestmark = pytest.mark.integration
@@ -175,6 +177,31 @@ async def test_register_response_never_contains_password_fields(client: AsyncCli
     body_text = response.text.lower()
     assert "password" not in body_text
     assert "hash" not in body_text
+
+
+async def test_register_issues_a_pending_verification_token(
+    client: AsyncClient, db_session: AsyncSession
+) -> None:
+    # Arrange
+    payload = {"email": "token.issued@example.com", "password": "Str0ng!Pass1"}
+
+    # Act
+    response = await client.post("/api/v1/auth/register", json=payload)
+
+    # Assert
+    body = response.json()
+    result = await db_session.execute(
+        select(EmailVerificationToken).where(
+            EmailVerificationToken.user_id == uuid.UUID(body["id"])
+        )
+    )
+    tokens = result.scalars().all()
+    assert len(tokens) == 1
+    token = tokens[0]
+    assert token.consumed_at is None
+    expected_expiry = token.issued_at + timedelta(hours=24)
+    assert abs((token.expires_at - expected_expiry).total_seconds()) < 5
+    assert set(body.keys()) == {"id", "email", "status", "createdAt"}
 
 
 async def test_concurrent_duplicate_registration_only_one_succeeds(

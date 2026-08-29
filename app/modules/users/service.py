@@ -1,14 +1,19 @@
+import logging
 import string
+import uuid
 from typing import Protocol
 
 from email_validator import EmailNotValidError, validate_email
 from pydantic import SecretStr
 
+from app.core.email import EmailSender
 from app.core.exceptions import FieldError
 from app.core.security import hash_password
 from app.modules.users.exceptions import DuplicateEmailError, RegistrationValidationError
 from app.modules.users.models import User
 from app.modules.users.schemas import UserCreate, UserRead, UserStatus
+
+logger = logging.getLogger(__name__)
 
 _SPECIAL_CHARACTERS = set(string.punctuation)
 _MIN_PASSWORD_LENGTH = 8
@@ -18,6 +23,10 @@ class UserRepositoryProtocol(Protocol):
     async def create(self, *, email: str, hashed_password: str, status: str) -> User | None: ...
 
     async def commit(self) -> None: ...
+
+
+class VerificationTokenIssuerProtocol(Protocol):
+    async def issue_pending_token(self, user_id: uuid.UUID) -> str: ...
 
 
 def _validate_email(email: str | None, errors: list[FieldError]) -> str | None:
@@ -72,8 +81,15 @@ def _validate_password(secret: SecretStr | None, errors: list[FieldError]) -> st
 
 
 class UserService:
-    def __init__(self, repository: UserRepositoryProtocol) -> None:
+    def __init__(
+        self,
+        repository: UserRepositoryProtocol,
+        issuer: VerificationTokenIssuerProtocol,
+        email_sender: EmailSender,
+    ) -> None:
         self._repository = repository
+        self._issuer = issuer
+        self._email_sender = email_sender
 
     async def register_user(self, payload: UserCreate) -> UserRead:
         errors: list[FieldError] = []
@@ -94,5 +110,14 @@ class UserService:
             raise DuplicateEmailError()
 
         await self._repository.commit()
+
+        # Best-effort: the user account is already committed and registration
+        # must succeed regardless of whether the verification email goes out.
+        # A failure here just means the customer falls back to /resend later.
+        try:
+            raw_token = await self._issuer.issue_pending_token(user.id)
+            await self._email_sender.send_verification_email(to=user.email, raw_token=raw_token)
+        except Exception:
+            logger.exception("failed to issue verification token after registration")
 
         return UserRead.model_validate(user)
