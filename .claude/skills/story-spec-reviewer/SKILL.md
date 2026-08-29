@@ -1,6 +1,6 @@
 ---
 name: story-spec-reviewer
-description: Reviews a generated Story Specification artifact (e.g. docs/specifications/US-001-spec.md, typically produced by story-spec-writer) against its original User Story file (e.g. docs/backlog/US-001.md, containing business context and Acceptance Criteria) to check completeness and accuracy before implementation begins. Use this whenever the user asks to "review a spec," "check a spec against the story," "audit this specification," "verify AC coverage," or wants a QA pass on a spec before handing it to engineering — even if they just paste two file paths (a story and a spec) and ask "does this spec match?" Produces a structured Markdown review report saved under docs/reviews/, checking for: ambiguous or non-verifiable statements, contradictions with the original business requirements, missing Acceptance Criteria coverage, scope creep beyond the original story, and missing edge cases/boundary conditions/error handling. This is the downstream QA counterpart to story-spec-writer — it audits an existing spec, it does not draft or rewrite one. Trigger this for requests about spec review, spec audits, AC coverage checks, or spec-vs-story validation; not for writing a spec from scratch (that's story-spec-writer) and not for reviewing code or pull requests.
+description: Reviews a generated Story Specification artifact (e.g. docs/specifications/US-001-spec.md, typically produced by story-spec-writer) against its original User Story file (e.g. docs/stories/US-001.md, containing business context and Acceptance Criteria) to check completeness and accuracy before implementation begins. Use this whenever the user asks to "review a spec," "check a spec against the story," "audit this specification," "verify AC coverage," or wants a QA pass on a spec before handing it to engineering — even if they just paste two file paths (a story and a spec) and ask "does this spec match?" Produces a structured Markdown review report saved under docs/reviews/specifications/, checking for: ambiguous or non-verifiable statements, contradictions with the original business requirements, missing Acceptance Criteria coverage, scope creep beyond the original story, and missing edge cases/boundary conditions/error handling. This is the downstream QA counterpart to story-spec-writer — it audits an existing spec, it does not draft or rewrite one. Trigger this for requests about spec review, spec audits, AC coverage checks, or spec-vs-story validation; not for writing a spec from scratch (that's story-spec-writer) and not for reviewing code or pull requests.
 ---
 
 # Story Spec Reviewer
@@ -28,7 +28,7 @@ The role is strictly auditor, not author. A developer or product owner should be
 
 Two files are required:
 
-1. **Original User Story** — contains business context and Acceptance Criteria (e.g. `docs/backlog/US-001.md`). This is the source of truth for scope.
+1. **Original User Story** — contains business context and Acceptance Criteria (e.g. `docs/stories/US-001.md`). This is the source of truth for scope.
 2. **Generated Story Specification** — the artifact being reviewed (e.g. `docs/specifications/US-001-spec.md`).
 
 If the user gives only one file, or only describes one verbally, ask for the other rather than guessing — a review is meaningless without both sides of the comparison. If either file can't be found at the path given, say so and stop; don't review from memory or assumption.
@@ -74,11 +74,11 @@ Based on the findings, assign one verdict:
 
 ### 9. Write and save the report
 
-Build the report from `assets/template.md` (read it before drafting so structure stays consistent across reviews). Save it to `docs/reviews/<story-id>-spec-review.md` (e.g. `docs/reviews/US-001-spec-review.md`), creating the directory if needed. If a review already exists at that path, treat this run as the canonical update (overwrite it), and tell the user you replaced a prior review — reviews get re-run as specs are revised.
+Build the report from `assets/template.md` (read it before drafting so structure stays consistent across reviews). Save it to `docs/reviews/specifications/<story-id>-spec-review.md` (e.g. `docs/reviews/specifications/US-001-spec-review.md`), creating the directory if needed. If a review already exists at that path, treat this run as the canonical update (overwrite it), and tell the user you replaced a prior review — reviews get re-run as specs are revised.
 
 ## Output Specification & Markdown Report Template
 
-The output is always a saved Markdown file under `docs/reviews/` — never just a chat reply. Use `assets/template.md` verbatim as the structure: header metadata, overall verdict, an AC coverage table, and one subsection per check category (Ambiguities, Contradictions, Scope Creep, Missing Edge Cases), each listing findings with a severity, the exact quoted evidence from spec and/or story, and a plain description of the problem.
+The output is always a saved Markdown file under `docs/reviews/specifications/` — never just a chat reply. Use `assets/template.md` verbatim as the structure: header metadata, overall verdict, an AC coverage table, and one subsection per check category (Ambiguities, Contradictions, Scope Creep, Missing Edge Cases), each listing findings with a severity, the exact quoted evidence from spec and/or story, and a plain description of the problem.
 
 After saving, tell the user where the report was written and summarize the verdict and the highest-severity findings in chat — the file is the durable artifact, the chat summary is just a pointer to it.
 
@@ -86,7 +86,7 @@ After saving, tell the user where the report was written and summarize the verdi
 
 - **Do not invent new requirements or ACs.** This skill's job is to compare what already exists in the story against what already exists in the spec — not to propose new scope, new requirements, or how a gap "should" be filled. If something's missing, say it's missing; don't write the missing content yourself.
 - **Maintain strict traceability.** Every finding must cite the specific AC ID and/or exact quoted text (from story or spec) it's based on. A finding with no traceable evidence is not usable — cut it or find the citation.
-- **Always write the durable artifact to `docs/reviews/`.** A review that only exists in the chat transcript can't be referenced later by other contributors or tools; the file is the deliverable.
+- **Always write the durable artifact to `docs/reviews/specifications/`.** A review that only exists in the chat transcript can't be referenced later by other contributors or tools; the file is the deliverable.
 - **Do not silently fix the spec.** This skill reports findings; it does not edit `docs/specifications/*`. If the user wants the spec fixed, that's a separate, explicit follow-up action (likely via `story-spec-writer`), not something to bundle into this review.
 - **Don't soften a Fail verdict to be polite.** If ACs are missing or contradictions exist, the verdict must reflect that plainly — the report exists specifically to catch these before implementation cost is sunk.
 
@@ -99,5 +99,5 @@ Before considering the review complete, confirm:
 - [ ] Every finding cites specific, quoted evidence from the story and/or spec — no unsupported assertions.
 - [ ] No finding proposes new requirement text to add to the spec — gaps are described, not filled.
 - [ ] The overall verdict (Pass / Pass with Issues / Fail) is consistent with the findings (any Missing/Partially Covered AC or contradiction forces Fail).
-- [ ] The report was saved to `docs/reviews/<story-id>-spec-review.md`, not only shown in chat.
+- [ ] The report was saved to `docs/reviews/specifications/<story-id>-spec-review.md`, not only shown in chat.
 - [ ] The chat reply summarizes the verdict and points to the saved file path.

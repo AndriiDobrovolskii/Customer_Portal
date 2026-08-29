@@ -33,3 +33,6 @@ desktop.ini
 
 # Local dev GUI for manual API testing (not part of the product)
 dev-gui/
+
+# Hook logs (local dev artifacts, not part of the product)
+docs/hooks/

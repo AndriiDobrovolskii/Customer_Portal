@@ -1,0 +1,3 @@
+# Keep this directory in version control while ignoring its (currently empty) contents.
+*
+!.gitignore

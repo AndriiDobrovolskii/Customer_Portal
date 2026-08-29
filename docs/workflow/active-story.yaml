@@ -1,0 +1,8 @@
+active_story: US-002
+
+# Assumption, not fact — confirm or correct:
+# US-001 (Register User) is implemented (see git history). All 16 stories
+# already have an approved spec + review, so US-002 (Verify Email) is the
+# next one in backlog order. The backlog's own "suggested build order" note
+# proposes US-3.2 (Manage Roles) first for dependency reasons — override
+# this value if that ordering should apply instead.
