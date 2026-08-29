@@ -240,6 +240,7 @@ async def get_with_orders(self, user_id: UUID) -> User | None:
     result = await self._session.execute(stmt)
     return result.scalars().unique().one_or_none()
 
+
 # ✅ service.py — conversion happens with the session still open
 async def get_profile_with_orders(self, user_id: UUID) -> UserWithOrdersRead:
     user = await self._repository.get_with_orders(user_id)
@@ -247,9 +248,10 @@ async def get_profile_with_orders(self, user_id: UUID) -> UserWithOrdersRead:
         raise EntityNotFoundError(f"User {user_id} not found")
     return UserWithOrdersRead.model_validate(user)
 
+
 # ❌ FORBIDDEN — get_by_id() did not load .orders
 user = await self._repository.get_by_id(user_id)
-return UserWithOrdersRead.model_validate(user)   # MissingGreenlet at runtime
+return UserWithOrdersRead.model_validate(user)  # MissingGreenlet at runtime
 ```
 
 **Repository naming reflects the loaded graph.** A method that eager-loads relations MUST say so:
@@ -303,9 +305,10 @@ async def get_by_email(self, email: str) -> User | None:
     result = await self._session.execute(stmt)
     return result.scalars().one_or_none()
 
+
 # ❌ FORBIDDEN — blocks the event loop, poisons the whole worker
 def get_by_email(self, email: str) -> User | None:
-    return self._session.query(User).filter_by(email=email).first()   # sync + legacy API
+    return self._session.query(User).filter_by(email=email).first()  # sync + legacy API
 ```
 
 CPU-bound or unavoidably blocking third-party calls (e.g. `PasswordHasher.hash`/`.verify`) MUST be offloaded:
@@ -338,6 +341,7 @@ downstream of them is request-scoped and injected.
 # app/cache/client.py
 def create_valkey_pool(settings: Settings) -> ConnectionPool:
     return ConnectionPool.from_url(str(settings.valkey_url), decode_responses=True)
+
 
 async def get_cache(request: Request) -> AsyncGenerator[Valkey, None]:
     client = Valkey(connection_pool=request.app.state.valkey_pool)
@@ -378,10 +382,12 @@ async def get_auth_service(
 # ❌ module-level global in service.py — unclosable, untestable, shared across event loops
 client = Valkey.from_url(os.environ["VALKEY_URL"])
 
+
 # ❌ constructing a client inside a service method
 async def logout(self, jti: str) -> None:
-    client = Valkey.from_url(...)          # new connection per call
+    client = Valkey.from_url(...)  # new connection per call
     await client.set(f"revoked:{jti}", 1)  # raw key, no TTL
+
 
 # ❌ calling a dependency provider by hand
 cache = await get_cache()
@@ -616,7 +622,7 @@ user = User(
     email=payload.email,
     full_name=payload.full_name,
     hashed_password=hashed,
-    is_active=False,          # server-owned; never client-supplied
+    is_active=False,  # server-owned; never client-supplied
 )
 ```
 
@@ -675,13 +681,20 @@ error there is a design fault the linter cannot catch on its own — human revie
 class DomainError(Exception):
     """Base for all business-rule failures."""
 
+
 # app/modules/users/exceptions.py — module-owned, specific
 class EntityNotFoundError(DomainError): ...
+
+
 class EmailAlreadyRegisteredError(DomainError): ...
+
+
 class InvalidCredentialsError(DomainError): ...
+
 
 # main.py
 from app.modules.users.exceptions import EmailAlreadyRegisteredError
+
 
 @app.exception_handler(EmailAlreadyRegisteredError)
 async def handle_email_conflict(request: Request, exc: EmailAlreadyRegisteredError) -> JSONResponse:
@@ -712,6 +725,7 @@ class Settings(BaseSettings):
     argon2_time_cost: int = 3
     argon2_memory_cost_kb: int = 65536
     argon2_parallelism: int = 4
+
 
 @lru_cache
 def get_settings() -> Settings:
@@ -753,6 +767,7 @@ def upgrade() -> None:
     op.create_table("user_sessions", ..., if_not_exists=True)
     op.create_index("ix_user_sessions_user_id", "user_sessions", ["user_id"], if_not_exists=True)
 
+
 def downgrade() -> None:
     op.drop_index("ix_user_sessions_user_id", table_name="user_sessions", if_exists=True)
     op.drop_table("user_sessions", if_exists=True)
@@ -764,6 +779,7 @@ Where an operation has no `if_*` flag, guard it explicitly with an inspector che
 def _has_column(table: str, column: str) -> bool:
     inspector = sa.inspect(op.get_bind())
     return column in {c["name"] for c in inspector.get_columns(table)}
+
 
 def upgrade() -> None:
     if not _has_column("users", "email_verified_at"):
@@ -805,7 +821,7 @@ def do_run_migrations(connection: Connection) -> None:
     context.configure(
         connection=connection,
         target_metadata=target_metadata,
-        process_revision_directives=writer,   # <-- wires the rewriter in
+        process_revision_directives=writer,  # <-- wires the rewriter in
         compare_type=True,
         compare_server_default=True,
     )

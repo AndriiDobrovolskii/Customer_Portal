@@ -118,6 +118,12 @@ class RecordingEmailSender:
     async def send_verification_email(self, *, to: str, raw_token: str) -> None:
         self.sent.append({"to": to, "raw_token": raw_token})
 
+    async def send_email_change_confirmation(self, *, to: str, raw_token: str) -> None:
+        pass
+
+    async def send_email_change_notice(self, *, to: str) -> None:
+        pass
+
 
 def _make_service(
     repository: FakeEmailVerificationRepository, email_sender: RecordingEmailSender | None = None

@@ -37,7 +37,7 @@ app.add_middleware(
     allow_origins=["http://localhost:5500", "http://127.0.0.1:5500"],
     allow_methods=["*"],
     allow_headers=["*"],
-    expose_headers=["Location"],
+    expose_headers=["Location", "ETag"],
 )
 
 
@@ -58,17 +58,23 @@ async def registration_validation_error_handler(
 
 @app.exception_handler(ProblemError)
 async def problem_error_handler(request: Request, exc: ProblemError) -> JSONResponse:
+    content: dict[str, object] = {
+        "type": f"https://portal.internal/errors/{exc.type_slug}",
+        "title": exc.title,
+        "status": exc.status,
+        "detail": exc.detail,
+        "instance": request.url.path,
+    }
+    if exc.errors is not None:
+        content["errors"] = [
+            {"field": error.field, "code": error.code, "message": error.message}
+            for error in exc.errors
+        ]
     return JSONResponse(
         status_code=exc.status,
         media_type="application/problem+json",
         headers=exc.headers,
-        content={
-            "type": f"https://portal.internal/errors/{exc.type_slug}",
-            "title": exc.title,
-            "status": exc.status,
-            "detail": exc.detail,
-            "instance": request.url.path,
-        },
+        content=content,
     )
 
 

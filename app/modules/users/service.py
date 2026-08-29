@@ -1,22 +1,30 @@
 import logging
-import secrets
 import string
 import uuid
+from dataclasses import dataclass
+from datetime import UTC, datetime, timedelta
 from typing import Protocol
 
 from email_validator import EmailNotValidError, validate_email
 from pydantic import SecretStr
 
+from app.core.config import get_settings
 from app.core.email import EmailSender
 from app.core.exceptions import FieldError
-from app.core.security import hash_password, verify_password
+from app.core.security import (
+    InvalidTokenError,
+    decode_access_token,
+    encode_access_token,
+    hash_password,
+    verify_password,
+)
 from app.modules.users.exceptions import (
     DuplicateEmailError,
     EmailNotVerifiedError,
     InvalidCredentialsError,
     RegistrationValidationError,
 )
-from app.modules.users.models import User
+from app.modules.users.models import User, UserSession
 from app.modules.users.schemas import LoginRequest, LoginResponse, UserCreate, UserRead, UserStatus
 
 logger = logging.getLogger(__name__)
@@ -25,10 +33,28 @@ _SPECIAL_CHARACTERS = set(string.punctuation)
 _MIN_PASSWORD_LENGTH = 8
 
 
+@dataclass(frozen=True, slots=True)
+class AuthenticatedUser:
+    """The identity resolved from a valid access token. Never the ORM User."""
+
+    user_id: uuid.UUID
+    jti: uuid.UUID
+
+
 class UserRepositoryProtocol(Protocol):
     async def create(self, *, email: str, hashed_password: str, status: str) -> User | None: ...
 
     async def get_by_email(self, email: str) -> User | None: ...
+
+    async def create_session(
+        self, *, user_id: uuid.UUID, jti: uuid.UUID, expires_at: datetime
+    ) -> UserSession: ...
+
+    async def get_session_by_jti(self, jti: uuid.UUID) -> UserSession | None: ...
+
+    async def revoke_sessions_except(
+        self, *, user_id: uuid.UUID, except_jti: uuid.UUID | None
+    ) -> None: ...
 
     async def commit(self) -> None: ...
 
@@ -144,4 +170,35 @@ class UserService:
         if not user.email_verified:
             raise EmailNotVerifiedError
 
-        return LoginResponse(access_token=secrets.token_urlsafe(32))
+        settings = get_settings()
+        jti = uuid.uuid4()
+        expires_at = datetime.now(UTC) + timedelta(seconds=settings.access_token_ttl_seconds)
+        await self._repository.create_session(user_id=user.id, jti=jti, expires_at=expires_at)
+        await self._repository.commit()
+        return LoginResponse(access_token=encode_access_token(user_id=user.id, jti=jti))
+
+    async def get_authenticated_user(self, token: str) -> AuthenticatedUser | None:
+        try:
+            claims = decode_access_token(token)
+        except InvalidTokenError:
+            return None
+
+        session = await self._repository.get_session_by_jti(claims.jti)
+        if session is None or session.revoked_at is not None:
+            return None
+        if session.user_id != claims.user_id:
+            return None
+
+        return AuthenticatedUser(user_id=claims.user_id, jti=claims.jti)
+
+    async def revoke_other_sessions(
+        self, *, user_id: uuid.UUID, except_jti: uuid.UUID | None
+    ) -> None:
+        """Cross-module collaborator for the profile module's confirmed-email-
+        change flow (UP-AC11) — injected as a Protocol-typed service→service
+        dependency, per AGENTS.md's cross-module discipline. Owns its own
+        commit, matching the existing multi-commit-per-request precedent in
+        register_user's token-issuance composition.
+        """
+        await self._repository.revoke_sessions_except(user_id=user_id, except_jti=except_jti)
+        await self._repository.commit()

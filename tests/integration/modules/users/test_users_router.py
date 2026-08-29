@@ -7,10 +7,10 @@ from httpx import AsyncClient
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.security import hash_password
+from app.core.security import decode_access_token, hash_password
 from app.main import app
 from app.modules.email_verification.models import EmailVerificationToken
-from app.modules.users.models import User
+from app.modules.users.models import User, UserSession
 
 pytestmark = pytest.mark.integration
 
@@ -327,3 +327,27 @@ async def test_login_unknown_email_returns_401(client: AsyncClient) -> None:
 
     # Assert
     assert response.status_code == 401
+
+
+async def test_login_persists_a_session_and_returns_decodable_jwt(
+    client: AsyncClient, db_session: AsyncSession
+) -> None:
+    # Arrange
+    user = await _seed_login_user(
+        db_session, email="login.session@example.com", password="Str0ng!Pass1", email_verified=True
+    )
+
+    # Act
+    response = await client.post(
+        "/api/v1/auth/login",
+        json={"email": "login.session@example.com", "password": "Str0ng!Pass1"},
+    )
+
+    # Assert
+    assert response.status_code == 200
+    claims = decode_access_token(response.json()["access_token"])
+    assert claims.user_id == user.id
+    result = await db_session.execute(select(UserSession).where(UserSession.jti == claims.jti))
+    session = result.scalar_one()
+    assert session.user_id == user.id
+    assert session.revoked_at is None

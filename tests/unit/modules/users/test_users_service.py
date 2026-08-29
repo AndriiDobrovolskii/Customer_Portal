@@ -3,14 +3,14 @@ from datetime import UTC, datetime
 
 import pytest
 
-from app.core.security import hash_password
+from app.core.security import decode_access_token, hash_password
 from app.modules.users.exceptions import (
     DuplicateEmailError,
     EmailNotVerifiedError,
     InvalidCredentialsError,
     RegistrationValidationError,
 )
-from app.modules.users.models import User
+from app.modules.users.models import User, UserSession
 from app.modules.users.schemas import LoginRequest, UserCreate, UserStatus
 from app.modules.users.service import UserService
 
@@ -23,6 +23,7 @@ class FakeUserRepository:
         self.created_with: dict[str, str] | None = None
         self.commit_called = False
         self.users_by_email: dict[str, User] = {}
+        self.sessions_by_jti: dict[uuid.UUID, UserSession] = {}
 
     async def create(self, *, email: str, hashed_password: str, status: str) -> User | None:
         if email in self.existing_emails:
@@ -35,6 +36,23 @@ class FakeUserRepository:
 
     async def get_by_email(self, email: str) -> User | None:
         return self.users_by_email.get(email.lower())
+
+    async def create_session(
+        self, *, user_id: uuid.UUID, jti: uuid.UUID, expires_at: datetime
+    ) -> UserSession:
+        session = UserSession(jti=jti, user_id=user_id, expires_at=expires_at)
+        self.sessions_by_jti[jti] = session
+        return session
+
+    async def get_session_by_jti(self, jti: uuid.UUID) -> UserSession | None:
+        return self.sessions_by_jti.get(jti)
+
+    async def revoke_sessions_except(
+        self, *, user_id: uuid.UUID, except_jti: uuid.UUID | None
+    ) -> None:
+        for jti, session in self.sessions_by_jti.items():
+            if session.user_id == user_id and jti != except_jti:
+                session.revoked_at = datetime.now(UTC)
 
     async def commit(self) -> None:
         self.commit_called = True
@@ -61,6 +79,12 @@ class FakeEmailSender:
         if self.raises:
             raise RuntimeError("email dispatch failed")
         self.sent.append({"to": to, "raw_token": raw_token})
+
+    async def send_email_change_confirmation(self, *, to: str, raw_token: str) -> None:
+        pass
+
+    async def send_email_change_notice(self, *, to: str) -> None:
+        pass
 
 
 def _make_service(
@@ -298,7 +322,7 @@ async def test_authenticate_user_correct_password_unverified_raises_email_not_ve
 async def test_authenticate_user_correct_password_verified_returns_access_token() -> None:
     # Arrange
     repository = FakeUserRepository()
-    await _seed_user(
+    user = await _seed_user(
         repository, email="verified@example.com", password="Str0ng!Pass", email_verified=True
     )
     service, _, _ = _make_service(repository)
@@ -310,6 +334,27 @@ async def test_authenticate_user_correct_password_verified_returns_access_token(
     # Assert
     assert result.token_type == "bearer"
     assert len(result.access_token) > 0
+    claims = decode_access_token(result.access_token)
+    assert claims.user_id == user.id
+    assert repository.commit_called is True
+
+
+async def test_authenticate_user_persists_a_session_row() -> None:
+    # Arrange
+    repository = FakeUserRepository()
+    await _seed_user(
+        repository, email="session@example.com", password="Str0ng!Pass", email_verified=True
+    )
+    service, _, _ = _make_service(repository)
+    payload = LoginRequest(email="session@example.com", password="Str0ng!Pass")
+
+    # Act
+    result = await service.authenticate_user(payload)
+
+    # Assert
+    claims = decode_access_token(result.access_token)
+    assert claims.jti in repository.sessions_by_jti
+    assert repository.sessions_by_jti[claims.jti].revoked_at is None
 
 
 async def test_authenticate_user_wrong_password_raises_invalid_credentials() -> None:
