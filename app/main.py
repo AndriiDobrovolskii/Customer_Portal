@@ -10,7 +10,11 @@ from app.api.v1.router import router as api_v1_router
 from app.core.config import get_settings
 from app.core.problem_details import ProblemError
 from app.db.session import create_engine_and_sessionmaker
-from app.modules.users.exceptions import DuplicateEmailError, RegistrationValidationError
+from app.modules.users.exceptions import (
+    DuplicateEmailError,
+    InvalidCredentialsError,
+    RegistrationValidationError,
+)
 
 
 @asynccontextmanager
@@ -71,6 +75,13 @@ async def problem_error_handler(request: Request, exc: ProblemError) -> JSONResp
 @app.exception_handler(DuplicateEmailError)
 async def duplicate_email_error_handler(request: Request, exc: DuplicateEmailError) -> JSONResponse:
     return JSONResponse(status_code=409, content={"detail": "Email is already registered."})
+
+
+@app.exception_handler(InvalidCredentialsError)
+async def invalid_credentials_error_handler(
+    request: Request, exc: InvalidCredentialsError
+) -> JSONResponse:
+    return JSONResponse(status_code=401, content={"detail": "The email or password is incorrect."})
 
 
 @app.exception_handler(RequestValidationError)

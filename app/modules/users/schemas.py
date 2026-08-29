@@ -23,3 +23,15 @@ class UserRead(BaseModel):
     email: str
     status: UserStatus
     created_at: datetime = Field(serialization_alias="createdAt")
+
+
+class LoginRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    email: str
+    password: SecretStr
+
+
+class LoginResponse(BaseModel):
+    access_token: str
+    token_type: str = "bearer"  # noqa: S105 -- OAuth2 field name, not a secret

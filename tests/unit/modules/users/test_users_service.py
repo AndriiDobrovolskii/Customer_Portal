@@ -3,9 +3,15 @@ from datetime import UTC, datetime
 
 import pytest
 
-from app.modules.users.exceptions import DuplicateEmailError, RegistrationValidationError
+from app.core.security import hash_password
+from app.modules.users.exceptions import (
+    DuplicateEmailError,
+    EmailNotVerifiedError,
+    InvalidCredentialsError,
+    RegistrationValidationError,
+)
 from app.modules.users.models import User
-from app.modules.users.schemas import UserCreate, UserStatus
+from app.modules.users.schemas import LoginRequest, UserCreate, UserStatus
 from app.modules.users.service import UserService
 
 pytestmark = pytest.mark.unit
@@ -16,6 +22,7 @@ class FakeUserRepository:
         self.existing_emails = existing_emails or set()
         self.created_with: dict[str, str] | None = None
         self.commit_called = False
+        self.users_by_email: dict[str, User] = {}
 
     async def create(self, *, email: str, hashed_password: str, status: str) -> User | None:
         if email in self.existing_emails:
@@ -25,6 +32,9 @@ class FakeUserRepository:
         user.id = uuid.uuid4()
         user.created_at = datetime.now(UTC)
         return user
+
+    async def get_by_email(self, email: str) -> User | None:
+        return self.users_by_email.get(email.lower())
 
     async def commit(self) -> None:
         self.commit_called = True
@@ -251,3 +261,77 @@ async def test_register_user_swallows_email_dispatch_failure() -> None:
     # Assert: registration still succeeds even though email dispatch failed
     assert result.email == "resilient2@example.com"
     assert repository.commit_called is True
+
+
+async def _seed_user(
+    repository: FakeUserRepository, *, email: str, password: str, email_verified: bool
+) -> User:
+    user = User(
+        email=email, hashed_password=await hash_password(password), status="PENDING_VERIFICATION"
+    )
+    user.id = uuid.uuid4()
+    user.email_verified = email_verified
+    repository.users_by_email[email.lower()] = user
+    return user
+
+
+# --- VE-AC5: unverified account cannot log in ----------------------------------
+
+
+async def test_authenticate_user_correct_password_unverified_raises_email_not_verified() -> None:
+    # Arrange
+    repository = FakeUserRepository()
+    await _seed_user(
+        repository, email="unverified@example.com", password="Str0ng!Pass", email_verified=False
+    )
+    service, _, _ = _make_service(repository)
+    payload = LoginRequest(email="unverified@example.com", password="Str0ng!Pass")
+
+    # Act & Assert
+    with pytest.raises(EmailNotVerifiedError):
+        await service.authenticate_user(payload)
+
+
+# --- VE-AC6: verified account logs in normally ---------------------------------
+
+
+async def test_authenticate_user_correct_password_verified_returns_access_token() -> None:
+    # Arrange
+    repository = FakeUserRepository()
+    await _seed_user(
+        repository, email="verified@example.com", password="Str0ng!Pass", email_verified=True
+    )
+    service, _, _ = _make_service(repository)
+    payload = LoginRequest(email="verified@example.com", password="Str0ng!Pass")
+
+    # Act
+    result = await service.authenticate_user(payload)
+
+    # Assert
+    assert result.token_type == "bearer"
+    assert len(result.access_token) > 0
+
+
+async def test_authenticate_user_wrong_password_raises_invalid_credentials() -> None:
+    # Arrange
+    repository = FakeUserRepository()
+    await _seed_user(
+        repository, email="verified@example.com", password="Str0ng!Pass", email_verified=True
+    )
+    service, _, _ = _make_service(repository)
+    payload = LoginRequest(email="verified@example.com", password="WrongPassword1!")
+
+    # Act & Assert
+    with pytest.raises(InvalidCredentialsError):
+        await service.authenticate_user(payload)
+
+
+async def test_authenticate_user_unknown_email_raises_invalid_credentials() -> None:
+    # Arrange
+    repository = FakeUserRepository()
+    service, _, _ = _make_service(repository)
+    payload = LoginRequest(email="nobody@example.com", password="Str0ng!Pass")
+
+    # Act & Assert
+    with pytest.raises(InvalidCredentialsError):
+        await service.authenticate_user(payload)

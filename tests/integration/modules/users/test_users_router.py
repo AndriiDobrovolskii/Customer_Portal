@@ -7,11 +7,26 @@ from httpx import AsyncClient
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.security import hash_password
 from app.main import app
 from app.modules.email_verification.models import EmailVerificationToken
 from app.modules.users.models import User
 
 pytestmark = pytest.mark.integration
+
+
+async def _seed_login_user(
+    db_session: AsyncSession, *, email: str, password: str, email_verified: bool
+) -> User:
+    user = User(
+        email=email,
+        hashed_password=await hash_password(password),
+        status="PENDING_VERIFICATION",
+    )
+    user.email_verified = email_verified
+    db_session.add(user)
+    await db_session.flush()
+    return user
 
 
 async def test_register_valid_input_returns_201_with_location_and_body(
@@ -230,3 +245,85 @@ async def test_concurrent_duplicate_registration_only_one_succeeds(
     async with engine.connect() as connection:
         result = await connection.execute(select(User).where(User.email == email_lower.lower()))
         assert len(result.all()) == 1
+
+
+# --- VE-AC5: unverified account cannot log in -----------------------------------
+
+
+async def test_login_correct_password_unverified_returns_403_email_not_verified(
+    client: AsyncClient, db_session: AsyncSession
+) -> None:
+    # Arrange
+    await _seed_login_user(
+        db_session,
+        email="login.unverified@example.com",
+        password="Str0ng!Pass1",
+        email_verified=False,
+    )
+
+    # Act
+    response = await client.post(
+        "/api/v1/auth/login",
+        json={"email": "login.unverified@example.com", "password": "Str0ng!Pass1"},
+    )
+
+    # Assert
+    assert response.status_code == 403
+    assert response.headers["content-type"] == "application/problem+json"
+    assert response.json()["type"] == "https://portal.internal/errors/email-not-verified"
+
+
+# --- VE-AC6: verified account logs in normally ----------------------------------
+
+
+async def test_login_correct_password_verified_returns_200_with_access_token(
+    client: AsyncClient, db_session: AsyncSession
+) -> None:
+    # Arrange
+    await _seed_login_user(
+        db_session, email="login.verified@example.com", password="Str0ng!Pass1", email_verified=True
+    )
+
+    # Act
+    response = await client.post(
+        "/api/v1/auth/login",
+        json={"email": "login.verified@example.com", "password": "Str0ng!Pass1"},
+    )
+
+    # Assert
+    assert response.status_code == 200
+    body = response.json()
+    assert body["token_type"] == "bearer"
+    assert len(body["access_token"]) > 0
+
+
+async def test_login_wrong_password_returns_401(
+    client: AsyncClient, db_session: AsyncSession
+) -> None:
+    # Arrange
+    await _seed_login_user(
+        db_session, email="login.wrongpw@example.com", password="Str0ng!Pass1", email_verified=True
+    )
+
+    # Act
+    response = await client.post(
+        "/api/v1/auth/login",
+        json={
+            "email": "login.wrongpw@example.com",
+            "password": "WrongPassword1!",  # pragma: allowlist secret
+        },
+    )
+
+    # Assert
+    assert response.status_code == 401
+
+
+async def test_login_unknown_email_returns_401(client: AsyncClient) -> None:
+    # Act
+    response = await client.post(
+        "/api/v1/auth/login",
+        json={"email": "nobody.logs.in@example.com", "password": "Str0ng!Pass1"},
+    )
+
+    # Assert
+    assert response.status_code == 401

@@ -1,4 +1,5 @@
 import logging
+import secrets
 import string
 import uuid
 from typing import Protocol
@@ -8,10 +9,15 @@ from pydantic import SecretStr
 
 from app.core.email import EmailSender
 from app.core.exceptions import FieldError
-from app.core.security import hash_password
-from app.modules.users.exceptions import DuplicateEmailError, RegistrationValidationError
+from app.core.security import hash_password, verify_password
+from app.modules.users.exceptions import (
+    DuplicateEmailError,
+    EmailNotVerifiedError,
+    InvalidCredentialsError,
+    RegistrationValidationError,
+)
 from app.modules.users.models import User
-from app.modules.users.schemas import UserCreate, UserRead, UserStatus
+from app.modules.users.schemas import LoginRequest, LoginResponse, UserCreate, UserRead, UserStatus
 
 logger = logging.getLogger(__name__)
 
@@ -21,6 +27,8 @@ _MIN_PASSWORD_LENGTH = 8
 
 class UserRepositoryProtocol(Protocol):
     async def create(self, *, email: str, hashed_password: str, status: str) -> User | None: ...
+
+    async def get_by_email(self, email: str) -> User | None: ...
 
     async def commit(self) -> None: ...
 
@@ -121,3 +129,19 @@ class UserService:
             logger.exception("failed to issue verification token after registration")
 
         return UserRead.model_validate(user)
+
+    async def authenticate_user(self, payload: LoginRequest) -> LoginResponse:
+        user = await self._repository.get_by_email(payload.email)
+        if user is None:
+            raise InvalidCredentialsError
+
+        # Checked before the verification gate below: a wrong-password guess
+        # against an unverified account must not be distinguishable from one
+        # against a verified account.
+        if not await verify_password(payload.password.get_secret_value(), user.hashed_password):
+            raise InvalidCredentialsError
+
+        if not user.email_verified:
+            raise EmailNotVerifiedError
+
+        return LoginResponse(access_token=secrets.token_urlsafe(32))
