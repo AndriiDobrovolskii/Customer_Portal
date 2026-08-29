@@ -11,6 +11,9 @@ from sqlalchemy.ext.asyncio import async_engine_from_config
 
 from app.core.config import get_settings
 from app.db.base import Base
+from app.modules.email_verification import (  # noqa: F401  # registers models with Base
+    models as email_verification_models,
+)
 from app.modules.users import models as users_models  # noqa: F401  # registers User with Base
 
 # this is the Alembic Config object, which provides
