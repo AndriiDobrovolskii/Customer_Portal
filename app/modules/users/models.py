@@ -23,6 +23,7 @@ class User(Base):
     timezone: Mapped[str | None] = mapped_column(String(64))
     avatar_url: Mapped[str | None] = mapped_column(String(2048))
     pending_email: Mapped[str | None] = mapped_column(String(320))
+    deactivated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
 
 class UserSession(Base):

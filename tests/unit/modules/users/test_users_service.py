@@ -1,9 +1,9 @@
 import uuid
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 
 import pytest
 
-from app.core.security import decode_access_token, hash_password
+from app.core.security import decode_access_token, encode_access_token, hash_password
 from app.modules.users.exceptions import (
     DuplicateEmailError,
     EmailNotVerifiedError,
@@ -70,6 +70,22 @@ class FakeVerificationTokenIssuer:
         return "raw-verification-token"
 
 
+class FakeRevocationCacheReader:
+    def __init__(
+        self,
+        *,
+        revoke_before_by_user: dict[uuid.UUID, datetime] | None = None,
+        raises: bool = False,
+    ) -> None:
+        self.revoke_before_by_user = revoke_before_by_user or {}
+        self.raises = raises
+
+    async def get_revoke_before(self, user_id: uuid.UUID) -> datetime | None:
+        if self.raises:
+            raise ConnectionError("valkey unreachable")
+        return self.revoke_before_by_user.get(user_id)
+
+
 class FakeEmailSender:
     def __init__(self, *, raises: bool = False) -> None:
         self.raises = raises
@@ -91,10 +107,12 @@ def _make_service(
     repository: FakeUserRepository,
     issuer: FakeVerificationTokenIssuer | None = None,
     email_sender: FakeEmailSender | None = None,
+    revocation_cache: FakeRevocationCacheReader | None = None,
 ) -> tuple[UserService, FakeVerificationTokenIssuer, FakeEmailSender]:
     issuer = issuer or FakeVerificationTokenIssuer()
     email_sender = email_sender or FakeEmailSender()
-    return UserService(repository, issuer, email_sender), issuer, email_sender
+    revocation_cache = revocation_cache or FakeRevocationCacheReader()
+    return UserService(repository, issuer, email_sender, revocation_cache), issuer, email_sender
 
 
 async def test_register_user_valid_input_returns_pending_verification() -> None:
@@ -369,6 +387,86 @@ async def test_authenticate_user_wrong_password_raises_invalid_credentials() -> 
     # Act & Assert
     with pytest.raises(InvalidCredentialsError):
         await service.authenticate_user(payload)
+
+
+# --- DA-AC4 (US-004): revoke_before check in the shared auth dependency -------
+
+
+async def _seed_session(
+    repository: FakeUserRepository, *, user_id: uuid.UUID, issued_at: datetime
+) -> str:
+    jti = uuid.uuid4()
+    session = UserSession(
+        jti=jti, user_id=user_id, expires_at=datetime.now(UTC) + timedelta(hours=1)
+    )
+    session.issued_at = issued_at
+    repository.sessions_by_jti[jti] = session
+    return encode_access_token(user_id=user_id, jti=jti)
+
+
+async def test_get_authenticated_user_token_before_revoke_before_rejected() -> None:
+    # Arrange
+    user_id = uuid.uuid4()
+    repository = FakeUserRepository()
+    issued_at = datetime.now(UTC) - timedelta(minutes=10)
+    token = await _seed_session(repository, user_id=user_id, issued_at=issued_at)
+    revoke_before = issued_at + timedelta(minutes=1)
+    cache = FakeRevocationCacheReader(revoke_before_by_user={user_id: revoke_before})
+    service, _, _ = _make_service(repository, revocation_cache=cache)
+
+    # Act
+    result = await service.get_authenticated_user(token)
+
+    # Assert
+    assert result is None
+
+
+async def test_get_authenticated_user_revoke_before_absent_accepted() -> None:
+    # Arrange
+    user_id = uuid.uuid4()
+    repository = FakeUserRepository()
+    token = await _seed_session(repository, user_id=user_id, issued_at=datetime.now(UTC))
+    cache = FakeRevocationCacheReader()
+    service, _, _ = _make_service(repository, revocation_cache=cache)
+
+    # Act
+    result = await service.get_authenticated_user(token)
+
+    # Assert
+    assert result is not None
+    assert result.user_id == user_id
+
+
+async def test_get_authenticated_user_token_issued_after_revoke_before_accepted() -> None:
+    # Arrange
+    user_id = uuid.uuid4()
+    repository = FakeUserRepository()
+    revoke_before = datetime.now(UTC) - timedelta(minutes=10)
+    token = await _seed_session(repository, user_id=user_id, issued_at=datetime.now(UTC))
+    cache = FakeRevocationCacheReader(revoke_before_by_user={user_id: revoke_before})
+    service, _, _ = _make_service(repository, revocation_cache=cache)
+
+    # Act
+    result = await service.get_authenticated_user(token)
+
+    # Assert
+    assert result is not None
+
+
+async def test_get_authenticated_user_cache_read_error_rejected() -> None:
+    # Arrange
+    user_id = uuid.uuid4()
+    repository = FakeUserRepository()
+    token = await _seed_session(repository, user_id=user_id, issued_at=datetime.now(UTC))
+    cache = FakeRevocationCacheReader(raises=True)
+    service, _, _ = _make_service(repository, revocation_cache=cache)
+
+    # Act
+    result = await service.get_authenticated_user(token)
+
+    # Assert: fail closed on a cache-read error, per AGENTS.md §3's
+    # denylist carve-out — an outage must reject, not accept, the token.
+    assert result is None
 
 
 async def test_authenticate_user_unknown_email_raises_invalid_credentials() -> None:

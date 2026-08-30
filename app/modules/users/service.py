@@ -63,6 +63,10 @@ class VerificationTokenIssuerProtocol(Protocol):
     async def issue_pending_token(self, user_id: uuid.UUID) -> str: ...
 
 
+class RevocationCacheReaderProtocol(Protocol):
+    async def get_revoke_before(self, user_id: uuid.UUID) -> datetime | None: ...
+
+
 def _validate_email(email: str | None, errors: list[FieldError]) -> str | None:
     trimmed = (email or "").strip()
     if not trimmed:
@@ -120,10 +124,12 @@ class UserService:
         repository: UserRepositoryProtocol,
         issuer: VerificationTokenIssuerProtocol,
         email_sender: EmailSender,
+        revocation_cache: RevocationCacheReaderProtocol,
     ) -> None:
         self._repository = repository
         self._issuer = issuer
         self._email_sender = email_sender
+        self._revocation_cache = revocation_cache
 
     async def register_user(self, payload: UserCreate) -> UserRead:
         errors: list[FieldError] = []
@@ -187,6 +193,19 @@ class UserService:
         if session is None or session.revoked_at is not None:
             return None
         if session.user_id != claims.user_id:
+            return None
+
+        try:
+            revoke_before = await self._revocation_cache.get_revoke_before(claims.user_id)
+        except Exception:
+            # Fail closed: revoke_before is a token denylist, and AGENTS.md §3
+            # carves the denylist out of the general "degrade to the DB on
+            # cache outage" rule — an unreachable cache must reject the
+            # token, not silently accept it. Deliberately broad: any failure
+            # reading the denylist must reject, regardless of its cause.
+            logger.exception("revoke_before check failed; rejecting token")
+            return None
+        if revoke_before is not None and session.issued_at <= revoke_before:
             return None
 
         return AuthenticatedUser(user_id=claims.user_id, jti=claims.jti)

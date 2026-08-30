@@ -5,6 +5,7 @@ from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
+from redis.asyncio import Redis
 
 from app.api.v1.router import router as api_v1_router
 from app.core.config import get_settings
@@ -23,8 +24,11 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     engine, session_factory = create_engine_and_sessionmaker(settings.database_url)
     app.state.db_engine = engine
     app.state.db_session_factory = session_factory
+    valkey_client: Redis = Redis.from_url(settings.valkey_url, decode_responses=True)
+    app.state.valkey_client = valkey_client
     yield
     await engine.dispose()
+    await valkey_client.aclose()
 
 
 app = FastAPI(title="Customer Portal", lifespan=lifespan)

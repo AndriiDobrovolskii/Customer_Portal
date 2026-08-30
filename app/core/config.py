@@ -19,6 +19,7 @@ class Settings(BaseSettings):
     jwt_algorithm: str = "HS256"
     access_token_ttl_seconds: int = 900
     email_change_token_ttl_hours: int = 24
+    valkey_url: str = "redis://localhost:6379/0"
 
 
 @lru_cache

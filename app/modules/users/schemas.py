@@ -7,6 +7,8 @@ from pydantic import BaseModel, ConfigDict, Field, SecretStr
 
 class UserStatus(StrEnum):
     PENDING_VERIFICATION = "PENDING_VERIFICATION"
+    ACTIVE = "active"
+    DEACTIVATED = "deactivated"
 
 
 class UserCreate(BaseModel):

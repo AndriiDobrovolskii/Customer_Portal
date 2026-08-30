@@ -1,8 +1,8 @@
-active_story: US-002
+active_story: US-004
 
-# Assumption, not fact — confirm or correct:
-# US-001 (Register User) is implemented (see git history). All 16 stories
-# already have an approved spec + review, so US-002 (Verify Email) is the
-# next one in backlog order. The backlog's own "suggested build order" note
-# proposes US-3.2 (Manage Roles) first for dependency reasons — override
-# this value if that ordering should apply instead.
+# US-001, US-002, US-003 are implemented per git history (commits b6dc29e,
+# ed6e2a9, 90a612b, 1f8d2a5, 1ee7dc5), though not tracked through this
+# pipeline. US-004 (Deactivate Account, Epic 1 / "1.4") has an approved
+# spec + spec review (docs/specifications/US-004-deactivate-account-spec.md,
+# docs/reviews/specifications/US-004-spec-review.md) but no API/DB design
+# yet — confirmed with the user on 2026-08-30 as the next story to build.
