@@ -1,45 +1,107 @@
-story: US-2.1
+story: US-2.2
 
 current_stage: PR
 
 status: DONE
-# Every stage Pass through PR. pr-preparer's draft is ready for user review
-# at docs/pr/US-005-pr-description.md. Files are staged in the working tree
-# (git add) but nothing is committed or pushed yet.
-# Along the way: found+fixed (user-approved) a pre-existing migrations/
-# env.py bug (missing account.models import, spurious autogenerate drop of
-# account_lifecycle_audit_log); found+fixed a real verify_password_dummy()
-# logic bug during reconciliation (hashed+verified the same value, always
-# True — harmless in prod since unused, now fixed); found+fixed 11 stale
-# directory .gitignore files that had silently excluded every pipeline doc
-# (including all of US-004's) from git since creation — fixed and this
-# story's own docs included in the PR, US-004's left untracked pending a
-# possible separate follow-up.
-# SPEC_REVIEW: Pass with Issues, accepted 2026-08-31. DESIGN/PLANNING
-# complete (OD-9 refresh_tokens gap resolved; OD-10 reactivation gap found
-# via advisor() consultation and resolved - see decisions log). TESTS:
-# traceability matrix done, T7 dropped (no cache-gateway unit-test
-# precedent in this codebase - see matrix note). IMPLEMENTATION complete:
-# all T0a-T0e/T1-T9 tasks done. gate-enforcer PASS: 7/7 pre-commit hooks,
-# mypy strict clean, lint-imports 6/6, 163/163 tests, 97.16% coverage,
-# migration cycle proven. Fixed a machine-level mypy/import-linter DLL-
-# block (Windows Application Control policy) via pure-Python reinstalls,
-# unrelated to story code. Advancing to VERIFICATION.
+# Every stage Pass through PR, plus a post-PR fix. pr-preparer's draft is
+# ready for user review at docs/pr/US-006-pr-description.md. Nothing
+# staged, committed, or pushed yet.
+# POST-PR (2026-09-01): independent review found a real IDOR in
+# UserService.logout() - the refresh-cookie family-revocation lookup
+# matched by hash only, with no check that the row belonged to the caller,
+# letting a stolen refresh token revoke another user's session family.
+# Fixed same-day (existing.user_id == user_id check added); 2 regression
+# tests added; security review and reconciliation report addenda written;
+# traceability matrix and PR draft updated. Full suite reverified 186/186,
+# mypy strict clean, pre-commit green.
+# VERIFICATION: Pass. Found+fixed missing expired-token security cases for
+# both /logout and /logout-all. SECURITY_REVIEW: Pass, all 6 AGENTS.md §7
+# rows Pass/N/A; 1 Low advisory (CSRF not enforced, disclosed OD-4, not a
+# new gap). RECONCILIATION: Pass, found+fixed 1 gap same-day (LO-AC4's
+# idempotency test didn't independently verify "no additional revocation
+# side effects" - strengthened to assert persisted revoked_at unchanged
+# across the repeat call; also fixed a stale traceability-matrix cross-
+# reference). Full suite 184/184 green throughout. Now advancing to PR.
+# IMPLEMENTATION complete: T1 (data-layer-builder) -> T2 (migration-
+# manager, verified upgrade/downgrade/upgrade) -> T3 (service) -> T4
+# (router/deps) -> T5/T6 (test-writer, 20 new tests) -> T7 (gate-enforcer)
+# all Done. gate-enforcer PASS: 7/7 pre-commit hooks, mypy strict clean (81
+# files), lint-imports 6/6, 182/182 tests, 97.26% coverage (floor 85%),
+# migration cycle proven. Found+fixed along the way: hash_refresh_token
+# helper needed in app/core/security.py (unanticipated by plan/impact-
+# analysis); a Secure-cookie test-fixture bug in tests/conftest.py
+# (base_url="http://test" silently drops httpx's Secure cookie on replay -
+# this story is the first test to chain the login cookie into a second
+# request); 3 stale .gitignore files (docs/evidence, docs/reviews/
+# reconciliation, docs/reviews/security) still excluding pipeline docs
+# from git, same bug class as US-2.1's own PR fix (also surfaced:
+# docs/evidence/US-2.1-clarification-report.md was itself silently
+# excluded from US-2.1's merged PR #2 - left untracked, out of this
+# story's scope, flagged for a possible follow-up). One pre-existing
+# flaky unit test (JWT-tamper test, unrelated to this diff) confirmed via
+# isolation + 3x full-suite reruns, all green. Now advancing to
+# VERIFICATION.
+# PLANNING complete: impact-analyzer -> planner -> implementation-planner ->
+# plan-reviewer, all Done. plan-reviewer: Pass with Issues (1 Low finding -
+# T1/T3 boundary ambiguity on create_auth_audit_log_entry's caller update -
+# fixed same-day in docs/plans/US-006-task-breakdown.md T3). No cross-
+# module ripple, additive-only migration, T1-T7 mostly linear. Now
+# advancing to TESTS (test-writer builds the traceability matrix; test
+# code itself is deferred to IMPLEMENTATION per T5/T6 in the task
+# breakdown, same sequencing as US-2.1).
+# DESIGN complete: docs/designs/api/US-006-{openapi.yaml,api-design.md},
+# docs/designs/database/US-006-{db-design.md,entity-model.md}. New:
+# refresh_tokens.revoked_at + ix_refresh_tokens_family_id, auth_audit_log.
+# scope. user_sessions unchanged (reuses existing revoked_at from US-2.1).
+# 2 API Open Questions logged for planner: (1) how OD-2's /logout-only
+# revoked-jti leniency is implemented without weakening every other route
+# (recommend a per-route allow_revoked opt-in on get_authenticated_user,
+# used only by the logout router function); (2) whether "jti never
+# existed" should be distinguished from "jti revoked" for that leniency
+# (recommend: only revoked_at IS NOT NULL gets 204, an unknown jti still
+# 401s as today). Now advancing to PLANNING (impact-analyzer -> planner ->
+# implementation-planner -> plan-reviewer).
+# SPEC_REVIEW: Pass with Issues, accepted 2026-08-31. Prior [High]
+# LO-AC4/LO-AC5 ambiguity resolved via OD-2. One new [Low] finding
+# (refresh-cookie token_hash lookup-miss) resolved by user: silent skip of
+# family-revocation, still 204 - spec FR-1 amended accordingly. Remaining
+# [Low] scope-creep note (OD-anchored content) does not block. Now
+# advancing to DESIGN (openapi-designer + db-designer).
+# SPECIFICATION: docs/specifications/US-006-logout-spec.md revised 2026-08-31
+# to incorporate OD-1-6 (see prior note).
+# us-clarifier ran, initially returned Not Ready. A spec + review (US-006)
+# already existed outside this pipeline (drafted 2026-08-22, Pass with
+# Issues, same pattern as US-005/US-2.1) but predates US-2.1's actual
+# implementation. Reading the now-real codebase surfaced 6 Open Decisions
+# in docs/decisions/US-2.2-open-decisions.md, all resolved by the user
+# 2026-08-31 (recommended option accepted in every case): OD-1 revoke via
+# existing UserSession.revoked_at (not a new Valkey jti_denylist), OD-2
+# logout-only leniency reconciles LO-AC4/LO-AC5, OD-3 add a minimal
+# revoked_at column to refresh_tokens now (US-2.3 hasn't been built yet),
+# OD-4 CSRF descoped from this story (tracked as follow-up), OD-5 add a
+# dedicated scope column to AuthAuditLog, OD-6 missing refresh cookie
+# still revokes the jti and returns 204. See
+# docs/evidence/US-2.2-clarification-report.md and
+# docs/catalog/US-2.2-pipeline-status.md. Now advancing to SPECIFICATION:
+# story-spec-writer revising the existing US-006-logout-spec.md to
+# incorporate OD-1-6 before SPEC_REVIEW is re-run.
+# US-2.1 (Login, Epic 2) reached PR with every stage Pass (see
+# docs/catalog/US-2.1-pipeline-status.md), was committed and merged as
+# PR #2 on GitHub (commit 1ecedb0, merge d14a51b) — confirmed via git log
+# on main at session start, 2026-08-31.
+
+# --- prior story history retained for context ---
 # US-004 reached PR with every stage Pass, was committed (e3b42c4), pushed,
 # and PR #1 was merged on GitHub — confirmed via `gh pr view 1` (state:
-# MERGED) on 2026-08-31. Superseded the earlier "nothing staged/committed/
-# pushed" note, which was stale relative to docs/catalog/US-004-pipeline-
-# status.md.
-# US-2.1 (Login, Epic 2): us-clarifier ran (retroactively — a spec and spec
-# review already existed outside this pipeline, filed as US-005, spec
-# review Pass with Issues) and initially returned "Not Ready". 7 Open
-# Decisions were logged in docs/decisions/US-2.1-open-decisions.md; the
-# user resolved all 6 substantive items on 2026-08-31 (recommended option
-# in every case): OD-1 use existing HS256 (drop RS256/JWKS), OD-2 mobile
-# transport out of scope, OD-3/OD-4 audit-log unknown-email and blocked-
-# login paths with specific reason values, OD-5 leave per-IP throttle
-# counter unreset on success, OD-6 don't audit-log 429/422. OD-7
-# (spec-quality: inline concrete JSON/audit shapes) forwarded to
-# story-spec-writer directly. Now advancing to SPECIFICATION: the existing
-# US-005-login-spec.md needs revision to incorporate OD-1–OD-7 before
-# SPEC_REVIEW is re-run. See docs/catalog/US-2.1-pipeline-status.md.
+# MERGED) on 2026-08-31.
+# US-2.1: us-clarifier ran retroactively (spec/review already existed
+# outside this pipeline, filed as US-005). 7 Open Decisions logged in
+# docs/decisions/US-2.1-open-decisions.md, all resolved by the user
+# 2026-08-31. Full pipeline (SPECIFICATION through PR) completed with
+# Pass/Pass-with-Issues at every stage; gate-enforcer PASS: 7/7 pre-commit
+# hooks, mypy strict clean, lint-imports 6/6, 163/163 tests, 97.16%
+# coverage, migration cycle proven. Notable fixes along the way:
+# migrations/env.py missing account.models import (user-approved),
+# verify_password_dummy() always-True logic bug (found in reconciliation),
+# 11 stale directory .gitignore files that had excluded pipeline docs from
+# git since creation. Reached PR, was committed and merged as PR #2.

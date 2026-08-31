@@ -62,14 +62,23 @@ async def verify_password_dummy() -> bool:
     return await verify_password(_DUMMY_ATTEMPT_PASSWORD, _dummy_hash_cache)
 
 
+def hash_refresh_token(raw_token: str) -> str:
+    """SHA-256 hex digest of a refresh token's raw value — the lookup key
+    persisted in `refresh_tokens.token_hash`. Shared by both issuance
+    (`generate_refresh_token`, below) and lookup of an already-issued
+    token presented back later (US-2.2 logout, resolved OD-3), so the two
+    call sites can never compute the hash differently.
+    """
+    return hashlib.sha256(raw_token.encode("ascii")).hexdigest()
+
+
 def generate_refresh_token() -> tuple[str, str]:
     """Returns (raw_token, token_hash). The raw value is returned to the
     caller once (as the cookie); only the SHA-256 hash is ever persisted,
     matching US-2.3's Assumption #5 token design.
     """
     raw_token = secrets.token_urlsafe(32)
-    token_hash = hashlib.sha256(raw_token.encode("ascii")).hexdigest()
-    return raw_token, token_hash
+    return raw_token, hash_refresh_token(raw_token)
 
 
 class InvalidTokenError(Exception):

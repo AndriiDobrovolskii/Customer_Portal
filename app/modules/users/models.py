@@ -47,6 +47,7 @@ class AuthAuditLog(Base):
     id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=uuid.uuid4)
     event: Mapped[str] = mapped_column(String(32), nullable=False)
     reason: Mapped[str | None] = mapped_column(String(32))
+    scope: Mapped[str | None] = mapped_column(String(32))
     # Deliberately no FK: the row must survive the eventual 30-day-grace-
     # period account deletion/anonymization (BR-007), matching every other
     # audit table in this project.
@@ -64,7 +65,7 @@ class RefreshToken(Base):
 
     id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=uuid.uuid4)
     token_hash: Mapped[str] = mapped_column(String(64), unique=True, nullable=False)
-    family_id: Mapped[uuid.UUID] = mapped_column(nullable=False, default=uuid.uuid4)
+    family_id: Mapped[uuid.UUID] = mapped_column(nullable=False, default=uuid.uuid4, index=True)
     user_id: Mapped[uuid.UUID] = mapped_column(
         ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True
     )
@@ -72,3 +73,4 @@ class RefreshToken(Base):
         DateTime(timezone=True), nullable=False, server_default=func.now()
     )
     expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))

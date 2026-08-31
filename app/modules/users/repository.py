@@ -50,6 +50,24 @@ class UserRepository:
             stmt = stmt.where(UserSession.jti != except_jti)
         await self._session.execute(stmt.values(revoked_at=func.now()))
 
+    async def revoke_session(self, *, jti: uuid.UUID) -> None:
+        await self._session.execute(
+            update(UserSession).where(UserSession.jti == jti).values(revoked_at=func.now())
+        )
+
+    async def get_refresh_token_by_hash(self, token_hash: str) -> RefreshToken | None:
+        result = await self._session.execute(
+            select(RefreshToken).where(RefreshToken.token_hash == token_hash)
+        )
+        return result.scalar_one_or_none()
+
+    async def revoke_refresh_token_family(self, *, family_id: uuid.UUID) -> None:
+        await self._session.execute(
+            update(RefreshToken)
+            .where(RefreshToken.family_id == family_id)
+            .values(revoked_at=func.now())
+        )
+
     async def update_last_login_at(self, *, user_id: uuid.UUID) -> None:
         await self._session.execute(
             update(User).where(User.id == user_id).values(last_login_at=func.now())
@@ -60,6 +78,7 @@ class UserRepository:
         *,
         event: str,
         reason: str | None,
+        scope: str | None,
         actor_id: uuid.UUID | None,
         ip: str,
         user_agent: str | None,
@@ -69,6 +88,7 @@ class UserRepository:
             AuthAuditLog(
                 event=event,
                 reason=reason,
+                scope=scope,
                 actor_id=actor_id,
                 ip=ip,
                 user_agent=user_agent,
