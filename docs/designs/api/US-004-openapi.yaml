@@ -1,0 +1,104 @@
+openapi: 3.0.3
+info:
+  title: Deactivate Account (US-004) — fragment
+  version: "1.0"
+paths:
+  /v1/account/deactivate:
+    post:
+      operationId: deactivateAccount
+      summary: Self-service account deactivation
+      tags: [account]
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/DeactivateAccountRequest"
+      responses:
+        "200":
+          description: Account deactivated.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DeactivateAccountResponse"
+        "401":
+          description: >
+            Missing/invalid bearer token, or current_password does not match.
+            Both cases render the generic auth-failure problem body — the
+            response never distinguishes "not authenticated" from "wrong
+            password" beyond the shared 401 shape (project-wide invariant,
+            AGENTS.md §7).
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/InvalidCredentialsProblem"
+        "409":
+          description: Account is already deactivated.
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/AlreadyDeactivatedProblem"
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+  schemas:
+    DeactivateAccountRequest:
+      type: object
+      additionalProperties: false
+      required: [current_password]
+      properties:
+        current_password:
+          type: string
+          format: password
+          minLength: 1
+          description: >
+            The account's current password. Verified before any state
+            change (FR-1, FR-2). No upper length bound is enforced beyond
+            whatever the stored password policy already allows — this is a
+            verification, not a policy check.
+    DeactivateAccountResponse:
+      type: object
+      properties:
+        status:
+          type: string
+          enum: [deactivated]
+        deactivated_at:
+          type: string
+          format: date-time
+      required: [status, deactivated_at]
+    InvalidCredentialsProblem:
+      type: object
+      description: RFC 7807 problem body. type is an absolute/relative URI ending in the slug below.
+      properties:
+        type:
+          type: string
+          example: ".../errors/invalid-credentials"
+        title:
+          type: string
+          example: "Invalid Credentials"
+        status:
+          type: integer
+          example: 401
+        detail:
+          type: string
+      required: [type, title, status, detail]
+    AlreadyDeactivatedProblem:
+      type: object
+      properties:
+        type:
+          type: string
+          example: ".../errors/already-deactivated"
+        title:
+          type: string
+          example: "Account Already Deactivated"
+        status:
+          type: integer
+          example: 409
+        detail:
+          type: string
+      required: [type, title, status, detail]
