@@ -1,6 +1,7 @@
 import uuid
 from datetime import datetime
 from enum import StrEnum
+from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, SecretStr
 
@@ -31,9 +32,10 @@ class LoginRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     email: str
-    password: SecretStr
+    password: SecretStr = Field(min_length=1)
 
 
 class LoginResponse(BaseModel):
     access_token: str
-    token_type: str = "bearer"  # noqa: S105 -- OAuth2 field name, not a secret
+    token_type: Literal["Bearer"] = "Bearer"  # noqa: S105 -- OAuth2 field name, not a secret
+    expires_in: int

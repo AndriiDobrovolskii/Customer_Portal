@@ -20,6 +20,10 @@ class Settings(BaseSettings):
     access_token_ttl_seconds: int = 900
     email_change_token_ttl_hours: int = 24
     valkey_url: str = "redis://localhost:6379/0"
+    login_failure_threshold_account: int = 10
+    login_failure_threshold_ip: int = 20
+    login_throttle_window_seconds: int = 900
+    refresh_token_ttl_seconds: int = 2_592_000
 
 
 @lru_cache

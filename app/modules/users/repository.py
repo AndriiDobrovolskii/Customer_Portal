@@ -5,7 +5,7 @@ from sqlalchemy import func, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.modules.users.models import User, UserSession
+from app.modules.users.models import AuthAuditLog, RefreshToken, User, UserSession
 
 
 class UserRepository:
@@ -49,6 +49,47 @@ class UserRepository:
         if except_jti is not None:
             stmt = stmt.where(UserSession.jti != except_jti)
         await self._session.execute(stmt.values(revoked_at=func.now()))
+
+    async def update_last_login_at(self, *, user_id: uuid.UUID) -> None:
+        await self._session.execute(
+            update(User).where(User.id == user_id).values(last_login_at=func.now())
+        )
+
+    async def create_auth_audit_log_entry(
+        self,
+        *,
+        event: str,
+        reason: str | None,
+        actor_id: uuid.UUID | None,
+        ip: str,
+        user_agent: str | None,
+        request_id: str,
+    ) -> None:
+        self._session.add(
+            AuthAuditLog(
+                event=event,
+                reason=reason,
+                actor_id=actor_id,
+                ip=ip,
+                user_agent=user_agent,
+                request_id=request_id,
+            )
+        )
+
+    async def create_refresh_token(
+        self,
+        *,
+        token_hash: str,
+        family_id: uuid.UUID,
+        user_id: uuid.UUID,
+        expires_at: datetime,
+    ) -> RefreshToken:
+        refresh_token = RefreshToken(
+            token_hash=token_hash, family_id=family_id, user_id=user_id, expires_at=expires_at
+        )
+        self._session.add(refresh_token)
+        await self._session.flush()
+        return refresh_token
 
     async def commit(self) -> None:
         await self._session.commit()

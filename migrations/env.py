@@ -11,6 +11,7 @@ from sqlalchemy.ext.asyncio import async_engine_from_config
 
 from app.core.config import get_settings
 from app.db.base import Base
+from app.modules.account import models as account_models  # noqa: F401  # registers models
 from app.modules.email_verification import (  # noqa: F401  # registers models with Base
     models as email_verification_models,
 )

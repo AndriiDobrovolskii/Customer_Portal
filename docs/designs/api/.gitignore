@@ -1,3 +1,2 @@
-# Keep this directory in version control while ignoring its (currently empty) contents.
-*
-!.gitignore
+# This directory is tracked in version control; its contents (plans,
+# designs, reports) are committed as part of each story pipeline.

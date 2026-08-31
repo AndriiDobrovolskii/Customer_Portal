@@ -8,7 +8,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.email import EmailSender, get_email_sender
 from app.core.revocation_cache import RevocationCache
 from app.db.dependencies import get_db_session, get_valkey_client
+from app.modules.account.dependencies import AccountServiceDep
 from app.modules.email_verification.dependencies import EmailVerificationServiceDep
+from app.modules.users.cache import LoginThrottleCache
 from app.modules.users.exceptions import UnauthenticatedError
 from app.modules.users.repository import UserRepository
 from app.modules.users.service import AuthenticatedUser, UserService
@@ -19,10 +21,17 @@ def get_user_service(
     issuer: EmailVerificationServiceDep,
     email_sender: Annotated[EmailSender, Depends(get_email_sender)],
     valkey_client: Annotated[Redis, Depends(get_valkey_client)],
+    # AccountService is injected purely as the AccountServiceProtocol
+    # collaborator (reactivate_account) for resolved OD-10/DA-AC8, mirroring
+    # profile/dependencies.py's own cross-module UserServiceDep injection.
+    account_service: AccountServiceDep,
 ) -> UserService:
     repository = UserRepository(session)
     revocation_cache = RevocationCache(valkey_client)
-    return UserService(repository, issuer, email_sender, revocation_cache)
+    throttle_cache = LoginThrottleCache(valkey_client)
+    return UserService(
+        repository, issuer, email_sender, revocation_cache, throttle_cache, account_service
+    )
 
 
 UserServiceDep = Annotated[UserService, Depends(get_user_service)]

@@ -1,3 +1,5 @@
+import hashlib
+import secrets
 import uuid
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
@@ -34,6 +36,40 @@ def _verify_password_sync(password: str, hashed_password: str) -> bool:
 
 async def verify_password(password: str, hashed_password: str) -> bool:
     return await to_thread.run_sync(_verify_password_sync, password, hashed_password)
+
+
+# Not real credentials — pay comparable Argon2id verification cost only.
+# Deliberately two distinct values (stored vs. attempted): hashing and
+# verifying the *same* value would always return True, which doesn't match
+# what a real wrong-password verification actually does.
+_DUMMY_STORED_PASSWORD = "dummy-stored-value"  # noqa: S105  # pragma: allowlist secret
+_DUMMY_ATTEMPT_PASSWORD = "dummy-attempt-value"  # noqa: S105  # pragma: allowlist secret
+_dummy_hash_cache: str | None = None
+
+
+async def verify_password_dummy() -> bool:
+    """Pays the same Argon2id verification cost as `verify_password` when no
+    account matched, so response timing doesn't reveal account existence
+    (LI-AC3). Always returns False (the attempted value never matches the
+    stored one). The dummy hash is computed lazily against current
+    `settings.argon2_*` parameters on first use and cached, rather than a
+    hardcoded string computed once at old parameter values, so it can never
+    drift out of step with the parameters real verification actually uses.
+    """
+    global _dummy_hash_cache
+    if _dummy_hash_cache is None:
+        _dummy_hash_cache = await hash_password(_DUMMY_STORED_PASSWORD)
+    return await verify_password(_DUMMY_ATTEMPT_PASSWORD, _dummy_hash_cache)
+
+
+def generate_refresh_token() -> tuple[str, str]:
+    """Returns (raw_token, token_hash). The raw value is returned to the
+    caller once (as the cookie); only the SHA-256 hash is ever persisted,
+    matching US-2.3's Assumption #5 token design.
+    """
+    raw_token = secrets.token_urlsafe(32)
+    token_hash = hashlib.sha256(raw_token.encode("ascii")).hexdigest()
+    return raw_token, token_hash
 
 
 class InvalidTokenError(Exception):
