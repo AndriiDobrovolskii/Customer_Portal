@@ -11,6 +11,14 @@ Reads a user story or requirements file that contains Acceptance Criteria (AC) a
 
 The value here is discipline, not creativity: a developer or reviewer should be able to open the output spec, pick any requirement, and immediately see which Acceptance Criterion justifies it — and conversely, see at a glance if any AC was left uncovered.
 
+## Operational Contract
+
+```
+Precondition: A source file containing Acceptance Criteria exists at a path the user provides; us-clarifier's verdict (if run) is "Ready for Specification" or the user explicitly accepts the open risk.
+Input Artifacts: the user-provided source story/ticket/requirements file.
+Output Artifacts: docs/specifications/<story-id>-<kebab-case-title>.md.
+```
+
 ## Workflow
 
 ### 1. Get the source

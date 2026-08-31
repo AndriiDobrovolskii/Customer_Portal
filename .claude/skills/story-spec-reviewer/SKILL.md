@@ -11,6 +11,14 @@ This skill is the quality gate between "a spec exists" and "engineering starts b
 
 The role is strictly auditor, not author. A developer or product owner should be able to read the report and know exactly what's wrong with the spec and where — without the reviewer having quietly patched the spec itself or invented requirements that were never in the original story. If `story-spec-writer` is the skill that formalizes a story into a spec, this skill is the one that checks the formalization was done faithfully.
 
+## Operational Contract
+
+```
+Precondition: story-spec-writer has produced a spec for the story.
+Input Artifacts: the original story file (e.g. docs/stories/<StoryId>.md), docs/specifications/<StoryId>-spec.md.
+Output Artifacts: docs/reviews/specifications/<StoryId>-spec-review.md.
+```
+
 ## When To Use / When Not To Use
 
 **Use this skill when:**

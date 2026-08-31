@@ -1,0 +1,86 @@
+---
+name: gate-enforcer
+description: Runs and reports the full post-generation verification gate for a story's implementation — pre-commit run --all-files, mypy app tests, lint-imports, pytest --cov=app --cov-report=term-missing --cov-fail-under=85 where runnable locally — plus the runtime rules no tool checks (AGENTS.md §6.6): ORM objects never reaching a router, every relationship eager-loaded appropriately, every cache write carrying a TTL, cross-module calls going service→service (never service→another module's router), and no typing.Any/# type: ignore/os.getenv outside core.config. Use after schema-builder/data-layer-builder/service-and-router-builder/migration-manager have produced code and it's time to confirm the Definition of Done before commit or PR ("run the gate for US-xxx," "is this ready to commit," "check this passes CI," "verify the definition of done"). Never proposes bypassing a failing check — no --no-verify, SKIP=<hook>, narrowed mypy scope, coverage excludes, or disabled import-linter contracts; a failing check is reported and the skill stops there, per AGENTS.md §7.9 naming "reporting a check as passing without running it" the most serious violation available. Does not fix failures itself and does not perform a substantive architecture/security code review (that belongs to other pipeline stages) — this is the mechanical-gate-plus-runtime-rules check only, run before commit/PR, not a replacement for them.
+---
+
+# Gate Enforcer
+
+## Purpose
+
+Run this codebase's actual quality gate and report exactly what happened — never what should happen, never what would probably happen. AGENTS.md §7.9 names "reporting a check as passing without running it" as the single most serious violation available to an agent, because it silently disables every other rule in the file. This skill exists to make that failure mode structurally impossible: every checklist item below requires captured, quoted command output.
+
+## Operational Contract
+
+```
+Precondition: schema-builder, data-layer-builder, service-and-router-builder, and migration-manager (where applicable) have produced code for this story; git status/git diff shows real changes.
+Input Artifacts: the story's changed files; pyproject.toml ([tool.importlinter]/[tool.mypy]/[tool.ruff]/[tool.coverage] sections); .pre-commit-config.yaml; AGENTS.md §6 and §7.
+Output Artifacts: a chat report only (no docs/ file — docs/verification/ belongs to implementation-verifier, not this skill).
+```
+
+## Required Context
+
+Read, in order:
+
+1. `AGENTS.md` §6 (Definition of Done, all 7 items) and §7 (Prohibited Actions, especially §7.9's bypass list).
+2. `pyproject.toml`'s `[tool.importlinter]`, `[tool.mypy]`, `[tool.ruff]`, `[tool.coverage]` sections — read as the *actual current* thresholds/contracts, never assumed from memory (this project currently sets `--cov-fail-under=85`, `mypy strict` with `exclude = ["migrations/"]`, and 5 import-linter contracts — but re-read the file each run, since these can change).
+3. `.pre-commit-config.yaml` — confirm which hooks actually run locally (`ruff`, `ruff-format`, `mypy`, `lint-imports`, `unit-tests`, `no-mock-in-integration-tests`, `detect-secrets`, in this repo).
+
+## Preconditions
+
+Implementation code already exists for the story (`git status`/`git diff` shows something). If nothing changed, say so rather than running an empty gate.
+
+## Workflow
+
+### Part A — mechanical (always paste real captured output; never assert a result without running it)
+
+1. `pre-commit run --all-files` — capture full output. A Ruff auto-fix modifying files is expected and not itself a failure (per AGENTS.md §6 "When a hook fails"): `git add -u` and re-run. A real mypy/lint-imports/secret-scan failure is not auto-fixable and is a stop.
+2. `mypy app tests` — capture full output; must target the whole project, never a single file.
+3. `lint-imports` — capture full output; confirm zero broken contracts, and confirm `pyproject.toml` gained no new `ignore_imports`/`exhaustive = false` (diff against the last committed version if available).
+4. `pytest --cov=app --cov-report=term-missing --cov-fail-under=85` — run what's actually runnable in this environment. If integration tests need containers unavailable here, report explicitly "not run here — CI is the authority per AGENTS.md §6," never a silent skip or a claimed pass.
+5. Migration cycle — confirm `migration-manager` already captured a real `upgrade → downgrade → upgrade`, or run and capture it here. `mypy`'s `exclude = ["migrations/"]` means this cycle is the *only* proof for that code — it can't be waved through.
+
+### Part B — runtime rules (AGENTS.md §6.6, explicitly marked "not machine-checkable" in AGENTS.md itself)
+
+6. **ORM containment** — grep changed `router.py` files for model imports (there should be none); check every changed `service.py` return annotation is `-> *Read`/a domain type, never a model, never `Any`.
+7. **Eager loading** — for every touched relationship, confirm the repository query uses the strategy declared on the model's `lazy="raise_on_sql"` comment (`joinedload`/`selectinload`/`contains_eager`); flag any relationship access with no accompanying eager-load in the same query.
+8. **Cache TTL** — grep for cache-gateway write calls and confirm each carries a TTL; if no `cache.py` exists in this diff, report "N/A — no cache writes in this diff," not a false pass.
+9. **Cross-module discipline** — grep changed `service.py` files for `from app.modules.<other>.router import` (forbidden) vs. `...service import` (required).
+10. **Banned idioms** — grep the diff for `typing.Any`, `# type: ignore`, `cast(`, and `os.getenv`/`os.environ` outside `app/core/config.py`; each hit is a finding unless it's the one documented `migrations/env.py` exemption already carved into `pyproject.toml`'s `per-file-ignores`/mypy override.
+11. **Contract & security spot-check (§6.7)** — every new/changed route declares `response_model` and `status_code`; every inbound schema sets `extra="forbid"` and excludes privilege fields; no sensitive field in any `*Read`; `.env.example` updated if a setting was added.
+
+### On any failure
+
+Report the failing check verbatim, stop, and explicitly refuse to propose any of: `--no-verify`/`-n`, `SKIP=<hook>`, `pre-commit uninstall`, narrowing mypy to one file, adding `exclude:`/`ignore_imports`/`exhaustive=false`, lowering `--cov-fail-under`, adding coverage excludes, or commenting out an assertion. Name AGENTS.md §7.9 as the reason.
+
+### Verdict
+
+**PASS** only if every Part A check runnable locally actually passed and every Part B item is confirmed-compliant or explicitly N/A, with nothing not-run-locally asserted as passing. Otherwise **FAIL** with the specific unmet list, or a labeled "local gate green, CI-only checks pending" state for the documented CI-only items (integration tests with containers, the coverage threshold if it needs those tests, the Alembic cycle if not already run).
+
+## Constraints
+
+- Never propose or apply a gate bypass of any kind (see On any failure).
+- Never claim a check passed without having run it and captured its real output.
+- This skill fixes nothing — it reports. Fixing a failure is the responsibility of whichever generating skill produced the failing code.
+
+## Verification Checklist
+
+- [ ] `pre-commit run --all-files` output captured and quoted.
+- [ ] `mypy app tests` output captured and quoted.
+- [ ] `lint-imports` output captured and quoted; no new `ignore_imports`/`exhaustive=false`.
+- [ ] `pytest --cov=app ... --cov-fail-under=85` output captured and quoted, or explicitly marked not-runnable-here.
+- [ ] Migration upgrade→downgrade→upgrade output captured and quoted (or confirmed already captured by `migration-manager`).
+- [ ] ORM containment checked with evidence.
+- [ ] Eager-loading strategy checked per touched relationship, with evidence.
+- [ ] Cache TTL checked per cache write, or explicitly N/A.
+- [ ] Cross-module import discipline checked with evidence.
+- [ ] Banned-idiom grep run and results reported.
+- [ ] §6.7 contract/security spot-check completed.
+- [ ] No bypass was proposed for any failing check.
+
+## Outputs
+
+- A chat report structured like `assets/report-template.md`, covering every item above with its result (Pass/Fail/N/A) and evidence.
+
+## Completion Criteria
+
+Complete only when every applicable check has a real captured result, the verdict is consistent with those results, and no failing check was accompanied by a bypass suggestion.

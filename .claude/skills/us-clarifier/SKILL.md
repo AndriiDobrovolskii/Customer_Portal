@@ -11,6 +11,14 @@ This skill sits between "a story exists in `docs/stories/`" and "a specification
 
 The skill never fills a gap itself. Its output is a decision log, not a decision.
 
+## Operational Contract
+
+```
+Precondition: The target story exists under docs/stories/ and (if the user didn't name one explicitly) matches docs/workflow/active-story.yaml.
+Input Artifacts: docs/product/product-vision.md, docs/product/personas.md, docs/product/business-rules.md, docs/product/business-glossary.md, docs/stories/<StoryId>.md, docs/workflow/active-story.yaml, docs/decisions/<StoryId>-open-decisions.md (if it already exists).
+Output Artifacts: docs/decisions/<StoryId>-open-decisions.md, docs/evidence/<StoryId>-clarification-report.md.
+```
+
 ## Required Context
 
 Read, in this order:
