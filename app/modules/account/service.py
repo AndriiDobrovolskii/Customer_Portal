@@ -62,7 +62,14 @@ class AccountService:
         await self._repository.commit()
 
         settings = get_settings()
-        await self._cache.set_revoke_before(user_id, ttl_seconds=settings.access_token_ttl_seconds)
+        # Must outlive the longest-lived credential this key is meant to
+        # gate. get_authenticated_user only checks access tokens today, but
+        # the revoke_before key is shared with US-2.3's future /refresh
+        # endpoint (see US-2.2's logout_all, which already uses this TTL) —
+        # a shorter TTL here would let a deactivated account's refresh
+        # token silently become valid again once the key expires (found via
+        # independent review, 2026-09-01).
+        await self._cache.set_revoke_before(user_id, ttl_seconds=settings.refresh_token_ttl_seconds)
 
         return DeactivateAccountResponse(
             status=DeactivationStatusSchema.DEACTIVATED, deactivated_at=deactivated_at
