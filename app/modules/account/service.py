@@ -1,6 +1,6 @@
 import uuid
-from datetime import datetime
-from typing import Protocol
+from datetime import UTC, datetime, timedelta
+from typing import Final, Protocol
 
 from app.core.config import get_settings
 from app.core.security import verify_password
@@ -9,11 +9,18 @@ from app.modules.account.schemas import DeactivateAccountRequest, DeactivateAcco
 from app.modules.account.schemas import DeactivationStatus as DeactivationStatusSchema
 from app.modules.users.models import User
 
+# Resolved OD-10: matches BR-007 / DA-AC8's 30-day reactivation grace period.
+_REACTIVATION_GRACE_PERIOD_DAYS: Final = 30
+
 
 class AccountRepositoryProtocol(Protocol):
     async def get_user_by_id(self, user_id: uuid.UUID) -> User | None: ...
 
     async def deactivate_if_not_already(self, user_id: uuid.UUID) -> datetime | None: ...
+
+    async def reactivate_if_within_grace(
+        self, user_id: uuid.UUID, *, grace_period_cutoff: datetime
+    ) -> bool: ...
 
     async def create_audit_log_entry(
         self, *, user_id: uuid.UUID, event: str, actor: str
@@ -60,3 +67,24 @@ class AccountService:
         return DeactivateAccountResponse(
             status=DeactivationStatusSchema.DEACTIVATED, deactivated_at=deactivated_at
         )
+
+    async def reactivate_account(self, user_id: uuid.UUID) -> bool:
+        """Cross-module collaborator for the login flow (resolved OD-10,
+        DA-AC8): reactivates a deactivated account if it's still within its
+        30-day grace period. Returns True if this call actually reactivated
+        the account, False if it was a no-op (already active, or past the
+        grace period) — either way, the caller (users/service.py) proceeds
+        with an ordinary login. Injected as a Protocol-typed service->service
+        collaborator, per AGENTS.md's cross-module discipline, mirroring
+        users/service.py's own revoke_other_sessions collaborator pattern.
+        """
+        grace_period_cutoff = datetime.now(UTC) - timedelta(days=_REACTIVATION_GRACE_PERIOD_DAYS)
+        reactivated = await self._repository.reactivate_if_within_grace(
+            user_id, grace_period_cutoff=grace_period_cutoff
+        )
+        if reactivated:
+            await self._repository.create_audit_log_entry(
+                user_id=user_id, event="reactivated", actor="self"
+            )
+            await self._repository.commit()
+        return reactivated

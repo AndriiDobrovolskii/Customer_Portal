@@ -1,11 +1,45 @@
-story: US-004
+story: US-2.1
 
 current_stage: PR
 
 status: DONE
-# Every stage Pass through PR. pr-preparer's draft is ready for user review;
-# nothing staged/committed/pushed. Flagged: exclude pre-existing unrelated
-# .claude/skills/* changes from this story's commit.
-# IMPLEMENTATION complete: gate-enforcer PASSed (all 7 pre-commit hooks
-# green, 145/145 tests, 96.84% coverage, migration cycle proven). Docker
-# was started mid-session rather than treated as a hard blocker.
+# Every stage Pass through PR. pr-preparer's draft is ready for user review
+# at docs/pr/US-005-pr-description.md. Files are staged in the working tree
+# (git add) but nothing is committed or pushed yet.
+# Along the way: found+fixed (user-approved) a pre-existing migrations/
+# env.py bug (missing account.models import, spurious autogenerate drop of
+# account_lifecycle_audit_log); found+fixed a real verify_password_dummy()
+# logic bug during reconciliation (hashed+verified the same value, always
+# True — harmless in prod since unused, now fixed); found+fixed 11 stale
+# directory .gitignore files that had silently excluded every pipeline doc
+# (including all of US-004's) from git since creation — fixed and this
+# story's own docs included in the PR, US-004's left untracked pending a
+# possible separate follow-up.
+# SPEC_REVIEW: Pass with Issues, accepted 2026-08-31. DESIGN/PLANNING
+# complete (OD-9 refresh_tokens gap resolved; OD-10 reactivation gap found
+# via advisor() consultation and resolved - see decisions log). TESTS:
+# traceability matrix done, T7 dropped (no cache-gateway unit-test
+# precedent in this codebase - see matrix note). IMPLEMENTATION complete:
+# all T0a-T0e/T1-T9 tasks done. gate-enforcer PASS: 7/7 pre-commit hooks,
+# mypy strict clean, lint-imports 6/6, 163/163 tests, 97.16% coverage,
+# migration cycle proven. Fixed a machine-level mypy/import-linter DLL-
+# block (Windows Application Control policy) via pure-Python reinstalls,
+# unrelated to story code. Advancing to VERIFICATION.
+# US-004 reached PR with every stage Pass, was committed (e3b42c4), pushed,
+# and PR #1 was merged on GitHub — confirmed via `gh pr view 1` (state:
+# MERGED) on 2026-08-31. Superseded the earlier "nothing staged/committed/
+# pushed" note, which was stale relative to docs/catalog/US-004-pipeline-
+# status.md.
+# US-2.1 (Login, Epic 2): us-clarifier ran (retroactively — a spec and spec
+# review already existed outside this pipeline, filed as US-005, spec
+# review Pass with Issues) and initially returned "Not Ready". 7 Open
+# Decisions were logged in docs/decisions/US-2.1-open-decisions.md; the
+# user resolved all 6 substantive items on 2026-08-31 (recommended option
+# in every case): OD-1 use existing HS256 (drop RS256/JWKS), OD-2 mobile
+# transport out of scope, OD-3/OD-4 audit-log unknown-email and blocked-
+# login paths with specific reason values, OD-5 leave per-IP throttle
+# counter unreset on success, OD-6 don't audit-log 429/422. OD-7
+# (spec-quality: inline concrete JSON/audit shapes) forwarded to
+# story-spec-writer directly. Now advancing to SPECIFICATION: the existing
+# US-005-login-spec.md needs revision to incorporate OD-1–OD-7 before
+# SPEC_REVIEW is re-run. See docs/catalog/US-2.1-pipeline-status.md.

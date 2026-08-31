@@ -5,16 +5,21 @@ import pytest
 
 from app.core.security import decode_access_token, encode_access_token, hash_password
 from app.modules.users.exceptions import (
+    AccountDeactivatedError,
     DuplicateEmailError,
     EmailNotVerifiedError,
     InvalidCredentialsError,
     RegistrationValidationError,
+    TooManyAttemptsError,
 )
-from app.modules.users.models import User, UserSession
-from app.modules.users.schemas import LoginRequest, UserCreate, UserStatus
+from app.modules.users.models import RefreshToken, User, UserSession
+from app.modules.users.schemas import LoginRequest, LoginResponse, UserCreate, UserStatus
 from app.modules.users.service import UserService
 
 pytestmark = pytest.mark.unit
+
+_IP = "203.0.113.10"
+_REQUEST_ID = "test-request-id"
 
 
 class FakeUserRepository:
@@ -24,6 +29,9 @@ class FakeUserRepository:
         self.commit_called = False
         self.users_by_email: dict[str, User] = {}
         self.sessions_by_jti: dict[uuid.UUID, UserSession] = {}
+        self.last_login_at_updates: list[uuid.UUID] = []
+        self.audit_log_entries: list[dict[str, object]] = []
+        self.refresh_tokens: list[dict[str, object]] = []
 
     async def create(self, *, email: str, hashed_password: str, status: str) -> User | None:
         if email in self.existing_emails:
@@ -53,6 +61,50 @@ class FakeUserRepository:
         for jti, session in self.sessions_by_jti.items():
             if session.user_id == user_id and jti != except_jti:
                 session.revoked_at = datetime.now(UTC)
+
+    async def update_last_login_at(self, *, user_id: uuid.UUID) -> None:
+        self.last_login_at_updates.append(user_id)
+
+    async def create_auth_audit_log_entry(
+        self,
+        *,
+        event: str,
+        reason: str | None,
+        actor_id: uuid.UUID | None,
+        ip: str,
+        user_agent: str | None,
+        request_id: str,
+    ) -> None:
+        self.audit_log_entries.append(
+            {
+                "event": event,
+                "reason": reason,
+                "actor_id": actor_id,
+                "ip": ip,
+                "user_agent": user_agent,
+                "request_id": request_id,
+            }
+        )
+
+    async def create_refresh_token(
+        self,
+        *,
+        token_hash: str,
+        family_id: uuid.UUID,
+        user_id: uuid.UUID,
+        expires_at: datetime,
+    ) -> RefreshToken:
+        self.refresh_tokens.append(
+            {
+                "token_hash": token_hash,
+                "family_id": family_id,
+                "user_id": user_id,
+                "expires_at": expires_at,
+            }
+        )
+        return RefreshToken(
+            token_hash=token_hash, family_id=family_id, user_id=user_id, expires_at=expires_at
+        )
 
     async def commit(self) -> None:
         self.commit_called = True
@@ -86,6 +138,60 @@ class FakeRevocationCacheReader:
         return self.revoke_before_by_user.get(user_id)
 
 
+class FakeLoginThrottleCache:
+    def __init__(
+        self,
+        *,
+        account_counts: dict[uuid.UUID, int] | None = None,
+        ip_counts: dict[str, int] | None = None,
+        account_ttls: dict[uuid.UUID, int] | None = None,
+        ip_ttls: dict[str, int] | None = None,
+    ) -> None:
+        self.account_counts = dict(account_counts or {})
+        self.ip_counts = dict(ip_counts or {})
+        self.account_ttls = account_ttls or {}
+        self.ip_ttls = ip_ttls or {}
+        self.account_failures_recorded: list[uuid.UUID] = []
+        self.ip_failures_recorded: list[str] = []
+        self.account_resets: list[uuid.UUID] = []
+
+    async def record_account_failure(self, user_id: uuid.UUID, *, window_seconds: int) -> int:
+        self.account_failures_recorded.append(user_id)
+        self.account_counts[user_id] = self.account_counts.get(user_id, 0) + 1
+        return self.account_counts[user_id]
+
+    async def record_ip_failure(self, ip: str, *, window_seconds: int) -> int:
+        self.ip_failures_recorded.append(ip)
+        self.ip_counts[ip] = self.ip_counts.get(ip, 0) + 1
+        return self.ip_counts[ip]
+
+    async def get_account_failure_count(self, user_id: uuid.UUID) -> int:
+        return self.account_counts.get(user_id, 0)
+
+    async def get_ip_failure_count(self, ip: str) -> int:
+        return self.ip_counts.get(ip, 0)
+
+    async def get_account_retry_after_seconds(self, user_id: uuid.UUID) -> int:
+        return self.account_ttls.get(user_id, 900)
+
+    async def get_ip_retry_after_seconds(self, ip: str) -> int:
+        return self.ip_ttls.get(ip, 900)
+
+    async def reset_account_failures(self, user_id: uuid.UUID) -> None:
+        self.account_resets.append(user_id)
+        self.account_counts.pop(user_id, None)
+
+
+class FakeAccountService:
+    def __init__(self, *, reactivate_result: bool = False) -> None:
+        self.reactivate_result = reactivate_result
+        self.reactivate_called_for: list[uuid.UUID] = []
+
+    async def reactivate_account(self, user_id: uuid.UUID) -> bool:
+        self.reactivate_called_for.append(user_id)
+        return self.reactivate_result
+
+
 class FakeEmailSender:
     def __init__(self, *, raises: bool = False) -> None:
         self.raises = raises
@@ -108,11 +214,18 @@ def _make_service(
     issuer: FakeVerificationTokenIssuer | None = None,
     email_sender: FakeEmailSender | None = None,
     revocation_cache: FakeRevocationCacheReader | None = None,
+    throttle_cache: FakeLoginThrottleCache | None = None,
+    account_service: FakeAccountService | None = None,
 ) -> tuple[UserService, FakeVerificationTokenIssuer, FakeEmailSender]:
     issuer = issuer or FakeVerificationTokenIssuer()
     email_sender = email_sender or FakeEmailSender()
     revocation_cache = revocation_cache or FakeRevocationCacheReader()
-    return UserService(repository, issuer, email_sender, revocation_cache), issuer, email_sender
+    throttle_cache = throttle_cache or FakeLoginThrottleCache()
+    account_service = account_service or FakeAccountService()
+    service = UserService(
+        repository, issuer, email_sender, revocation_cache, throttle_cache, account_service
+    )
+    return service, issuer, email_sender
 
 
 async def test_register_user_valid_input_returns_pending_verification() -> None:
@@ -306,21 +419,125 @@ async def test_register_user_swallows_email_dispatch_failure() -> None:
 
 
 async def _seed_user(
-    repository: FakeUserRepository, *, email: str, password: str, email_verified: bool
+    repository: FakeUserRepository,
+    *,
+    email: str,
+    password: str,
+    email_verified: bool,
+    status: str = "PENDING_VERIFICATION",
+    deactivated_at: datetime | None = None,
 ) -> User:
-    user = User(
-        email=email, hashed_password=await hash_password(password), status="PENDING_VERIFICATION"
-    )
+    user = User(email=email, hashed_password=await hash_password(password), status=status)
     user.id = uuid.uuid4()
     user.email_verified = email_verified
+    user.deactivated_at = deactivated_at
     repository.users_by_email[email.lower()] = user
     return user
 
 
-# --- VE-AC5: unverified account cannot log in ----------------------------------
+async def _login(service: UserService, payload: LoginRequest) -> tuple[LoginResponse, str]:
+    return await service.authenticate_user(
+        payload, ip=_IP, user_agent="pytest-agent", request_id=_REQUEST_ID
+    )
 
 
-async def test_authenticate_user_correct_password_unverified_raises_email_not_verified() -> None:
+# --- LI-AC1: successful login (FR-1) --------------------------------------
+
+
+async def test_authenticate_user_correct_credentials_returns_token() -> None:
+    # Arrange
+    repository = FakeUserRepository()
+    user = await _seed_user(
+        repository,
+        email="verified@example.com",
+        password="Str0ng!Pass",
+        email_verified=True,
+        status="active",
+    )
+    service, _, _ = _make_service(repository)
+    payload = LoginRequest(email="verified@example.com", password="Str0ng!Pass")
+
+    # Act
+    response, raw_refresh_token = await _login(service, payload)
+
+    # Assert
+    assert response.token_type == "Bearer"
+    assert response.expires_in > 0
+    assert len(raw_refresh_token) > 0
+    claims = decode_access_token(response.access_token)
+    assert claims.user_id == user.id
+    assert repository.commit_called is True
+    assert repository.last_login_at_updates == [user.id]
+    assert repository.audit_log_entries[-1]["event"] == "login_succeeded"
+    assert repository.refresh_tokens[-1]["user_id"] == user.id
+
+
+async def test_authenticate_user_persists_a_session_row() -> None:
+    # Arrange
+    repository = FakeUserRepository()
+    await _seed_user(
+        repository,
+        email="session@example.com",
+        password="Str0ng!Pass",
+        email_verified=True,
+        status="active",
+    )
+    service, _, _ = _make_service(repository)
+    payload = LoginRequest(email="session@example.com", password="Str0ng!Pass")
+
+    # Act
+    response, _ = await _login(service, payload)
+
+    # Assert
+    claims = decode_access_token(response.access_token)
+    assert claims.jti in repository.sessions_by_jti
+    assert repository.sessions_by_jti[claims.jti].revoked_at is None
+
+
+# --- LI-AC2: wrong password (FR-2) ------------------------------------------
+
+
+async def test_authenticate_user_wrong_password_raises_invalid_credentials() -> None:
+    # Arrange
+    repository = FakeUserRepository()
+    await _seed_user(
+        repository,
+        email="verified@example.com",
+        password="Str0ng!Pass",
+        email_verified=True,
+        status="active",
+    )
+    service, _, _ = _make_service(repository)
+    payload = LoginRequest(email="verified@example.com", password="WrongPassword1!")
+
+    # Act & Assert
+    with pytest.raises(InvalidCredentialsError):
+        await _login(service, payload)
+    assert repository.audit_log_entries[-1]["reason"] == "bad_password"
+
+
+# --- LI-AC3: unknown email, anti-enumeration (FR-3, resolved OD-3) ---------
+
+
+async def test_authenticate_user_unknown_email_calls_dummy_verification() -> None:
+    # Arrange
+    repository = FakeUserRepository()
+    service, _, _ = _make_service(repository)
+    payload = LoginRequest(email="nobody@example.com", password="Str0ng!Pass")
+
+    # Act & Assert
+    with pytest.raises(InvalidCredentialsError):
+        await _login(service, payload)
+    entry = repository.audit_log_entries[-1]
+    assert entry["event"] == "login_failed"
+    assert entry["reason"] == "unknown_email"
+    assert entry["actor_id"] is None
+
+
+# --- LI-AC4: account-state gating (FR-4) -------------------------------------
+
+
+async def test_authenticate_user_unverified_raises_email_not_verified() -> None:
     # Arrange
     repository = FakeUserRepository()
     await _seed_user(
@@ -331,62 +548,176 @@ async def test_authenticate_user_correct_password_unverified_raises_email_not_ve
 
     # Act & Assert
     with pytest.raises(EmailNotVerifiedError):
-        await service.authenticate_user(payload)
+        await _login(service, payload)
+    assert repository.audit_log_entries[-1]["reason"] == "email_not_verified"
 
 
-# --- VE-AC6: verified account logs in normally ---------------------------------
-
-
-async def test_authenticate_user_correct_password_verified_returns_access_token() -> None:
-    # Arrange
-    repository = FakeUserRepository()
-    user = await _seed_user(
-        repository, email="verified@example.com", password="Str0ng!Pass", email_verified=True
-    )
-    service, _, _ = _make_service(repository)
-    payload = LoginRequest(email="verified@example.com", password="Str0ng!Pass")
-
-    # Act
-    result = await service.authenticate_user(payload)
-
-    # Assert
-    assert result.token_type == "bearer"
-    assert len(result.access_token) > 0
-    claims = decode_access_token(result.access_token)
-    assert claims.user_id == user.id
-    assert repository.commit_called is True
-
-
-async def test_authenticate_user_persists_a_session_row() -> None:
+async def test_authenticate_user_deactivated_past_grace_raises_account_deactivated() -> None:
     # Arrange
     repository = FakeUserRepository()
     await _seed_user(
-        repository, email="session@example.com", password="Str0ng!Pass", email_verified=True
+        repository,
+        email="deactivated@example.com",
+        password="Str0ng!Pass",
+        email_verified=True,
+        status="deactivated",
     )
-    service, _, _ = _make_service(repository)
-    payload = LoginRequest(email="session@example.com", password="Str0ng!Pass")
+    account_service = FakeAccountService(reactivate_result=False)
+    service, _, _ = _make_service(repository, account_service=account_service)
+    payload = LoginRequest(email="deactivated@example.com", password="Str0ng!Pass")
 
-    # Act
-    result = await service.authenticate_user(payload)
-
-    # Assert
-    claims = decode_access_token(result.access_token)
-    assert claims.jti in repository.sessions_by_jti
-    assert repository.sessions_by_jti[claims.jti].revoked_at is None
+    # Act & Assert
+    with pytest.raises(AccountDeactivatedError):
+        await _login(service, payload)
+    assert repository.audit_log_entries[-1]["reason"] == "account_deactivated"
 
 
-async def test_authenticate_user_wrong_password_raises_invalid_credentials() -> None:
-    # Arrange
+async def test_authenticate_user_deactivated_wrong_password_returns_generic_401() -> None:
+    # Arrange — ordering guarantee (FR-4/DA-AC7): credential check precedes
+    # the state check, so a wrong password against a deactivated account
+    # must be indistinguishable from one against a normal account.
     repository = FakeUserRepository()
     await _seed_user(
-        repository, email="verified@example.com", password="Str0ng!Pass", email_verified=True
+        repository,
+        email="deactivated@example.com",
+        password="Str0ng!Pass",
+        email_verified=True,
+        status="deactivated",
     )
-    service, _, _ = _make_service(repository)
-    payload = LoginRequest(email="verified@example.com", password="WrongPassword1!")
+    account_service = FakeAccountService()
+    service, _, _ = _make_service(repository, account_service=account_service)
+    payload = LoginRequest(email="deactivated@example.com", password="WrongPassword1!")
 
     # Act & Assert
     with pytest.raises(InvalidCredentialsError):
-        await service.authenticate_user(payload)
+        await _login(service, payload)
+    assert account_service.reactivate_called_for == []
+
+
+# --- DA-AC8 (resolved OD-10): reactivation within the grace period ---------
+
+
+async def test_authenticate_user_deactivated_within_grace_reactivates_and_logs_in() -> None:
+    # Arrange
+    repository = FakeUserRepository()
+    user = await _seed_user(
+        repository,
+        email="grace@example.com",
+        password="Str0ng!Pass",
+        email_verified=True,
+        status="deactivated",
+        deactivated_at=datetime.now(UTC) - timedelta(days=5),
+    )
+    account_service = FakeAccountService(reactivate_result=True)
+    service, _, _ = _make_service(repository, account_service=account_service)
+    payload = LoginRequest(email="grace@example.com", password="Str0ng!Pass")
+
+    # Act
+    response, raw_refresh_token = await _login(service, payload)
+
+    # Assert
+    assert account_service.reactivate_called_for == [user.id]
+    assert len(response.access_token) > 0
+    assert len(raw_refresh_token) > 0
+    assert repository.audit_log_entries[-1]["event"] == "login_succeeded"
+    assert repository.last_login_at_updates == [user.id]
+
+
+# --- LI-AC5: brute-force throttling (FR-5) -----------------------------------
+
+
+async def test_authenticate_user_account_throttle_exceeded_raises_too_many_attempts() -> None:
+    # Arrange
+    repository = FakeUserRepository()
+    user = await _seed_user(
+        repository,
+        email="throttled@example.com",
+        password="Str0ng!Pass",
+        email_verified=True,
+        status="active",
+    )
+    throttle_cache = FakeLoginThrottleCache(
+        account_counts={user.id: 10}, account_ttls={user.id: 300}
+    )
+    service, _, _ = _make_service(repository, throttle_cache=throttle_cache)
+    payload = LoginRequest(email="throttled@example.com", password="Str0ng!Pass")
+
+    # Act & Assert
+    with pytest.raises(TooManyAttemptsError) as exc_info:
+        await _login(service, payload)
+    assert exc_info.value.headers == {"Retry-After": "300"}
+    # No login attempt was actually processed against this account.
+    assert repository.audit_log_entries == []
+
+
+async def test_authenticate_user_ip_throttle_exceeded_raises_too_many_attempts() -> None:
+    # Arrange
+    repository = FakeUserRepository()
+    throttle_cache = FakeLoginThrottleCache(ip_counts={_IP: 20}, ip_ttls={_IP: 600})
+    service, _, _ = _make_service(repository, throttle_cache=throttle_cache)
+    payload = LoginRequest(email="anyone@example.com", password="Str0ng!Pass")
+
+    # Act & Assert
+    with pytest.raises(TooManyAttemptsError) as exc_info:
+        await _login(service, payload)
+    assert exc_info.value.headers == {"Retry-After": "600"}
+
+
+async def test_authenticate_user_success_resets_account_counter_not_ip_counter() -> None:
+    # Arrange — resolved OD-5.
+    repository = FakeUserRepository()
+    user = await _seed_user(
+        repository,
+        email="resets@example.com",
+        password="Str0ng!Pass",
+        email_verified=True,
+        status="active",
+    )
+    throttle_cache = FakeLoginThrottleCache(account_counts={user.id: 3}, ip_counts={_IP: 5})
+    service, _, _ = _make_service(repository, throttle_cache=throttle_cache)
+    payload = LoginRequest(email="resets@example.com", password="Str0ng!Pass")
+
+    # Act
+    await _login(service, payload)
+
+    # Assert
+    assert throttle_cache.account_resets == [user.id]
+    assert throttle_cache.ip_counts[_IP] == 5  # untouched
+
+
+async def test_authenticate_user_wrong_password_records_both_counters() -> None:
+    # Arrange
+    repository = FakeUserRepository()
+    user = await _seed_user(
+        repository,
+        email="wrongpw@example.com",
+        password="Str0ng!Pass",
+        email_verified=True,
+        status="active",
+    )
+    throttle_cache = FakeLoginThrottleCache()
+    service, _, _ = _make_service(repository, throttle_cache=throttle_cache)
+    payload = LoginRequest(email="wrongpw@example.com", password="WrongPassword1!")
+
+    # Act & Assert
+    with pytest.raises(InvalidCredentialsError):
+        await _login(service, payload)
+    assert throttle_cache.account_failures_recorded == [user.id]
+    assert throttle_cache.ip_failures_recorded == [_IP]
+
+
+async def test_authenticate_user_unknown_email_records_only_ip_counter() -> None:
+    # Arrange
+    repository = FakeUserRepository()
+    throttle_cache = FakeLoginThrottleCache()
+    service, _, _ = _make_service(repository, throttle_cache=throttle_cache)
+    payload = LoginRequest(email="nobody@example.com", password="Str0ng!Pass")
+
+    # Act & Assert
+    with pytest.raises(InvalidCredentialsError):
+        await _login(service, payload)
+    assert throttle_cache.account_failures_recorded == []
+    assert throttle_cache.ip_failures_recorded == [_IP]
 
 
 # --- DA-AC4 (US-004): revoke_before check in the shared auth dependency -------
@@ -467,14 +798,3 @@ async def test_get_authenticated_user_cache_read_error_rejected() -> None:
     # Assert: fail closed on a cache-read error, per AGENTS.md §3's
     # denylist carve-out — an outage must reject, not accept, the token.
     assert result is None
-
-
-async def test_authenticate_user_unknown_email_raises_invalid_credentials() -> None:
-    # Arrange
-    repository = FakeUserRepository()
-    service, _, _ = _make_service(repository)
-    payload = LoginRequest(email="nobody@example.com", password="Str0ng!Pass")
-
-    # Act & Assert
-    with pytest.raises(InvalidCredentialsError):
-        await service.authenticate_user(payload)

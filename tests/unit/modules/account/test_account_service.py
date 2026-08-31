@@ -14,10 +14,18 @@ pytestmark = pytest.mark.unit
 
 
 class FakeAccountRepository:
-    def __init__(self, *, user: User | None = None, already_deactivated: bool = False) -> None:
+    def __init__(
+        self,
+        *,
+        user: User | None = None,
+        already_deactivated: bool = False,
+        reactivation_succeeds: bool = False,
+    ) -> None:
         self.user = user
         self.already_deactivated = already_deactivated
+        self.reactivation_succeeds = reactivation_succeeds
         self.deactivate_called_for: uuid.UUID | None = None
+        self.reactivate_called_with: tuple[uuid.UUID, datetime] | None = None
         self.audit_entries: list[dict[str, str | uuid.UUID]] = []
         self.commit_called = False
 
@@ -29,6 +37,12 @@ class FakeAccountRepository:
         if self.already_deactivated:
             return None
         return datetime.now(UTC)
+
+    async def reactivate_if_within_grace(
+        self, user_id: uuid.UUID, *, grace_period_cutoff: datetime
+    ) -> bool:
+        self.reactivate_called_with = (user_id, grace_period_cutoff)
+        return self.reactivation_succeeds
 
     async def create_audit_log_entry(self, *, user_id: uuid.UUID, event: str, actor: str) -> None:
         self.audit_entries.append({"user_id": user_id, "event": event, "actor": actor})
@@ -106,3 +120,61 @@ async def test_deactivate_account_already_deactivated_raises_already_deactivated
         await service.deactivate_account(user_id=user.id, payload=payload)
     assert repository.commit_called is False
     assert cache.set_for == []
+
+
+# --- DA-AC8 (resolved OD-10): reactivate_account, called cross-module from
+# users/service.py's login flow. -----------------------------------------
+
+
+async def test_reactivate_account_within_grace_reactivates() -> None:
+    # Arrange
+    user_id = uuid.uuid4()
+    repository = FakeAccountRepository(reactivation_succeeds=True)
+    cache = FakeRevocationCache()
+    service = AccountService(repository, cache)
+
+    # Act
+    reactivated = await service.reactivate_account(user_id)
+
+    # Assert
+    assert reactivated is True
+    assert repository.reactivate_called_with is not None
+    called_user_id, grace_period_cutoff = repository.reactivate_called_with
+    assert called_user_id == user_id
+    assert grace_period_cutoff < datetime.now(UTC)
+    assert repository.audit_entries == [
+        {"user_id": user_id, "event": "reactivated", "actor": "self"}
+    ]
+    assert repository.commit_called is True
+
+
+async def test_reactivate_account_past_grace_does_not_reactivate() -> None:
+    # Arrange
+    user_id = uuid.uuid4()
+    repository = FakeAccountRepository(reactivation_succeeds=False)
+    cache = FakeRevocationCache()
+    service = AccountService(repository, cache)
+
+    # Act
+    reactivated = await service.reactivate_account(user_id)
+
+    # Assert
+    assert reactivated is False
+    assert repository.audit_entries == []
+    assert repository.commit_called is False
+
+
+async def test_reactivate_account_already_active_is_noop() -> None:
+    # Arrange — the repository's atomic WHERE clause matches zero rows for
+    # an already-active account, same as a past-grace one: both report False.
+    user_id = uuid.uuid4()
+    repository = FakeAccountRepository(reactivation_succeeds=False)
+    cache = FakeRevocationCache()
+    service = AccountService(repository, cache)
+
+    # Act
+    reactivated = await service.reactivate_account(user_id)
+
+    # Assert
+    assert reactivated is False
+    assert repository.commit_called is False

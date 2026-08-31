@@ -1,0 +1,202 @@
+openapi: 3.0.3
+info:
+  title: Login (US-2.1 / spec US-005) — fragment
+  version: "1.0"
+paths:
+  /v1/auth/login:
+    post:
+      operationId: login
+      summary: Exchange email + password for an access token and a refresh-token cookie
+      tags: [auth]
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/LoginRequest"
+      responses:
+        "200":
+          description: >
+            Credentials verified; account is active and email-verified, OR
+            the account was deactivated within its 30-day grace period and
+            is reactivated by this login (resolved OD-10 — same response
+            shape either way). Sets the refresh token as an HttpOnly,
+            Secure, SameSite=Strict cookie scoped to Path=/v1/auth (FR-1).
+            This story does not implement the mobile JSON-body transport
+            variant referenced by the source story's Assumption #2
+            (resolved OD-2, out of scope).
+          headers:
+            Set-Cookie:
+              schema:
+                type: string
+                example: refresh_token=<opaque>; Path=/v1/auth; HttpOnly; Secure; SameSite=Strict
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LoginResponse"
+        "401":
+          description: >
+            Wrong password (FR-2) or unknown email (FR-3) — identical body,
+            status, and comparable timing in both cases (anti-enumeration,
+            NFR-002). Never distinguishes the two cases in any observable
+            way.
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/InvalidCredentialsProblem"
+        "403":
+          description: >
+            Correct credentials, but the account is blocked from logging in
+            (FR-4). Two distinct problem types share this status — see the
+            two schemas below. For a deactivated account, this response
+            applies only when the account is past its 30-day grace period
+            (resolved OD-10) — within the grace period, login reactivates
+            the account and returns 200 instead. Credential verification
+            always runs before this check, so a caller without the
+            password only ever sees 401.
+          content:
+            application/problem+json:
+              schema:
+                oneOf:
+                  - $ref: "#/components/schemas/EmailNotVerifiedProblem"
+                  - $ref: "#/components/schemas/AccountDeactivatedProblem"
+        "422":
+          description: >
+            Request body missing `password`, containing an unknown field, or
+            containing an empty-string `password` (FR-6, resolved OD-8). Not
+            recorded against the rate-limit counter.
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ValidationFailedProblem"
+        "429":
+          description: >
+            10 failed attempts for this account, or 20 for this source IP,
+            within 15 minutes (FR-5). A successful login resets only the
+            per-account counter (resolved OD-5 — the per-IP counter is
+            deliberately left unreset).
+          headers:
+            Retry-After:
+              schema:
+                type: integer
+                description: Seconds until the throttle window for the triggering counter (account or IP) clears.
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/TooManyAttemptsProblem"
+components:
+  schemas:
+    LoginRequest:
+      type: object
+      additionalProperties: false
+      required: [email, password]
+      properties:
+        email:
+          type: string
+          format: email
+        password:
+          type: string
+          format: password
+          minLength: 1
+          description: >
+            An empty string fails minLength and is rejected as 422, same as
+            a missing field (resolved OD-8) — it never reaches credential
+            verification.
+    LoginResponse:
+      type: object
+      required: [access_token, token_type, expires_in]
+      properties:
+        access_token:
+          type: string
+          description: JWT, 15-minute TTL, signed with the project's existing HS256 shared-secret scheme (resolved OD-1 — this story does not add RS256/JWKS).
+        token_type:
+          type: string
+          enum: [Bearer]
+        expires_in:
+          type: integer
+          enum: [900]
+    InvalidCredentialsProblem:
+      allOf:
+        - $ref: "#/components/schemas/ProblemBase"
+      properties:
+        type:
+          type: string
+          example: ".../errors/invalid-credentials"
+        status:
+          type: integer
+          example: 401
+    EmailNotVerifiedProblem:
+      allOf:
+        - $ref: "#/components/schemas/ProblemBase"
+      properties:
+        type:
+          type: string
+          example: ".../errors/email-not-verified"
+        status:
+          type: integer
+          example: 403
+      description: Type slug owned by US-1.2 (VE-AC5) — reused here, not introduced by this story.
+    AccountDeactivatedProblem:
+      allOf:
+        - $ref: "#/components/schemas/ProblemBase"
+      properties:
+        type:
+          type: string
+          example: ".../errors/account-deactivated"
+        status:
+          type: integer
+          example: 403
+      description: Type slug owned by US-1.4 (DA-AC6) — reused here, not introduced by this story.
+    TooManyAttemptsProblem:
+      allOf:
+        - $ref: "#/components/schemas/ProblemBase"
+      properties:
+        type:
+          type: string
+          example: ".../errors/too-many-attempts"
+        status:
+          type: integer
+          example: 429
+    ValidationFailedProblem:
+      allOf:
+        - $ref: "#/components/schemas/ProblemBase"
+        - type: object
+          required: [errors]
+          properties:
+            errors:
+              type: array
+              items:
+                type: object
+                required: [field, code, message]
+                properties:
+                  field:
+                    type: string
+                  code:
+                    type: string
+                  message:
+                    type: string
+      properties:
+        type:
+          type: string
+          example: ".../errors/validation-failed"
+        status:
+          type: integer
+          example: 422
+      description: Type slug is shared project convention, not introduced by this story.
+    ProblemBase:
+      type: object
+      description: RFC 7807 problem body. `type` is an absolute/relative URI ending in the slug named per response.
+      required: [type, title, status, detail, instance]
+      properties:
+        type:
+          type: string
+        title:
+          type: string
+        status:
+          type: integer
+        detail:
+          type: string
+        instance:
+          type: string
+          example: /v1/auth/login

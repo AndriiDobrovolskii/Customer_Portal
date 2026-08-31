@@ -15,16 +15,20 @@ from app.core.security import (
     InvalidTokenError,
     decode_access_token,
     encode_access_token,
+    generate_refresh_token,
     hash_password,
     verify_password,
+    verify_password_dummy,
 )
 from app.modules.users.exceptions import (
+    AccountDeactivatedError,
     DuplicateEmailError,
     EmailNotVerifiedError,
     InvalidCredentialsError,
     RegistrationValidationError,
+    TooManyAttemptsError,
 )
-from app.modules.users.models import User, UserSession
+from app.modules.users.models import RefreshToken, User, UserSession
 from app.modules.users.schemas import LoginRequest, LoginResponse, UserCreate, UserRead, UserStatus
 
 logger = logging.getLogger(__name__)
@@ -56,6 +60,28 @@ class UserRepositoryProtocol(Protocol):
         self, *, user_id: uuid.UUID, except_jti: uuid.UUID | None
     ) -> None: ...
 
+    async def update_last_login_at(self, *, user_id: uuid.UUID) -> None: ...
+
+    async def create_auth_audit_log_entry(
+        self,
+        *,
+        event: str,
+        reason: str | None,
+        actor_id: uuid.UUID | None,
+        ip: str,
+        user_agent: str | None,
+        request_id: str,
+    ) -> None: ...
+
+    async def create_refresh_token(
+        self,
+        *,
+        token_hash: str,
+        family_id: uuid.UUID,
+        user_id: uuid.UUID,
+        expires_at: datetime,
+    ) -> RefreshToken: ...
+
     async def commit(self) -> None: ...
 
 
@@ -65,6 +91,32 @@ class VerificationTokenIssuerProtocol(Protocol):
 
 class RevocationCacheReaderProtocol(Protocol):
     async def get_revoke_before(self, user_id: uuid.UUID) -> datetime | None: ...
+
+
+class LoginThrottleCacheProtocol(Protocol):
+    async def record_account_failure(self, user_id: uuid.UUID, *, window_seconds: int) -> int: ...
+
+    async def record_ip_failure(self, ip: str, *, window_seconds: int) -> int: ...
+
+    async def get_account_failure_count(self, user_id: uuid.UUID) -> int: ...
+
+    async def get_ip_failure_count(self, ip: str) -> int: ...
+
+    async def get_account_retry_after_seconds(self, user_id: uuid.UUID) -> int: ...
+
+    async def get_ip_retry_after_seconds(self, ip: str) -> int: ...
+
+    async def reset_account_failures(self, user_id: uuid.UUID) -> None: ...
+
+
+class AccountServiceProtocol(Protocol):
+    """Cross-module collaborator (resolved OD-10): reactivation lives in the
+    `account` module, called here via its service, never its router/
+    repository, mirroring `revoke_other_sessions`'s existing cross-module
+    pattern in the other direction (`profile` -> `users`).
+    """
+
+    async def reactivate_account(self, user_id: uuid.UUID) -> bool: ...
 
 
 def _validate_email(email: str | None, errors: list[FieldError]) -> str | None:
@@ -125,11 +177,15 @@ class UserService:
         issuer: VerificationTokenIssuerProtocol,
         email_sender: EmailSender,
         revocation_cache: RevocationCacheReaderProtocol,
+        throttle_cache: LoginThrottleCacheProtocol,
+        account_service: AccountServiceProtocol,
     ) -> None:
         self._repository = repository
         self._issuer = issuer
         self._email_sender = email_sender
         self._revocation_cache = revocation_cache
+        self._throttle_cache = throttle_cache
+        self._account_service = account_service
 
     async def register_user(self, payload: UserCreate) -> UserRead:
         errors: list[FieldError] = []
@@ -162,26 +218,141 @@ class UserService:
 
         return UserRead.model_validate(user)
 
-    async def authenticate_user(self, payload: LoginRequest) -> LoginResponse:
+    async def authenticate_user(
+        self, payload: LoginRequest, *, ip: str, user_agent: str | None, request_id: str
+    ) -> tuple[LoginResponse, str]:
+        """Returns (response, raw_refresh_token) — the raw refresh token is
+        never part of the LoginResponse body (FR-1: it's a Set-Cookie value,
+        not a JSON field), so the router receives it separately to build the
+        cookie, mirroring profile/service.py's own tuple-return pattern for
+        a value the router needs beyond the response schema.
+        """
+        settings = get_settings()
+
+        # Checked first, before any DB lookup: an IP already over its limit
+        # is blocked regardless of which account it's trying (FR-5).
+        ip_failure_count = await self._throttle_cache.get_ip_failure_count(ip)
+        if ip_failure_count >= settings.login_failure_threshold_ip:
+            retry_after = await self._throttle_cache.get_ip_retry_after_seconds(ip)
+            raise TooManyAttemptsError(retry_after_seconds=retry_after)
+
         user = await self._repository.get_by_email(payload.email)
+
+        if user is not None:
+            account_failure_count = await self._throttle_cache.get_account_failure_count(user.id)
+            if account_failure_count >= settings.login_failure_threshold_account:
+                retry_after = await self._throttle_cache.get_account_retry_after_seconds(user.id)
+                raise TooManyAttemptsError(retry_after_seconds=retry_after)
+
         if user is None:
+            # Dummy Argon2id verification so response timing doesn't reveal
+            # account existence (FR-3, NFR-002).
+            await verify_password_dummy()
+            await self._repository.create_auth_audit_log_entry(
+                event="login_failed",
+                reason="unknown_email",
+                actor_id=None,
+                ip=ip,
+                user_agent=user_agent,
+                request_id=request_id,
+            )
+            await self._repository.commit()
+            # Cache write after the commit (AGENTS.md §3).
+            await self._throttle_cache.record_ip_failure(
+                ip, window_seconds=settings.login_throttle_window_seconds
+            )
             raise InvalidCredentialsError
 
         # Checked before the verification gate below: a wrong-password guess
-        # against an unverified account must not be distinguishable from one
-        # against a verified account.
+        # against an unverified or deactivated account must not be
+        # distinguishable from one against a normal account (FR-4).
         if not await verify_password(payload.password.get_secret_value(), user.hashed_password):
+            await self._repository.create_auth_audit_log_entry(
+                event="login_failed",
+                reason="bad_password",
+                actor_id=user.id,
+                ip=ip,
+                user_agent=user_agent,
+                request_id=request_id,
+            )
+            await self._repository.commit()
+            await self._throttle_cache.record_account_failure(
+                user.id, window_seconds=settings.login_throttle_window_seconds
+            )
+            await self._throttle_cache.record_ip_failure(
+                ip, window_seconds=settings.login_throttle_window_seconds
+            )
             raise InvalidCredentialsError
 
-        if not user.email_verified:
+        # Deactivation gate tests the actual persisted value ("deactivated"),
+        # never "!= active" — nothing in this codebase ever writes "active"
+        # to users.status, so that comparison would reject every real user.
+        if user.status == UserStatus.DEACTIVATED.value:
+            reactivated = await self._account_service.reactivate_account(user.id)
+            if not reactivated:
+                await self._repository.create_auth_audit_log_entry(
+                    event="login_failed",
+                    reason="account_deactivated",
+                    actor_id=user.id,
+                    ip=ip,
+                    user_agent=user_agent,
+                    request_id=request_id,
+                )
+                await self._repository.commit()
+                raise AccountDeactivatedError
+            # else: reactivated within its grace period (resolved OD-10,
+            # DA-AC8) — fall through to the ordinary success path below.
+        elif not user.email_verified:
+            await self._repository.create_auth_audit_log_entry(
+                event="login_failed",
+                reason="email_not_verified",
+                actor_id=user.id,
+                ip=ip,
+                user_agent=user_agent,
+                request_id=request_id,
+            )
+            await self._repository.commit()
             raise EmailNotVerifiedError
 
-        settings = get_settings()
         jti = uuid.uuid4()
-        expires_at = datetime.now(UTC) + timedelta(seconds=settings.access_token_ttl_seconds)
-        await self._repository.create_session(user_id=user.id, jti=jti, expires_at=expires_at)
+        session_expires_at = datetime.now(UTC) + timedelta(
+            seconds=settings.access_token_ttl_seconds
+        )
+        await self._repository.create_session(
+            user_id=user.id, jti=jti, expires_at=session_expires_at
+        )
+
+        raw_refresh_token, token_hash = generate_refresh_token()
+        refresh_expires_at = datetime.now(UTC) + timedelta(
+            seconds=settings.refresh_token_ttl_seconds
+        )
+        await self._repository.create_refresh_token(
+            token_hash=token_hash,
+            family_id=uuid.uuid4(),
+            user_id=user.id,
+            expires_at=refresh_expires_at,
+        )
+
+        await self._repository.update_last_login_at(user_id=user.id)
+        await self._repository.create_auth_audit_log_entry(
+            event="login_succeeded",
+            reason=None,
+            actor_id=user.id,
+            ip=ip,
+            user_agent=user_agent,
+            request_id=request_id,
+        )
         await self._repository.commit()
-        return LoginResponse(access_token=encode_access_token(user_id=user.id, jti=jti))
+
+        # Resolved OD-5: only the account counter resets on success; the
+        # per-IP counter is deliberately left alone.
+        await self._throttle_cache.reset_account_failures(user.id)
+
+        response = LoginResponse(
+            access_token=encode_access_token(user_id=user.id, jti=jti),
+            expires_in=settings.access_token_ttl_seconds,
+        )
+        return response, raw_refresh_token
 
     async def get_authenticated_user(self, token: str) -> AuthenticatedUser | None:
         try:

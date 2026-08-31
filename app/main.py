@@ -11,11 +11,7 @@ from app.api.v1.router import router as api_v1_router
 from app.core.config import get_settings
 from app.core.problem_details import ProblemError
 from app.db.session import create_engine_and_sessionmaker
-from app.modules.users.exceptions import (
-    DuplicateEmailError,
-    InvalidCredentialsError,
-    RegistrationValidationError,
-)
+from app.modules.users.exceptions import DuplicateEmailError, RegistrationValidationError
 
 
 @asynccontextmanager
@@ -87,22 +83,29 @@ async def duplicate_email_error_handler(request: Request, exc: DuplicateEmailErr
     return JSONResponse(status_code=409, content={"detail": "Email is already registered."})
 
 
-@app.exception_handler(InvalidCredentialsError)
-async def invalid_credentials_error_handler(
-    request: Request, exc: InvalidCredentialsError
-) -> JSONResponse:
-    return JSONResponse(status_code=401, content={"detail": "The email or password is incorrect."})
-
-
 @app.exception_handler(RequestValidationError)
 async def request_validation_error_handler(
     request: Request, exc: RequestValidationError
 ) -> JSONResponse:
-    # FastAPI's default handler echoes exc.errors() verbatim, which includes the
-    # rejected `input` value — that would leak a submitted password (FR-6 applies
-    # to every registration attempt, not just the ones handled by our own domain
-    # exceptions). Keep only the non-sensitive fields.
-    sanitized = [
-        {"type": error["type"], "loc": error["loc"], "msg": error["msg"]} for error in exc.errors()
+    # FastAPI's default handler echoes exc.errors() verbatim, which includes
+    # the rejected `input` value — that would leak a submitted password
+    # (BR-004 applies to every validated request, not just registration).
+    # Reshaped as this project's problem+json error array ({field, code,
+    # message}), matching problem_error_handler's shape (FR-6/LI-AC6).
+    errors = [
+        {
+            "field": ".".join(str(part) for part in error["loc"] if part != "body"),
+            "code": error["type"],
+            "message": error["msg"],
+        }
+        for error in exc.errors()
     ]
-    return JSONResponse(status_code=422, content={"detail": sanitized})
+    content: dict[str, object] = {
+        "type": "https://portal.internal/errors/validation-failed",
+        "title": "Validation Failed",
+        "status": 422,
+        "detail": "The request body failed validation.",
+        "instance": request.url.path,
+        "errors": errors,
+    }
+    return JSONResponse(status_code=422, media_type="application/problem+json", content=content)

@@ -36,5 +36,28 @@ class AccountRepository:
     async def create_audit_log_entry(self, *, user_id: uuid.UUID, event: str, actor: str) -> None:
         self._session.add(AccountLifecycleAuditLog(user_id=user_id, event=event, actor=actor))
 
+    async def reactivate_if_within_grace(
+        self, user_id: uuid.UUID, *, grace_period_cutoff: datetime
+    ) -> bool:
+        """Atomically reactivates an account only if it is currently
+        deactivated and its deactivated_at is after grace_period_cutoff
+        (i.e. within the grace period). Returns False — a no-op, not an
+        error — if the account is already active or past the grace period;
+        both cases mean the caller should proceed as an ordinary login
+        attempt (resolved OD-10), mirroring deactivate_if_not_already's
+        atomic-conditional-update shape so a concurrent duplicate call
+        can't double-reactivate or race past-grace into reactivating."""
+        result = await self._session.execute(
+            update(User)
+            .where(
+                User.id == user_id,
+                User.status == "deactivated",
+                User.deactivated_at > grace_period_cutoff,
+            )
+            .values(status="active", deactivated_at=None)
+            .returning(User.id)
+        )
+        return result.scalar_one_or_none() is not None
+
     async def commit(self) -> None:
         await self._session.commit()

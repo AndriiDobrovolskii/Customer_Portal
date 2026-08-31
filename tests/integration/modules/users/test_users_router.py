@@ -1,29 +1,43 @@
 import asyncio
 import uuid
-from datetime import timedelta
+from datetime import UTC, datetime, timedelta
 
 import pytest
 from httpx import AsyncClient
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.cache_keys import login_fail_account_key, login_fail_ip_key
 from app.core.security import decode_access_token, hash_password
 from app.main import app
+from app.modules.account.models import AccountLifecycleAuditLog
 from app.modules.email_verification.models import EmailVerificationToken
-from app.modules.users.models import User, UserSession
+from app.modules.users.models import AuthAuditLog, RefreshToken, User, UserSession
 
 pytestmark = pytest.mark.integration
 
+# httpx's ASGITransport defaults to this client address when none is
+# configured (see conftest.py's `client`/`real_client` fixtures) — every
+# request through them presents this as the source IP.
+_TEST_CLIENT_IP = "127.0.0.1"
+
 
 async def _seed_login_user(
-    db_session: AsyncSession, *, email: str, password: str, email_verified: bool
+    db_session: AsyncSession,
+    *,
+    email: str,
+    password: str,
+    email_verified: bool,
+    status: str = "PENDING_VERIFICATION",
+    deactivated_at: datetime | None = None,
 ) -> User:
     user = User(
         email=email,
         hashed_password=await hash_password(password),
-        status="PENDING_VERIFICATION",
+        status=status,
     )
     user.email_verified = email_verified
+    user.deactivated_at = deactivated_at
     db_session.add(user)
     await db_session.flush()
     return user
@@ -247,12 +261,148 @@ async def test_concurrent_duplicate_registration_only_one_succeeds(
         assert len(result.all()) == 1
 
 
-# --- VE-AC5: unverified account cannot log in -----------------------------------
+# --- LI-AC1: successful login (FR-1) --------------------------------------
 
 
-async def test_login_correct_password_unverified_returns_403_email_not_verified(
+async def test_login_correct_credentials_returns_200(
     client: AsyncClient, db_session: AsyncSession
 ) -> None:
+    # Arrange
+    user = await _seed_login_user(
+        db_session,
+        email="login.verified@example.com",
+        password="Str0ng!Pass1",
+        email_verified=True,
+        status="active",
+    )
+
+    # Act
+    response = await client.post(
+        "/api/v1/auth/login",
+        json={"email": "login.verified@example.com", "password": "Str0ng!Pass1"},
+    )
+
+    # Assert: status + body shape
+    assert response.status_code == 200
+    body = response.json()
+    assert body["token_type"] == "Bearer"
+    assert body["expires_in"] == 900
+    assert len(body["access_token"]) > 0
+    claims = decode_access_token(body["access_token"])
+    assert claims.user_id == user.id
+
+    # Assert: Set-Cookie attributes
+    set_cookie_headers = response.headers.get_list("set-cookie")
+    assert len(set_cookie_headers) == 1
+    cookie_header = set_cookie_headers[0]
+    assert cookie_header.startswith("refresh_token=")
+    assert "Path=/api/v1/auth" in cookie_header
+    assert "HttpOnly" in cookie_header
+    assert "Secure" in cookie_header
+    assert "samesite=strict" in cookie_header.lower()
+
+    # Assert: persisted state
+    session_result = await db_session.execute(
+        select(UserSession).where(UserSession.jti == claims.jti)
+    )
+    session = session_result.scalar_one()
+    assert session.user_id == user.id
+    assert session.revoked_at is None
+
+    refresh_result = await db_session.execute(
+        select(RefreshToken).where(RefreshToken.user_id == user.id)
+    )
+    assert refresh_result.scalar_one() is not None
+
+    audit_result = await db_session.execute(
+        select(AuthAuditLog).where(AuthAuditLog.actor_id == user.id)
+    )
+    audit_entry = audit_result.scalar_one()
+    assert audit_entry.event == "login_succeeded"
+    assert audit_entry.ip == _TEST_CLIENT_IP
+
+    user_result = await db_session.execute(select(User).where(User.id == user.id))
+    assert user_result.scalar_one().last_login_at is not None
+
+
+# --- LI-AC2: wrong password (FR-2) ------------------------------------------
+
+
+async def test_login_wrong_password_returns_401(
+    client: AsyncClient, db_session: AsyncSession
+) -> None:
+    # Arrange
+    user = await _seed_login_user(
+        db_session,
+        email="login.wrongpw@example.com",
+        password="Str0ng!Pass1",
+        email_verified=True,
+        status="active",
+    )
+
+    # Act
+    response = await client.post(
+        "/api/v1/auth/login",
+        json={
+            "email": "login.wrongpw@example.com",
+            "password": "WrongPassword1!",  # pragma: allowlist secret
+        },
+    )
+
+    # Assert
+    assert response.status_code == 401
+    assert response.headers["content-type"] == "application/problem+json"
+    assert response.json()["type"] == "https://portal.internal/errors/invalid-credentials"
+
+    audit_result = await db_session.execute(
+        select(AuthAuditLog).where(AuthAuditLog.actor_id == user.id)
+    )
+    assert audit_result.scalar_one().reason == "bad_password"
+
+
+# --- LI-AC3: unknown email, anti-enumeration (FR-3, resolved OD-3) ---------
+
+
+async def test_login_unknown_email_returns_401_same_shape_as_wrong_password(
+    client: AsyncClient, db_session: AsyncSession
+) -> None:
+    # Arrange
+    await _seed_login_user(
+        db_session,
+        email="login.shape@example.com",
+        password="Str0ng!Pass1",
+        email_verified=True,
+        status="active",
+    )
+    wrong_password_response = await client.post(
+        "/api/v1/auth/login",
+        json={
+            "email": "login.shape@example.com",
+            "password": "WrongPassword1!",  # pragma: allowlist secret
+        },
+    )
+
+    # Act
+    unknown_email_response = await client.post(
+        "/api/v1/auth/login",
+        json={"email": "nobody.logs.in@example.com", "password": "Str0ng!Pass1"},
+    )
+
+    # Assert
+    assert unknown_email_response.status_code == wrong_password_response.status_code == 401
+    assert unknown_email_response.json() == wrong_password_response.json()
+
+    audit_result = await db_session.execute(
+        select(AuthAuditLog).where(AuthAuditLog.reason == "unknown_email")
+    )
+    entry = audit_result.scalar_one()
+    assert entry.actor_id is None
+
+
+# --- LI-AC4: account-state gating (FR-4) -------------------------------------
+
+
+async def test_login_unverified_returns_403(client: AsyncClient, db_session: AsyncSession) -> None:
     # Arrange
     await _seed_login_user(
         db_session,
@@ -273,81 +423,188 @@ async def test_login_correct_password_unverified_returns_403_email_not_verified(
     assert response.json()["type"] == "https://portal.internal/errors/email-not-verified"
 
 
-# --- VE-AC6: verified account logs in normally ----------------------------------
-
-
-async def test_login_correct_password_verified_returns_200_with_access_token(
+async def test_login_deactivated_past_grace_returns_403(
     client: AsyncClient, db_session: AsyncSession
 ) -> None:
     # Arrange
     await _seed_login_user(
-        db_session, email="login.verified@example.com", password="Str0ng!Pass1", email_verified=True
+        db_session,
+        email="login.deactivated.pastgrace@example.com",
+        password="Str0ng!Pass1",
+        email_verified=True,
+        status="deactivated",
+        deactivated_at=datetime.now(UTC) - timedelta(days=31),
     )
 
     # Act
     response = await client.post(
         "/api/v1/auth/login",
-        json={"email": "login.verified@example.com", "password": "Str0ng!Pass1"},
+        json={"email": "login.deactivated.pastgrace@example.com", "password": "Str0ng!Pass1"},
     )
 
     # Assert
-    assert response.status_code == 200
-    body = response.json()
-    assert body["token_type"] == "bearer"
-    assert len(body["access_token"]) > 0
+    assert response.status_code == 403
+    assert response.headers["content-type"] == "application/problem+json"
+    assert response.json()["type"] == "https://portal.internal/errors/account-deactivated"
 
 
-async def test_login_wrong_password_returns_401(
+async def test_login_deactivated_wrong_password_returns_401_not_403(
     client: AsyncClient, db_session: AsyncSession
 ) -> None:
-    # Arrange
+    # Arrange — ordering guarantee (FR-4/DA-AC7).
     await _seed_login_user(
-        db_session, email="login.wrongpw@example.com", password="Str0ng!Pass1", email_verified=True
+        db_session,
+        email="login.deactivated.wrongpw@example.com",
+        password="Str0ng!Pass1",
+        email_verified=True,
+        status="deactivated",
+        deactivated_at=datetime.now(UTC) - timedelta(days=31),
     )
 
     # Act
     response = await client.post(
         "/api/v1/auth/login",
         json={
-            "email": "login.wrongpw@example.com",
+            "email": "login.deactivated.wrongpw@example.com",
             "password": "WrongPassword1!",  # pragma: allowlist secret
         },
     )
 
     # Assert
     assert response.status_code == 401
+    assert response.json()["type"] == "https://portal.internal/errors/invalid-credentials"
 
 
-async def test_login_unknown_email_returns_401(client: AsyncClient) -> None:
-    # Act
-    response = await client.post(
-        "/api/v1/auth/login",
-        json={"email": "nobody.logs.in@example.com", "password": "Str0ng!Pass1"},
-    )
-
-    # Assert
-    assert response.status_code == 401
+# --- DA-AC8 (resolved OD-10): reactivation within the grace period ---------
 
 
-async def test_login_persists_a_session_and_returns_decodable_jwt(
+async def test_login_deactivated_within_grace_reactivates_returns_200(
     client: AsyncClient, db_session: AsyncSession
 ) -> None:
     # Arrange
     user = await _seed_login_user(
-        db_session, email="login.session@example.com", password="Str0ng!Pass1", email_verified=True
+        db_session,
+        email="login.reactivate@example.com",
+        password="Str0ng!Pass1",
+        email_verified=True,
+        status="deactivated",
+        deactivated_at=datetime.now(UTC) - timedelta(days=5),
     )
 
     # Act
     response = await client.post(
         "/api/v1/auth/login",
-        json={"email": "login.session@example.com", "password": "Str0ng!Pass1"},
+        json={"email": "login.reactivate@example.com", "password": "Str0ng!Pass1"},
     )
 
     # Assert
     assert response.status_code == 200
-    claims = decode_access_token(response.json()["access_token"])
-    assert claims.user_id == user.id
-    result = await db_session.execute(select(UserSession).where(UserSession.jti == claims.jti))
-    session = result.scalar_one()
-    assert session.user_id == user.id
-    assert session.revoked_at is None
+    assert len(response.json()["access_token"]) > 0
+
+    user_result = await db_session.execute(select(User).where(User.id == user.id))
+    persisted = user_result.scalar_one()
+    assert persisted.status == "active"
+    assert persisted.deactivated_at is None
+
+    audit_result = await db_session.execute(
+        select(AccountLifecycleAuditLog).where(AccountLifecycleAuditLog.user_id == user.id)
+    )
+    account_audit = audit_result.scalar_one()
+    assert account_audit.event == "reactivated"
+    assert account_audit.actor == "self"
+
+
+# --- LI-AC5: brute-force throttling (FR-5) -----------------------------------
+
+
+async def test_login_account_throttled_returns_429(
+    client: AsyncClient, db_session: AsyncSession
+) -> None:
+    # Arrange
+    user = await _seed_login_user(
+        db_session,
+        email="login.throttled@example.com",
+        password="Str0ng!Pass1",
+        email_verified=True,
+        status="active",
+    )
+    for _ in range(10):
+        response = await client.post(
+            "/api/v1/auth/login",
+            json={
+                "email": "login.throttled@example.com",
+                "password": "WrongPassword1!",  # pragma: allowlist secret
+            },
+        )
+        assert response.status_code == 401
+
+    # Act: the 11th attempt is throttled, even with correct credentials.
+    response = await client.post(
+        "/api/v1/auth/login",
+        json={"email": "login.throttled@example.com", "password": "Str0ng!Pass1"},
+    )
+
+    # Assert
+    assert response.status_code == 429
+    assert response.headers["content-type"] == "application/problem+json"
+    assert response.json()["type"] == "https://portal.internal/errors/too-many-attempts"
+    assert int(response.headers["retry-after"]) > 0
+
+    # Assert: the counter is real, persisted Valkey state with a TTL.
+    account_key = login_fail_account_key(user.id)
+    assert int(await app.state.valkey_client.get(account_key)) == 10
+    assert await app.state.valkey_client.ttl(account_key) > 0
+
+
+async def test_login_missing_password_returns_422(client: AsyncClient) -> None:
+    # Act
+    response = await client.post(
+        "/api/v1/auth/login", json={"email": "login.missing.password@example.com"}
+    )
+
+    # Assert
+    assert response.status_code == 422
+    assert response.headers["content-type"] == "application/problem+json"
+    body = response.json()
+    assert body["type"] == "https://portal.internal/errors/validation-failed"
+    assert any(error["field"] == "password" for error in body["errors"])
+
+
+async def test_login_unknown_field_returns_422(client: AsyncClient) -> None:
+    # Act
+    response = await client.post(
+        "/api/v1/auth/login",
+        json={
+            "email": "login.unknown.field@example.com",
+            "password": "Str0ng!Pass1",
+            "isAdmin": True,
+        },
+    )
+
+    # Assert
+    assert response.status_code == 422
+
+
+async def test_login_empty_password_returns_422_not_401(client: AsyncClient) -> None:
+    # Act — resolved OD-8.
+    response = await client.post(
+        "/api/v1/auth/login",
+        json={"email": "login.empty.password@example.com", "password": ""},
+    )
+
+    # Assert
+    assert response.status_code == 422
+
+
+async def test_login_malformed_request_does_not_increment_throttle_counter(
+    client: AsyncClient,
+) -> None:
+    # Act — resolved OD-6.
+    response = await client.post(
+        "/api/v1/auth/login", json={"email": "login.malformed@example.com"}
+    )
+
+    # Assert
+    assert response.status_code == 422
+    ip_key = login_fail_ip_key(_TEST_CLIENT_IP)
+    assert await app.state.valkey_client.get(ip_key) is None
