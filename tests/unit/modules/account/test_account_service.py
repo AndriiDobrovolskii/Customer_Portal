@@ -86,7 +86,9 @@ async def test_deactivate_account_correct_password_deactivates() -> None:
     assert repository.audit_entries == [
         {"user_id": user.id, "event": "deactivated", "actor": "self"}
     ]
-    assert cache.set_for == [(user.id, 900)]
+    # TTL must cover the longest-lived credential this key gates, not just
+    # the access token (2026-09-01 fix — see service.py's comment).
+    assert cache.set_for == [(user.id, 2_592_000)]
 
 
 async def test_deactivate_account_wrong_password_raises_invalid_password() -> None:
