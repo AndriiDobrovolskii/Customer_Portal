@@ -49,3 +49,22 @@ async def get_current_user(
 
 
 CurrentUserDep = Annotated[AuthenticatedUser, Depends(get_current_user)]
+
+
+async def get_current_user_allow_revoked(
+    token: Annotated[str, Depends(_oauth2_scheme)], service: UserServiceDep
+) -> AuthenticatedUser:
+    """Resolved OD-2 (US-2.2): used by `POST /v1/auth/logout` only, so a
+    repeat logout call is idempotent (LO-AC4) rather than 401ing. A
+    deliberately separate function from `get_current_user` — not a shared
+    one with a query-param flag — so this leniency can never leak into
+    another route by an accidental call-site change; every other route
+    keeps depending on `get_current_user`/`CurrentUserDep` unchanged.
+    """
+    authenticated_user = await service.get_authenticated_user(token, allow_revoked=True)
+    if authenticated_user is None:
+        raise UnauthenticatedError
+    return authenticated_user
+
+
+CurrentUserAllowRevokedDep = Annotated[AuthenticatedUser, Depends(get_current_user_allow_revoked)]

@@ -2,13 +2,15 @@ import asyncio
 import uuid
 from datetime import UTC, datetime, timedelta
 
+import jwt
 import pytest
 from httpx import AsyncClient
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.cache_keys import login_fail_account_key, login_fail_ip_key
-from app.core.security import decode_access_token, hash_password
+from app.core.config import get_settings
+from app.core.security import decode_access_token, hash_password, hash_refresh_token
 from app.main import app
 from app.modules.account.models import AccountLifecycleAuditLog
 from app.modules.email_verification.models import EmailVerificationToken
@@ -608,3 +610,299 @@ async def test_login_malformed_request_does_not_increment_throttle_counter(
     assert response.status_code == 422
     ip_key = login_fail_ip_key(_TEST_CLIENT_IP)
     assert await app.state.valkey_client.get(ip_key) is None
+
+
+# --- US-2.2 (spec US-006): logout / logout-all -------------------------------
+
+
+_LOGOUT_TEST_PASSWORD = "Str0ng!Pass1"  # pragma: allowlist secret
+
+
+async def _login(
+    client: AsyncClient, db_session: AsyncSession, *, email: str, password: str | None = None
+) -> tuple[User, str]:
+    """Seeds an active/verified user, logs in through the real endpoint (so
+    the client's cookie jar picks up the refresh cookie exactly as a real
+    browser would), and returns (user, access_token).
+    """
+    password = password or _LOGOUT_TEST_PASSWORD
+    user = await _seed_login_user(
+        db_session, email=email, password=password, email_verified=True, status="active"
+    )
+    response = await client.post("/api/v1/auth/login", json={"email": email, "password": password})
+    assert response.status_code == 200
+    return user, response.json()["access_token"]
+
+
+def _auth_headers(access_token: str) -> dict[str, str]:
+    return {"Authorization": f"Bearer {access_token}"}
+
+
+# --- LO-AC1: logout on the current device (FR-1) -----------------------------
+
+
+async def test_logout_returns_204_and_revokes_session(
+    client: AsyncClient, db_session: AsyncSession
+) -> None:
+    # Arrange
+    user, access_token = await _login(client, db_session, email="logout.happy@example.com")
+    claims = decode_access_token(access_token)
+    refresh_result = await db_session.execute(
+        select(RefreshToken).where(RefreshToken.user_id == user.id)
+    )
+    refresh_token_row = refresh_result.scalar_one()
+
+    # Act
+    response = await client.post("/api/v1/auth/logout", headers=_auth_headers(access_token))
+
+    # Assert: status + Set-Cookie clear
+    assert response.status_code == 204
+    assert response.content == b""
+    set_cookie_headers = response.headers.get_list("set-cookie")
+    assert len(set_cookie_headers) == 1
+    assert "refresh_token=" in set_cookie_headers[0]
+    assert "Max-Age=0" in set_cookie_headers[0]
+
+    # Assert: persisted state
+    session_result = await db_session.execute(
+        select(UserSession).where(UserSession.jti == claims.jti)
+    )
+    assert session_result.scalar_one().revoked_at is not None
+
+    await db_session.refresh(refresh_token_row)
+    assert refresh_token_row.revoked_at is not None
+
+    audit_result = await db_session.execute(
+        select(AuthAuditLog).where(AuthAuditLog.event == "logout", AuthAuditLog.actor_id == user.id)
+    )
+    audit_entry = audit_result.scalar_one()
+    assert audit_entry.scope == "session"
+
+
+async def test_logout_no_refresh_cookie_returns_204_no_set_cookie(
+    client: AsyncClient, db_session: AsyncSession
+) -> None:
+    # Arrange
+    _, access_token = await _login(client, db_session, email="logout.nocookie@example.com")
+    client.cookies.clear()
+
+    # Act
+    response = await client.post("/api/v1/auth/logout", headers=_auth_headers(access_token))
+
+    # Assert
+    assert response.status_code == 204
+    assert response.headers.get_list("set-cookie") == []
+
+
+async def test_logout_stale_refresh_cookie_returns_204_indistinguishable(
+    client: AsyncClient, db_session: AsyncSession
+) -> None:
+    # Arrange
+    _, access_token = await _login(client, db_session, email="logout.stalecookie@example.com")
+    client.cookies.set("refresh_token", "never-issued-value", path="/api/v1/auth")
+
+    # Act
+    response = await client.post("/api/v1/auth/logout", headers=_auth_headers(access_token))
+
+    # Assert: identical shape to the matched-cookie happy path — 204, cookie
+    # cleared (one was presented), no error revealing the mismatch.
+    assert response.status_code == 204
+    set_cookie_headers = response.headers.get_list("set-cookie")
+    assert len(set_cookie_headers) == 1
+    assert "Max-Age=0" in set_cookie_headers[0]
+
+
+async def test_logout_cross_user_refresh_cookie_does_not_revoke_other_users_family(
+    client: AsyncClient, db_session: AsyncSession
+) -> None:
+    # Arrange: victim logs in first; their raw refresh-token cookie value is
+    # captured from the shared jar (simulating a leaked/stolen token). An
+    # unrelated attacker then logs in with their own credentials.
+    await _login(client, db_session, email="logout.idor.victim@example.com")
+    victim_refresh_token = client.cookies.get("refresh_token")
+    assert victim_refresh_token is not None
+    victim_row = (
+        await db_session.execute(
+            select(RefreshToken).where(
+                RefreshToken.token_hash == hash_refresh_token(victim_refresh_token)
+            )
+        )
+    ).scalar_one()
+
+    _, attacker_access_token = await _login(
+        client, db_session, email="logout.idor.attacker@example.com"
+    )
+    client.cookies.set("refresh_token", victim_refresh_token, path="/api/v1/auth")
+
+    # Act: attacker's own access token, paired with the victim's stolen
+    # refresh cookie.
+    response = await client.post(
+        "/api/v1/auth/logout", headers=_auth_headers(attacker_access_token)
+    )
+
+    # Assert: 204, indistinguishable from a lookup-miss (advisor-found IDOR,
+    # fixed 2026-09-01) — the victim's own refresh-token family is untouched.
+    assert response.status_code == 204
+    await db_session.refresh(victim_row)
+    assert victim_row.revoked_at is None
+
+
+# --- LO-AC2: logout everywhere (FR-2) ----------------------------------------
+
+
+async def test_logout_all_returns_204_and_revokes_every_session(
+    client: AsyncClient, db_session: AsyncSession
+) -> None:
+    # Arrange
+    _, access_token = await _login(client, db_session, email="logout.all@example.com")
+
+    # Act
+    response = await client.post("/api/v1/auth/logout-all", headers=_auth_headers(access_token))
+
+    # Assert
+    assert response.status_code == 204
+    assert response.content == b""
+
+    # A second request with the same pre-logout-all token is now rejected.
+    follow_up = await client.patch("/api/v1/profile", json={}, headers=_auth_headers(access_token))
+    assert follow_up.status_code == 401
+
+
+# --- LO-AC3: unauthenticated logout request rejected (FR-3) -----------------
+
+
+async def test_logout_no_token_returns_401(client: AsyncClient) -> None:
+    # Act
+    response = await client.post("/api/v1/auth/logout")
+
+    # Assert
+    assert response.status_code == 401
+
+
+async def test_logout_invalid_token_returns_401(client: AsyncClient) -> None:
+    # Act
+    response = await client.post("/api/v1/auth/logout", headers=_auth_headers("not-a-real-jwt"))
+
+    # Assert
+    assert response.status_code == 401
+
+
+async def _make_expired_token(db_session: AsyncSession, *, user_id: uuid.UUID) -> str:
+    settings = get_settings()
+    jti = uuid.uuid4()
+    db_session.add(
+        UserSession(jti=jti, user_id=user_id, expires_at=datetime.now(UTC) - timedelta(hours=2))
+    )
+    await db_session.flush()
+    token: str = jwt.encode(
+        {"sub": str(user_id), "jti": str(jti), "exp": datetime.now(UTC) - timedelta(hours=1)},
+        settings.jwt_secret_key.get_secret_value(),
+        algorithm=settings.jwt_algorithm,
+    )
+    return token
+
+
+async def test_logout_expired_token_returns_401(
+    client: AsyncClient, db_session: AsyncSession
+) -> None:
+    # Arrange — an expired token fails to decode at all (FR-3), so it never
+    # reaches the allow_revoked leniency (resolved OD-2) that a merely
+    # *revoked* token gets.
+    user = await _seed_login_user(
+        db_session,
+        email="logout.expired@example.com",
+        password="Str0ng!Pass1",
+        email_verified=True,
+        status="active",
+    )
+    expired_token = await _make_expired_token(db_session, user_id=user.id)
+
+    # Act
+    response = await client.post("/api/v1/auth/logout", headers=_auth_headers(expired_token))
+
+    # Assert
+    assert response.status_code == 401
+
+
+async def test_logout_all_expired_token_returns_401(
+    client: AsyncClient, db_session: AsyncSession
+) -> None:
+    # Arrange
+    user = await _seed_login_user(
+        db_session,
+        email="logout.all.expired@example.com",
+        password="Str0ng!Pass1",
+        email_verified=True,
+        status="active",
+    )
+    expired_token = await _make_expired_token(db_session, user_id=user.id)
+
+    # Act
+    response = await client.post("/api/v1/auth/logout-all", headers=_auth_headers(expired_token))
+
+    # Assert
+    assert response.status_code == 401
+
+
+# --- LO-AC4 (resolved OD-2): idempotent repeat logout ------------------------
+
+
+async def test_logout_repeat_call_same_token_returns_204_idempotent(
+    client: AsyncClient, db_session: AsyncSession
+) -> None:
+    # Arrange
+    _, access_token = await _login(client, db_session, email="logout.repeat@example.com")
+    claims = decode_access_token(access_token)
+    first_response = await client.post("/api/v1/auth/logout", headers=_auth_headers(access_token))
+    assert first_response.status_code == 204
+    session_result = await db_session.execute(
+        select(UserSession).where(UserSession.jti == claims.jti)
+    )
+    revoked_at_after_first_call = session_result.scalar_one().revoked_at
+    assert revoked_at_after_first_call is not None
+
+    # Act: same access token, presented again
+    second_response = await client.post("/api/v1/auth/logout", headers=_auth_headers(access_token))
+
+    # Assert: identical response shape (LO-AC4)
+    assert second_response.status_code == 204
+    assert second_response.content == b""
+
+    # Assert: no additional revocation side effect (LO-AC4) — the session's
+    # revocation timestamp is untouched by the repeat call, not re-written.
+    session_result_2 = await db_session.execute(
+        select(UserSession).where(UserSession.jti == claims.jti)
+    )
+    assert session_result_2.scalar_one().revoked_at == revoked_at_after_first_call
+
+
+# --- LO-AC5 (resolved OD-2 boundary): leniency is /logout-only --------------
+
+
+async def test_protected_endpoint_rejects_revoked_access_token(
+    client: AsyncClient, db_session: AsyncSession
+) -> None:
+    # Arrange
+    _, access_token = await _login(client, db_session, email="logout.thenprofile@example.com")
+    await client.post("/api/v1/auth/logout", headers=_auth_headers(access_token))
+
+    # Act
+    response = await client.patch("/api/v1/profile", json={}, headers=_auth_headers(access_token))
+
+    # Assert
+    assert response.status_code == 401
+
+
+async def test_logout_all_does_not_share_logout_leniency_rejects_revoked_token(
+    client: AsyncClient, db_session: AsyncSession
+) -> None:
+    # Arrange: revoke the session via a plain /logout call first
+    _, access_token = await _login(client, db_session, email="logout.all.boundary@example.com")
+    first_logout = await client.post("/api/v1/auth/logout", headers=_auth_headers(access_token))
+    assert first_logout.status_code == 204
+
+    # Act: the same now-revoked token is presented to /logout-all
+    response = await client.post("/api/v1/auth/logout-all", headers=_auth_headers(access_token))
+
+    # Assert: no leniency here — 401, not 204
+    assert response.status_code == 401

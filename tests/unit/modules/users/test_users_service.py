@@ -3,7 +3,12 @@ from datetime import UTC, datetime, timedelta
 
 import pytest
 
-from app.core.security import decode_access_token, encode_access_token, hash_password
+from app.core.security import (
+    decode_access_token,
+    encode_access_token,
+    hash_password,
+    hash_refresh_token,
+)
 from app.modules.users.exceptions import (
     AccountDeactivatedError,
     DuplicateEmailError,
@@ -32,6 +37,9 @@ class FakeUserRepository:
         self.last_login_at_updates: list[uuid.UUID] = []
         self.audit_log_entries: list[dict[str, object]] = []
         self.refresh_tokens: list[dict[str, object]] = []
+        self.refresh_tokens_by_hash: dict[str, RefreshToken] = {}
+        self.revoked_session_jtis: list[uuid.UUID] = []
+        self.revoked_family_ids: list[uuid.UUID] = []
 
     async def create(self, *, email: str, hashed_password: str, status: str) -> User | None:
         if email in self.existing_emails:
@@ -62,6 +70,21 @@ class FakeUserRepository:
             if session.user_id == user_id and jti != except_jti:
                 session.revoked_at = datetime.now(UTC)
 
+    async def revoke_session(self, *, jti: uuid.UUID) -> None:
+        self.revoked_session_jtis.append(jti)
+        session = self.sessions_by_jti.get(jti)
+        if session is not None:
+            session.revoked_at = datetime.now(UTC)
+
+    async def get_refresh_token_by_hash(self, token_hash: str) -> RefreshToken | None:
+        return self.refresh_tokens_by_hash.get(token_hash)
+
+    async def revoke_refresh_token_family(self, *, family_id: uuid.UUID) -> None:
+        self.revoked_family_ids.append(family_id)
+        for token in self.refresh_tokens_by_hash.values():
+            if token.family_id == family_id:
+                token.revoked_at = datetime.now(UTC)
+
     async def update_last_login_at(self, *, user_id: uuid.UUID) -> None:
         self.last_login_at_updates.append(user_id)
 
@@ -70,6 +93,7 @@ class FakeUserRepository:
         *,
         event: str,
         reason: str | None,
+        scope: str | None,
         actor_id: uuid.UUID | None,
         ip: str,
         user_agent: str | None,
@@ -79,6 +103,7 @@ class FakeUserRepository:
             {
                 "event": event,
                 "reason": reason,
+                "scope": scope,
                 "actor_id": actor_id,
                 "ip": ip,
                 "user_agent": user_agent,
@@ -102,9 +127,11 @@ class FakeUserRepository:
                 "expires_at": expires_at,
             }
         )
-        return RefreshToken(
+        token = RefreshToken(
             token_hash=token_hash, family_id=family_id, user_id=user_id, expires_at=expires_at
         )
+        self.refresh_tokens_by_hash[token_hash] = token
+        return token
 
     async def commit(self) -> None:
         self.commit_called = True
@@ -122,7 +149,7 @@ class FakeVerificationTokenIssuer:
         return "raw-verification-token"
 
 
-class FakeRevocationCacheReader:
+class FakeRevocationCache:
     def __init__(
         self,
         *,
@@ -131,11 +158,16 @@ class FakeRevocationCacheReader:
     ) -> None:
         self.revoke_before_by_user = revoke_before_by_user or {}
         self.raises = raises
+        self.set_revoke_before_calls: list[tuple[uuid.UUID, int]] = []
 
     async def get_revoke_before(self, user_id: uuid.UUID) -> datetime | None:
         if self.raises:
             raise ConnectionError("valkey unreachable")
         return self.revoke_before_by_user.get(user_id)
+
+    async def set_revoke_before(self, user_id: uuid.UUID, *, ttl_seconds: int) -> None:
+        self.set_revoke_before_calls.append((user_id, ttl_seconds))
+        self.revoke_before_by_user[user_id] = datetime.now(UTC)
 
 
 class FakeLoginThrottleCache:
@@ -213,13 +245,13 @@ def _make_service(
     repository: FakeUserRepository,
     issuer: FakeVerificationTokenIssuer | None = None,
     email_sender: FakeEmailSender | None = None,
-    revocation_cache: FakeRevocationCacheReader | None = None,
+    revocation_cache: FakeRevocationCache | None = None,
     throttle_cache: FakeLoginThrottleCache | None = None,
     account_service: FakeAccountService | None = None,
 ) -> tuple[UserService, FakeVerificationTokenIssuer, FakeEmailSender]:
     issuer = issuer or FakeVerificationTokenIssuer()
     email_sender = email_sender or FakeEmailSender()
-    revocation_cache = revocation_cache or FakeRevocationCacheReader()
+    revocation_cache = revocation_cache or FakeRevocationCache()
     throttle_cache = throttle_cache or FakeLoginThrottleCache()
     account_service = account_service or FakeAccountService()
     service = UserService(
@@ -742,7 +774,7 @@ async def test_get_authenticated_user_token_before_revoke_before_rejected() -> N
     issued_at = datetime.now(UTC) - timedelta(minutes=10)
     token = await _seed_session(repository, user_id=user_id, issued_at=issued_at)
     revoke_before = issued_at + timedelta(minutes=1)
-    cache = FakeRevocationCacheReader(revoke_before_by_user={user_id: revoke_before})
+    cache = FakeRevocationCache(revoke_before_by_user={user_id: revoke_before})
     service, _, _ = _make_service(repository, revocation_cache=cache)
 
     # Act
@@ -757,7 +789,7 @@ async def test_get_authenticated_user_revoke_before_absent_accepted() -> None:
     user_id = uuid.uuid4()
     repository = FakeUserRepository()
     token = await _seed_session(repository, user_id=user_id, issued_at=datetime.now(UTC))
-    cache = FakeRevocationCacheReader()
+    cache = FakeRevocationCache()
     service, _, _ = _make_service(repository, revocation_cache=cache)
 
     # Act
@@ -774,7 +806,7 @@ async def test_get_authenticated_user_token_issued_after_revoke_before_accepted(
     repository = FakeUserRepository()
     revoke_before = datetime.now(UTC) - timedelta(minutes=10)
     token = await _seed_session(repository, user_id=user_id, issued_at=datetime.now(UTC))
-    cache = FakeRevocationCacheReader(revoke_before_by_user={user_id: revoke_before})
+    cache = FakeRevocationCache(revoke_before_by_user={user_id: revoke_before})
     service, _, _ = _make_service(repository, revocation_cache=cache)
 
     # Act
@@ -789,7 +821,7 @@ async def test_get_authenticated_user_cache_read_error_rejected() -> None:
     user_id = uuid.uuid4()
     repository = FakeUserRepository()
     token = await _seed_session(repository, user_id=user_id, issued_at=datetime.now(UTC))
-    cache = FakeRevocationCacheReader(raises=True)
+    cache = FakeRevocationCache(raises=True)
     service, _, _ = _make_service(repository, revocation_cache=cache)
 
     # Act
@@ -797,4 +829,190 @@ async def test_get_authenticated_user_cache_read_error_rejected() -> None:
 
     # Assert: fail closed on a cache-read error, per AGENTS.md §3's
     # denylist carve-out — an outage must reject, not accept, the token.
+    assert result is None
+
+
+# --- US-2.2 (spec US-006): logout / logout-all -------------------------------
+
+
+async def _seed_refresh_token(
+    repository: FakeUserRepository, *, user_id: uuid.UUID, family_id: uuid.UUID | None = None
+) -> str:
+    """Seeds a refresh_tokens row and returns the raw token value (the
+    presented cookie), mirroring how login actually issues one.
+    """
+    raw_token = f"raw-refresh-token-{uuid.uuid4()}"
+    await repository.create_refresh_token(
+        token_hash=hash_refresh_token(raw_token),
+        family_id=family_id or uuid.uuid4(),
+        user_id=user_id,
+        expires_at=datetime.now(UTC) + timedelta(days=30),
+    )
+    return raw_token
+
+
+async def test_logout_revokes_session_and_refresh_family() -> None:
+    # Arrange
+    user_id = uuid.uuid4()
+    repository = FakeUserRepository()
+    token = await _seed_session(repository, user_id=user_id, issued_at=datetime.now(UTC))
+    claims = decode_access_token(token)
+    family_id = uuid.uuid4()
+    raw_refresh_token = await _seed_refresh_token(repository, user_id=user_id, family_id=family_id)
+    service, _, _ = _make_service(repository)
+
+    # Act
+    await service.logout(
+        jti=claims.jti,
+        user_id=user_id,
+        refresh_token=raw_refresh_token,
+        ip=_IP,
+        user_agent="pytest",
+        request_id=_REQUEST_ID,
+    )
+
+    # Assert
+    assert claims.jti in repository.revoked_session_jtis
+    assert repository.sessions_by_jti[claims.jti].revoked_at is not None
+    assert family_id in repository.revoked_family_ids
+    assert repository.audit_log_entries[-1]["event"] == "logout"
+    assert repository.audit_log_entries[-1]["scope"] == "session"
+    assert repository.audit_log_entries[-1]["actor_id"] == user_id
+    assert repository.commit_called is True
+
+
+async def test_logout_no_refresh_cookie_still_revokes_session() -> None:
+    # Arrange
+    user_id = uuid.uuid4()
+    repository = FakeUserRepository()
+    token = await _seed_session(repository, user_id=user_id, issued_at=datetime.now(UTC))
+    claims = decode_access_token(token)
+    service, _, _ = _make_service(repository)
+
+    # Act
+    await service.logout(
+        jti=claims.jti,
+        user_id=user_id,
+        refresh_token=None,
+        ip=_IP,
+        user_agent="pytest",
+        request_id=_REQUEST_ID,
+    )
+
+    # Assert
+    assert claims.jti in repository.revoked_session_jtis
+    assert repository.revoked_family_ids == []
+    assert repository.audit_log_entries[-1]["scope"] == "session"
+    assert repository.commit_called is True
+
+
+async def test_logout_refresh_cookie_lookup_miss_skips_family_revocation() -> None:
+    # Arrange: a cookie value that was never issued (stale/tampered/deleted)
+    user_id = uuid.uuid4()
+    repository = FakeUserRepository()
+    token = await _seed_session(repository, user_id=user_id, issued_at=datetime.now(UTC))
+    claims = decode_access_token(token)
+    service, _, _ = _make_service(repository)
+
+    # Act
+    await service.logout(
+        jti=claims.jti,
+        user_id=user_id,
+        refresh_token="never-issued-token-value",
+        ip=_IP,
+        user_agent="pytest",
+        request_id=_REQUEST_ID,
+    )
+
+    # Assert: jti still revoked, audit entry still written, no family to revoke
+    assert claims.jti in repository.revoked_session_jtis
+    assert repository.revoked_family_ids == []
+    assert repository.audit_log_entries[-1]["scope"] == "session"
+    assert repository.commit_called is True
+
+
+async def test_logout_cross_user_refresh_cookie_does_not_revoke_other_users_family() -> None:
+    # Arrange: caller presents a refresh cookie that hashes to a real row,
+    # but the row belongs to a different user (e.g. a stolen token). Advisor
+    # finding, fixed 2026-09-01: without an ownership check this let any
+    # authenticated caller revoke an arbitrary victim's session family.
+    caller_id = uuid.uuid4()
+    victim_id = uuid.uuid4()
+    repository = FakeUserRepository()
+    token = await _seed_session(repository, user_id=caller_id, issued_at=datetime.now(UTC))
+    claims = decode_access_token(token)
+    victim_family_id = uuid.uuid4()
+    victim_refresh_token = await _seed_refresh_token(
+        repository, user_id=victim_id, family_id=victim_family_id
+    )
+    service, _, _ = _make_service(repository)
+
+    # Act
+    await service.logout(
+        jti=claims.jti,
+        user_id=caller_id,
+        refresh_token=victim_refresh_token,
+        ip=_IP,
+        user_agent="pytest",
+        request_id=_REQUEST_ID,
+    )
+
+    # Assert: caller's own session is revoked, but the victim's refresh
+    # family is untouched — identical outward behavior to a lookup-miss.
+    assert claims.jti in repository.revoked_session_jtis
+    assert victim_family_id not in repository.revoked_family_ids
+    assert repository.audit_log_entries[-1]["scope"] == "session"
+    assert repository.commit_called is True
+
+
+async def test_logout_all_sets_revoke_before() -> None:
+    # Arrange
+    user_id = uuid.uuid4()
+    repository = FakeUserRepository()
+    cache = FakeRevocationCache()
+    service, _, _ = _make_service(repository, revocation_cache=cache)
+
+    # Act
+    await service.logout_all(user_id=user_id, ip=_IP, user_agent="pytest", request_id=_REQUEST_ID)
+
+    # Assert
+    assert len(cache.set_revoke_before_calls) == 1
+    assert cache.set_revoke_before_calls[0][0] == user_id
+    assert repository.audit_log_entries[-1]["event"] == "logout"
+    assert repository.audit_log_entries[-1]["scope"] == "all_sessions"
+    assert repository.audit_log_entries[-1]["actor_id"] == user_id
+    assert repository.commit_called is True
+
+
+async def test_get_authenticated_user_allow_revoked_resolves_revoked_session() -> None:
+    # Arrange: a session that has already been revoked (e.g. a prior logout)
+    user_id = uuid.uuid4()
+    repository = FakeUserRepository()
+    token = await _seed_session(repository, user_id=user_id, issued_at=datetime.now(UTC))
+    claims = decode_access_token(token)
+    repository.sessions_by_jti[claims.jti].revoked_at = datetime.now(UTC)
+    service, _, _ = _make_service(repository)
+
+    # Act
+    strict_result = await service.get_authenticated_user(token)
+    lenient_result = await service.get_authenticated_user(token, allow_revoked=True)
+
+    # Assert: default behavior unchanged (401-shaped), leniency resolves it
+    assert strict_result is None
+    assert lenient_result is not None
+    assert lenient_result.user_id == user_id
+
+
+async def test_get_authenticated_user_allow_revoked_rejects_unknown_jti() -> None:
+    # Arrange: a well-formed token whose jti has no session row at all —
+    # "revoked" and "never existed" are different failure modes (Open
+    # Question #2, US-006-api-design.md).
+    repository = FakeUserRepository()
+    token = encode_access_token(user_id=uuid.uuid4(), jti=uuid.uuid4())
+    service, _, _ = _make_service(repository)
+
+    # Act
+    result = await service.get_authenticated_user(token, allow_revoked=True)
+
+    # Assert
     assert result is None

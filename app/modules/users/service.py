@@ -17,6 +17,7 @@ from app.core.security import (
     encode_access_token,
     generate_refresh_token,
     hash_password,
+    hash_refresh_token,
     verify_password,
     verify_password_dummy,
 )
@@ -60,6 +61,12 @@ class UserRepositoryProtocol(Protocol):
         self, *, user_id: uuid.UUID, except_jti: uuid.UUID | None
     ) -> None: ...
 
+    async def revoke_session(self, *, jti: uuid.UUID) -> None: ...
+
+    async def get_refresh_token_by_hash(self, token_hash: str) -> RefreshToken | None: ...
+
+    async def revoke_refresh_token_family(self, *, family_id: uuid.UUID) -> None: ...
+
     async def update_last_login_at(self, *, user_id: uuid.UUID) -> None: ...
 
     async def create_auth_audit_log_entry(
@@ -67,6 +74,7 @@ class UserRepositoryProtocol(Protocol):
         *,
         event: str,
         reason: str | None,
+        scope: str | None,
         actor_id: uuid.UUID | None,
         ip: str,
         user_agent: str | None,
@@ -89,8 +97,10 @@ class VerificationTokenIssuerProtocol(Protocol):
     async def issue_pending_token(self, user_id: uuid.UUID) -> str: ...
 
 
-class RevocationCacheReaderProtocol(Protocol):
+class RevocationCacheProtocol(Protocol):
     async def get_revoke_before(self, user_id: uuid.UUID) -> datetime | None: ...
+
+    async def set_revoke_before(self, user_id: uuid.UUID, *, ttl_seconds: int) -> None: ...
 
 
 class LoginThrottleCacheProtocol(Protocol):
@@ -176,7 +186,7 @@ class UserService:
         repository: UserRepositoryProtocol,
         issuer: VerificationTokenIssuerProtocol,
         email_sender: EmailSender,
-        revocation_cache: RevocationCacheReaderProtocol,
+        revocation_cache: RevocationCacheProtocol,
         throttle_cache: LoginThrottleCacheProtocol,
         account_service: AccountServiceProtocol,
     ) -> None:
@@ -251,6 +261,7 @@ class UserService:
             await self._repository.create_auth_audit_log_entry(
                 event="login_failed",
                 reason="unknown_email",
+                scope=None,
                 actor_id=None,
                 ip=ip,
                 user_agent=user_agent,
@@ -270,6 +281,7 @@ class UserService:
             await self._repository.create_auth_audit_log_entry(
                 event="login_failed",
                 reason="bad_password",
+                scope=None,
                 actor_id=user.id,
                 ip=ip,
                 user_agent=user_agent,
@@ -293,6 +305,7 @@ class UserService:
                 await self._repository.create_auth_audit_log_entry(
                     event="login_failed",
                     reason="account_deactivated",
+                    scope=None,
                     actor_id=user.id,
                     ip=ip,
                     user_agent=user_agent,
@@ -306,6 +319,7 @@ class UserService:
             await self._repository.create_auth_audit_log_entry(
                 event="login_failed",
                 reason="email_not_verified",
+                scope=None,
                 actor_id=user.id,
                 ip=ip,
                 user_agent=user_agent,
@@ -337,6 +351,7 @@ class UserService:
         await self._repository.create_auth_audit_log_entry(
             event="login_succeeded",
             reason=None,
+            scope=None,
             actor_id=user.id,
             ip=ip,
             user_agent=user_agent,
@@ -354,14 +369,26 @@ class UserService:
         )
         return response, raw_refresh_token
 
-    async def get_authenticated_user(self, token: str) -> AuthenticatedUser | None:
+    async def get_authenticated_user(
+        self, token: str, *, allow_revoked: bool = False
+    ) -> AuthenticatedUser | None:
+        """`allow_revoked` (resolved OD-2, US-2.2) lets `POST /v1/auth/logout`
+        alone resolve a caller whose session is already revoked, so a repeat
+        logout call is idempotent (LO-AC4) rather than 401ing (LO-AC5).
+        Every other caller — including every other route — leaves this at
+        its default `False` and gets today's strict behavior unchanged. A
+        jti with no session row at all is never resolved, regardless of this
+        flag: "revoked" and "never existed" are different failure modes.
+        """
         try:
             claims = decode_access_token(token)
         except InvalidTokenError:
             return None
 
         session = await self._repository.get_session_by_jti(claims.jti)
-        if session is None or session.revoked_at is not None:
+        if session is None:
+            return None
+        if session.revoked_at is not None and not allow_revoked:
             return None
         if session.user_id != claims.user_id:
             return None
@@ -380,6 +407,77 @@ class UserService:
             return None
 
         return AuthenticatedUser(user_id=claims.user_id, jti=claims.jti)
+
+    async def logout(
+        self,
+        *,
+        jti: uuid.UUID,
+        user_id: uuid.UUID,
+        refresh_token: str | None,
+        ip: str,
+        user_agent: str | None,
+        request_id: str,
+    ) -> None:
+        """FR-1/FR-4 (LO-AC1, LO-AC4): revokes the caller's own session by
+        jti (resolved OD-1 — `user_sessions.revoked_at`, not a Valkey
+        denylist), and — if a refresh cookie was presented — revokes its
+        whole rotation family (resolved OD-3). Idempotent by construction:
+        re-revoking an already-revoked session/family is a harmless
+        overwrite, and the caller reaching this method at all already
+        required `get_authenticated_user(allow_revoked=True)` to resolve
+        the (possibly already-revoked) jti — see LO-AC4's leniency there.
+        """
+        await self._repository.revoke_session(jti=jti)
+
+        if refresh_token is not None:
+            token_hash = hash_refresh_token(refresh_token)
+            existing = await self._repository.get_refresh_token_by_hash(token_hash)
+            if existing is not None and existing.user_id == user_id:
+                # Lookup-miss (spec-review finding, resolved 2026-08-31): a
+                # stale/tampered/deleted cookie value silently skips this
+                # step — every other effect (jti revocation, audit entry)
+                # still occurs identically, so no response-level signal
+                # distinguishes a matched from an unmatched cookie. A
+                # cookie matching a *different* user's token (advisor
+                # finding, 2026-09-01: IDOR — a stolen refresh token must
+                # not let its holder revoke the victim's session family)
+                # is treated identically to a lookup-miss for the same
+                # anti-enumeration reason: silent skip, still 204.
+                await self._repository.revoke_refresh_token_family(family_id=existing.family_id)
+
+        await self._repository.create_auth_audit_log_entry(
+            event="logout",
+            reason=None,
+            scope="session",
+            actor_id=user_id,
+            ip=ip,
+            user_agent=user_agent,
+            request_id=request_id,
+        )
+        await self._repository.commit()
+
+    async def logout_all(
+        self, *, user_id: uuid.UUID, ip: str, user_agent: str | None, request_id: str
+    ) -> None:
+        """FR-2 (LO-AC2): reuses the existing `revoke_before` mechanism
+        (US-1.4/US-2.1) — every access and refresh token issued before this
+        moment is rejected on its next use via the same shared check
+        `get_authenticated_user` already performs.
+        """
+        settings = get_settings()
+        await self._revocation_cache.set_revoke_before(
+            user_id, ttl_seconds=settings.refresh_token_ttl_seconds
+        )
+        await self._repository.create_auth_audit_log_entry(
+            event="logout",
+            reason=None,
+            scope="all_sessions",
+            actor_id=user_id,
+            ip=ip,
+            user_agent=user_agent,
+            request_id=request_id,
+        )
+        await self._repository.commit()
 
     async def revoke_other_sessions(
         self, *, user_id: uuid.UUID, except_jti: uuid.UUID | None

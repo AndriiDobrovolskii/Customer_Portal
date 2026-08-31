@@ -1,11 +1,16 @@
-active_story: US-2.1
+active_story: US-2.2
 
 # US-001, US-002, US-003 are implemented per git history (commits b6dc29e,
 # ed6e2a9, 90a612b, 1f8d2a5, 1ee7dc5), though not tracked through this
 # pipeline. US-004 (Deactivate Account, Epic 1 / "1.4") completed the full
 # pipeline through PR, was committed (e3b42c4) and merged as PR #1 on
 # GitHub (confirmed via `gh pr view 1`, state: MERGED, 2026-08-31).
-# US-2.1 (Login, Epic 2) is now active per the user's explicit request on
-# 2026-08-31 to continue from docs/stories/US-2.1-login.md. The story doc
+# US-2.1 (Login, Epic 2) completed the full pipeline through PR (see
+# docs/catalog/US-2.1-pipeline-status.md, all stages Pass), was committed
+# and merged as PR #2 on GitHub (confirmed via git log on main: commit
+# 1ecedb0 "feat: implement US-2.1 login", merged via d14a51b "Merge pull
+# request #2 from AndriiDobrovolskii/feat/us-2.1-login").
+# US-2.2 (Logout, Epic 2) is now active per the user's explicit request on
+# 2026-08-31 to continue with docs/stories/US-2.2-logout.md. The story doc
 # is fully drafted (assumptions, API contract, ACs) but has not yet been
-# run through us-clarifier/story-spec-writer.
+# run through us-clarifier.

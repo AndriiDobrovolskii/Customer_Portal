@@ -115,7 +115,7 @@ async def db_session(db_connection: AsyncConnection) -> AsyncIterator[AsyncSessi
 @pytest.fixture
 async def client(db_session: AsyncSession) -> AsyncIterator[AsyncClient]:
     transport = ASGITransport(app=app)
-    async with AsyncClient(transport=transport, base_url="http://test") as async_client:
+    async with AsyncClient(transport=transport, base_url="https://test") as async_client:
         yield async_client
 
 
@@ -128,7 +128,7 @@ async def real_client() -> AsyncIterator[AsyncClient]:
     the db_session/client fixtures share one connection and can't express that.
     """
     transport = ASGITransport(app=app)
-    async with AsyncClient(transport=transport, base_url="http://test") as async_client:
+    async with AsyncClient(transport=transport, base_url="https://test") as async_client:
         yield async_client
 
 
