@@ -1,5 +1,11 @@
-story: US-002
+story: US-004
 
-current_stage: DESIGN
+current_stage: PR
 
-status: NOT_STARTED
+status: DONE
+# Every stage Pass through PR. pr-preparer's draft is ready for user review;
+# nothing staged/committed/pushed. Flagged: exclude pre-existing unrelated
+# .claude/skills/* changes from this story's commit.
+# IMPLEMENTATION complete: gate-enforcer PASSed (all 7 pre-commit hooks
+# green, 145/145 tests, 96.84% coverage, migration cycle proven). Docker
+# was started mid-session rather than treated as a hard blocker.

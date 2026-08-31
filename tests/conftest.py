@@ -6,9 +6,11 @@ import pytest
 from alembic import command
 from alembic.config import Config
 from httpx import ASGITransport, AsyncClient
+from redis.asyncio import Redis
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncConnection, AsyncSession
 from testcontainers.community.postgres import PostgresContainer
+from testcontainers.community.redis import RedisContainer
 
 from app.db.dependencies import get_db_session
 from app.db.session import create_engine_and_sessionmaker
@@ -19,6 +21,43 @@ from app.main import app
 def postgres_url() -> Iterator[str]:
     with PostgresContainer("postgres:16", driver="asyncpg") as postgres:
         yield postgres.get_connection_url()
+
+
+@pytest.fixture(scope="session")
+def valkey_container() -> Iterator[RedisContainer]:
+    # RedisContainer speaks the Redis wire protocol Valkey implements; the
+    # real Valkey image is used (not a redis-branded one) so this is real
+    # Valkey per AGENTS.md §5, not a compatible substitute.
+    with RedisContainer(image="valkey/valkey:7.2-alpine") as container:
+        yield container
+
+
+@pytest.fixture(scope="session", autouse=True)
+async def _valkey(valkey_container: RedisContainer) -> AsyncIterator[None]:
+    # Same test-only entry point rationale as _database below: ASGITransport
+    # never runs the app's `lifespan`, so app.state.valkey_client is wired
+    # here instead. get_client() on the container returns a sync client;
+    # the app needs redis.asyncio, constructed directly from the same host/port.
+    # An async fixture (not asyncio.run() in a sync one) so teardown closes
+    # the client on the same event loop that opened its connections —
+    # asyncio.run() here raised "Event loop is closed" against a transport
+    # bound to pytest-asyncio's session loop.
+    client: Redis = Redis(
+        host=valkey_container.get_container_host_ip(),
+        port=int(valkey_container.get_exposed_port(valkey_container.port)),
+        decode_responses=True,
+    )
+    app.state.valkey_client = client
+    yield
+    await client.aclose()
+
+
+@pytest.fixture(autouse=True)
+async def _flush_valkey() -> AsyncIterator[None]:
+    """Per-test isolation for Valkey, mirroring db_session's per-test
+    rollback: AGENTS.md §5 requires Valkey flushed or namespaced per test."""
+    yield
+    await app.state.valkey_client.flushdb()
 
 
 @pytest.fixture(scope="session", autouse=True)

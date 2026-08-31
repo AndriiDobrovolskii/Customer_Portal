@@ -5,11 +5,17 @@ from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
+from redis.asyncio import Redis
 
 from app.api.v1.router import router as api_v1_router
 from app.core.config import get_settings
+from app.core.problem_details import ProblemError
 from app.db.session import create_engine_and_sessionmaker
-from app.modules.users.exceptions import DuplicateEmailError, RegistrationValidationError
+from app.modules.users.exceptions import (
+    DuplicateEmailError,
+    InvalidCredentialsError,
+    RegistrationValidationError,
+)
 
 
 @asynccontextmanager
@@ -18,8 +24,11 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     engine, session_factory = create_engine_and_sessionmaker(settings.database_url)
     app.state.db_engine = engine
     app.state.db_session_factory = session_factory
+    valkey_client: Redis = Redis.from_url(settings.valkey_url, decode_responses=True)
+    app.state.valkey_client = valkey_client
     yield
     await engine.dispose()
+    await valkey_client.aclose()
 
 
 app = FastAPI(title="Customer Portal", lifespan=lifespan)
@@ -32,7 +41,7 @@ app.add_middleware(
     allow_origins=["http://localhost:5500", "http://127.0.0.1:5500"],
     allow_methods=["*"],
     allow_headers=["*"],
-    expose_headers=["Location"],
+    expose_headers=["Location", "ETag"],
 )
 
 
@@ -51,9 +60,38 @@ async def registration_validation_error_handler(
     )
 
 
+@app.exception_handler(ProblemError)
+async def problem_error_handler(request: Request, exc: ProblemError) -> JSONResponse:
+    content: dict[str, object] = {
+        "type": f"https://portal.internal/errors/{exc.type_slug}",
+        "title": exc.title,
+        "status": exc.status,
+        "detail": exc.detail,
+        "instance": request.url.path,
+    }
+    if exc.errors is not None:
+        content["errors"] = [
+            {"field": error.field, "code": error.code, "message": error.message}
+            for error in exc.errors
+        ]
+    return JSONResponse(
+        status_code=exc.status,
+        media_type="application/problem+json",
+        headers=exc.headers,
+        content=content,
+    )
+
+
 @app.exception_handler(DuplicateEmailError)
 async def duplicate_email_error_handler(request: Request, exc: DuplicateEmailError) -> JSONResponse:
     return JSONResponse(status_code=409, content={"detail": "Email is already registered."})
+
+
+@app.exception_handler(InvalidCredentialsError)
+async def invalid_credentials_error_handler(
+    request: Request, exc: InvalidCredentialsError
+) -> JSONResponse:
+    return JSONResponse(status_code=401, content={"detail": "The email or password is incorrect."})
 
 
 @app.exception_handler(RequestValidationError)

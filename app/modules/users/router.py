@@ -1,7 +1,7 @@
 from fastapi import APIRouter, Response, status
 
 from app.modules.users.dependencies import UserServiceDep
-from app.modules.users.schemas import UserCreate, UserRead
+from app.modules.users.schemas import LoginRequest, LoginResponse, UserCreate, UserRead
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
@@ -13,3 +13,8 @@ async def register_user(
     user = await service.register_user(payload)
     response.headers["Location"] = f"/api/v1/users/{user.id}"
     return user
+
+
+@router.post("/login", response_model=LoginResponse, status_code=status.HTTP_200_OK)
+async def login(payload: LoginRequest, service: UserServiceDep) -> LoginResponse:
+    return await service.authenticate_user(payload)

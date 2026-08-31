@@ -9,6 +9,14 @@ description: Produces the persistence design (entities, columns, constraints, in
 
 Design the persistence model a story requires, as a reviewable artifact — before any `models.py` change or Alembic migration exists. This is design, not implementation: no code is written here, only the decisions a migration/repository author will need.
 
+## Operational Contract
+
+```
+Precondition: story-spec-reviewer's verdict is Pass or Pass with Issues; an OpenAPI design exists if the story has endpoints.
+Input Artifacts: docs/specifications/<StoryId>-spec.md, docs/reviews/specifications/<StoryId>-spec-review.md, docs/designs/api/<StoryId>-openapi.yaml (if it exists), docs/product/business-rules.md, docs/product/business-glossary.md.
+Output Artifacts: docs/designs/database/<StoryId>-db-design.md, docs/designs/database/<StoryId>-entity-model.md.
+```
+
 ## Required Context
 
 Read, in order:

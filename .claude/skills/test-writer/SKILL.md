@@ -9,6 +9,14 @@ description: Turns a story's approved Acceptance Criteria, specification, API de
 
 Create executable evidence that an implementation satisfies a story's Acceptance Criteria. This turns each AC into one or more concrete test cases before (or alongside) the implementation itself, so "done" means "passing tests trace to every AC," not "code that looks right."
 
+## Operational Contract
+
+```
+Precondition: spec review, API design, and DB design are approved for the story.
+Input Artifacts: docs/specifications/<StoryId>-spec.md, docs/designs/api/<StoryId>-openapi.yaml, docs/designs/database/<StoryId>-entity-model.md, docs/plans/<StoryId>-implementation-plan.md (if it exists).
+Output Artifacts: tests/unit/modules/<module>/*, tests/integration/modules/<module>/*, docs/tests/<StoryId>-traceability-matrix.md.
+```
+
 ## Required Context
 
 Read, in order:

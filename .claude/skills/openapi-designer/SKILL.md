@@ -9,6 +9,14 @@ description: Produces the authoritative OpenAPI contract and API design notes fo
 
 Design the API contract before implementation begins. The output is the authoritative source for what a router and its Pydantic schemas must look like — endpoints should not be invented during coding if a contract already exists (this project's own artifact-driven flow: Specification → OpenAPI Design → Implementation, per `docs/workflow/stage-map.yaml`).
 
+## Operational Contract
+
+```
+Precondition: story-spec-reviewer's verdict is Pass or Pass with Issues (never Fail).
+Input Artifacts: docs/specifications/<StoryId>-spec.md, docs/reviews/specifications/<StoryId>-spec-review.md, docs/product/business-rules.md, docs/product/business-glossary.md, docs/product/non-functional-requirements.md.
+Output Artifacts: docs/designs/api/<StoryId>-openapi.yaml, docs/designs/api/<StoryId>-api-design.md.
+```
+
 ## Required Context
 
 Read, in order:
