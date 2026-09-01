@@ -11,6 +11,9 @@ from app.modules.users.dependencies import (
 from app.modules.users.schemas import (
     LoginRequest,
     LoginResponse,
+    PasswordResetConfirmRequest,
+    PasswordResetRequestRequest,
+    PasswordResetRequestResponse,
     RefreshResponse,
     UserCreate,
     UserRead,
@@ -130,3 +133,43 @@ async def logout_all(
         user_agent=request.headers.get("User-Agent"),
         request_id=request_id,
     )
+
+
+@router.post(
+    "/password-reset/request",
+    response_model=PasswordResetRequestResponse,
+    status_code=status.HTTP_202_ACCEPTED,
+)
+async def request_password_reset(
+    payload: PasswordResetRequestRequest,
+    service: UserServiceDep,
+    request: Request,
+    request_id: Annotated[str, Depends(get_request_id)],
+) -> PasswordResetRequestResponse:
+    return await service.request_password_reset(
+        payload,
+        ip=_get_client_ip(request),
+        user_agent=request.headers.get("User-Agent"),
+        request_id=request_id,
+    )
+
+
+@router.post("/password-reset/confirm", response_model=None, status_code=status.HTTP_200_OK)
+async def confirm_password_reset(
+    payload: PasswordResetConfirmRequest,
+    service: UserServiceDep,
+    request: Request,
+    request_id: Annotated[str, Depends(get_request_id)],
+) -> Response:
+    await service.confirm_password_reset(
+        payload,
+        ip=_get_client_ip(request),
+        user_agent=request.headers.get("User-Agent"),
+        request_id=request_id,
+    )
+    # A bare `-> None` return still serializes to a literal `"null"` JSON
+    # body at 200 (unlike 204, which FastAPI always sends bodiless
+    # regardless of the return value) — the source story's Success column
+    # states 200 with no response schema, so this returns a genuinely empty
+    # body explicitly rather than relying on that.
+    return Response(status_code=status.HTTP_200_OK)

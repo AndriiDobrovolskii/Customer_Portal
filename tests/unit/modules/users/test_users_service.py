@@ -1,3 +1,4 @@
+import hashlib
 import uuid
 from datetime import UTC, datetime, timedelta
 
@@ -14,12 +15,22 @@ from app.modules.users.exceptions import (
     DuplicateEmailError,
     EmailNotVerifiedError,
     InvalidCredentialsError,
+    PasswordPolicyError,
+    PasswordResetTokenExpiredError,
+    PasswordResetTokenInvalidError,
     RegistrationValidationError,
     TokenInvalidError,
     TooManyAttemptsError,
 )
-from app.modules.users.models import RefreshToken, User, UserSession
-from app.modules.users.schemas import LoginRequest, LoginResponse, UserCreate, UserStatus
+from app.modules.users.models import PasswordResetToken, RefreshToken, User, UserSession
+from app.modules.users.schemas import (
+    LoginRequest,
+    LoginResponse,
+    PasswordResetConfirmRequest,
+    PasswordResetRequestRequest,
+    UserCreate,
+    UserStatus,
+)
 from app.modules.users.service import UserService
 
 pytestmark = pytest.mark.unit
@@ -30,7 +41,11 @@ _REQUEST_ID = "test-request-id"
 
 class FakeUserRepository:
     def __init__(
-        self, *, existing_emails: set[str] | None = None, simulate_race_on_consume: bool = False
+        self,
+        *,
+        existing_emails: set[str] | None = None,
+        simulate_race_on_consume: bool = False,
+        simulate_race_on_consume_reset: bool = False,
     ) -> None:
         self.existing_emails = existing_emails or set()
         self.created_with: dict[str, str] | None = None
@@ -43,11 +58,16 @@ class FakeUserRepository:
         self.refresh_tokens_by_hash: dict[str, RefreshToken] = {}
         self.revoked_session_jtis: list[uuid.UUID] = []
         self.revoked_family_ids: list[uuid.UUID] = []
+        self.password_hash_updates: dict[uuid.UUID, str] = {}
+        self.password_reset_tokens_by_hash: dict[str, PasswordResetToken] = {}
+        self.invalidated_reset_tokens_for: list[uuid.UUID] = []
         # RT-AC6: simulates a concurrent winner consuming this token between
         # this fake's own initial read and its atomic-consume call — the
         # first consume_refresh_token call sets consumed_at (as if another
         # request just won) and returns None (this request lost the race).
         self.simulate_race_on_consume = simulate_race_on_consume
+        # Same pattern for password_reset_tokens (spec-review resolution).
+        self.simulate_race_on_consume_reset = simulate_race_on_consume_reset
 
     async def create(self, *, email: str, hashed_password: str, status: str) -> User | None:
         if email in self.existing_emails:
@@ -172,6 +192,39 @@ class FakeUserRepository:
         self.refresh_tokens_by_hash[token_hash] = token
         return token
 
+    async def update_password_hash(self, *, user_id: uuid.UUID, hashed_password: str) -> None:
+        self.password_hash_updates[user_id] = hashed_password
+        for user in self.users_by_email.values():
+            if user.id == user_id:
+                user.hashed_password = hashed_password
+
+    async def invalidate_password_reset_tokens_for_user(self, *, user_id: uuid.UUID) -> None:
+        self.invalidated_reset_tokens_for.append(user_id)
+        for token in self.password_reset_tokens_by_hash.values():
+            if token.user_id == user_id and token.consumed_at is None:
+                token.consumed_at = datetime.now(UTC)
+
+    async def create_password_reset_token(
+        self, *, user_id: uuid.UUID, token_hash: str, expires_at: datetime
+    ) -> PasswordResetToken:
+        token = PasswordResetToken(user_id=user_id, token_hash=token_hash, expires_at=expires_at)
+        self.password_reset_tokens_by_hash[token_hash] = token
+        return token
+
+    async def get_password_reset_token_by_hash(self, token_hash: str) -> PasswordResetToken | None:
+        return self.password_reset_tokens_by_hash.get(token_hash)
+
+    async def consume_password_reset_token(self, *, token_hash: str) -> PasswordResetToken | None:
+        token = self.password_reset_tokens_by_hash.get(token_hash)
+        if token is None or token.consumed_at is not None:
+            return None
+        if self.simulate_race_on_consume_reset:
+            self.simulate_race_on_consume_reset = False
+            token.consumed_at = datetime.now(UTC)
+            return None
+        token.consumed_at = datetime.now(UTC)
+        return token
+
     async def commit(self) -> None:
         self.commit_called = True
 
@@ -264,11 +317,22 @@ class FakeAccountService:
 
 
 class FakeEmailSender:
-    def __init__(self, *, raises: bool = False, raises_reuse_alert: bool = False) -> None:
+    def __init__(
+        self,
+        *,
+        raises: bool = False,
+        raises_reuse_alert: bool = False,
+        raises_reset_email: bool = False,
+        raises_reset_notice: bool = False,
+    ) -> None:
         self.raises = raises
         self.raises_reuse_alert = raises_reuse_alert
+        self.raises_reset_email = raises_reset_email
+        self.raises_reset_notice = raises_reset_notice
         self.sent: list[dict[str, str]] = []
         self.reuse_alerts_sent: list[str] = []
+        self.reset_emails_sent: list[dict[str, str]] = []
+        self.reset_notices_sent: list[str] = []
 
     async def send_verification_email(self, *, to: str, raw_token: str) -> None:
         if self.raises:
@@ -285,6 +349,16 @@ class FakeEmailSender:
         if self.raises_reuse_alert:
             raise RuntimeError("reuse alert dispatch failed")
         self.reuse_alerts_sent.append(to)
+
+    async def send_password_reset_email(self, *, to: str, raw_token: str) -> None:
+        if self.raises_reset_email:
+            raise RuntimeError("password reset email dispatch failed")
+        self.reset_emails_sent.append({"to": to, "raw_token": raw_token})
+
+    async def send_password_reset_notice(self, *, to: str) -> None:
+        if self.raises_reset_notice:
+            raise RuntimeError("password reset notice dispatch failed")
+        self.reset_notices_sent.append(to)
 
 
 class FakeRefreshRateLimitCache:
@@ -307,6 +381,63 @@ class FakeRefreshRateLimitCache:
         return self.retry_after.get(family_id, 3600)
 
 
+class FakePasswordResetRateLimitCache:
+    """Three independent counters (resolved OD-2), mirroring the real
+    `PasswordResetRateLimitCache`'s three key namespaces.
+    """
+
+    def __init__(
+        self,
+        *,
+        cooldown_counts: dict[str, int] | None = None,
+        cooldown_retry_after: dict[str, int] | None = None,
+        account_counts: dict[str, int] | None = None,
+        account_retry_after: dict[str, int] | None = None,
+        ip_counts: dict[str, int] | None = None,
+        ip_retry_after: dict[str, int] | None = None,
+    ) -> None:
+        self.cooldown_counts = dict(cooldown_counts or {})
+        self.cooldown_retry_after = cooldown_retry_after or {}
+        self.account_counts = dict(account_counts or {})
+        self.account_retry_after = account_retry_after or {}
+        self.ip_counts = dict(ip_counts or {})
+        self.ip_retry_after = ip_retry_after or {}
+        self.cooldown_attempts_recorded: list[str] = []
+        self.account_attempts_recorded: list[str] = []
+        self.ip_attempts_recorded: list[str] = []
+
+    async def record_cooldown_attempt(self, email_hash: str, *, window_seconds: int) -> int:
+        self.cooldown_attempts_recorded.append(email_hash)
+        self.cooldown_counts[email_hash] = self.cooldown_counts.get(email_hash, 0) + 1
+        return self.cooldown_counts[email_hash]
+
+    async def get_cooldown_retry_after_seconds(self, email_hash: str) -> int:
+        return self.cooldown_retry_after.get(email_hash, 60)
+
+    async def record_account_attempt(self, email_hash: str, *, window_seconds: int) -> int:
+        self.account_attempts_recorded.append(email_hash)
+        self.account_counts[email_hash] = self.account_counts.get(email_hash, 0) + 1
+        return self.account_counts[email_hash]
+
+    async def get_account_retry_after_seconds(self, email_hash: str) -> int:
+        return self.account_retry_after.get(email_hash, 3600)
+
+    async def record_ip_attempt(self, ip: str, *, window_seconds: int) -> int:
+        self.ip_attempts_recorded.append(ip)
+        self.ip_counts[ip] = self.ip_counts.get(ip, 0) + 1
+        return self.ip_counts[ip]
+
+    async def get_ip_retry_after_seconds(self, ip: str) -> int:
+        return self.ip_retry_after.get(ip, 3600)
+
+
+def _email_hash(email: str) -> str:
+    """Test-side mirror of the service's own normalized-email hashing, used
+    only to pre-seed/assert against the fake rate-limit cache's keys.
+    """
+    return hashlib.sha256(email.strip().lower().encode()).hexdigest()
+
+
 def _make_service(
     repository: FakeUserRepository,
     issuer: FakeVerificationTokenIssuer | None = None,
@@ -315,6 +446,7 @@ def _make_service(
     throttle_cache: FakeLoginThrottleCache | None = None,
     account_service: FakeAccountService | None = None,
     refresh_rate_limit_cache: FakeRefreshRateLimitCache | None = None,
+    password_reset_rate_limit_cache: FakePasswordResetRateLimitCache | None = None,
 ) -> tuple[UserService, FakeVerificationTokenIssuer, FakeEmailSender]:
     issuer = issuer or FakeVerificationTokenIssuer()
     email_sender = email_sender or FakeEmailSender()
@@ -322,6 +454,9 @@ def _make_service(
     throttle_cache = throttle_cache or FakeLoginThrottleCache()
     account_service = account_service or FakeAccountService()
     refresh_rate_limit_cache = refresh_rate_limit_cache or FakeRefreshRateLimitCache()
+    password_reset_rate_limit_cache = (
+        password_reset_rate_limit_cache or FakePasswordResetRateLimitCache()
+    )
     service = UserService(
         repository,
         issuer,
@@ -330,6 +465,7 @@ def _make_service(
         throttle_cache,
         account_service,
         refresh_rate_limit_cache,
+        password_reset_rate_limit_cache,
     )
     return service, issuer, email_sender
 
@@ -1550,3 +1686,484 @@ async def test_rotate_refresh_token_rate_limit_exceeded_raises_too_many_attempts
     assert exc_info.value.headers == {"Retry-After": "120"}
     # No rotation was attempted against this token.
     assert repository.refresh_tokens_by_hash[hash_refresh_token(raw_token)].consumed_at is None
+
+
+# --- US-2.4 (spec US-008): password reset ------------------------------------
+
+
+async def _seed_reset_token(
+    repository: FakeUserRepository,
+    *,
+    user_id: uuid.UUID,
+    expires_at: datetime | None = None,
+    consumed_at: datetime | None = None,
+) -> str:
+    raw_token = f"raw-reset-token-{uuid.uuid4()}"
+    token = await repository.create_password_reset_token(
+        user_id=user_id,
+        token_hash=hashlib.sha256(raw_token.encode()).hexdigest(),
+        expires_at=expires_at or (datetime.now(UTC) + timedelta(minutes=30)),
+    )
+    if consumed_at is not None:
+        token.consumed_at = consumed_at
+    return raw_token
+
+
+async def _request_reset(service: UserService, email: str) -> None:
+    await service.request_password_reset(
+        PasswordResetRequestRequest(email=email),
+        ip=_IP,
+        user_agent="pytest-agent",
+        request_id=_REQUEST_ID,
+    )
+
+
+_RESET_OLD_PASSWORD = "OldStr0ng!Pass"  # pragma: allowlist secret
+_RESET_NEW_PASSWORD = "BrandNewStr0ngPass!"  # pragma: allowlist secret
+_RESET_SHORT_PASSWORD = "Sh0rt!"  # pragma: allowlist secret
+_RESET_BREACHED_PASSWORD = "Password123!"  # pragma: allowlist secret
+_RESET_CURRENT_PASSWORD = "CurrentStr0ngPass!"  # pragma: allowlist secret
+
+
+async def _confirm_reset(service: UserService, *, token: str, new_password: str) -> None:
+    await service.confirm_password_reset(
+        PasswordResetConfirmRequest(token=token, new_password=new_password),
+        ip=_IP,
+        user_agent="pytest-agent",
+        request_id=_REQUEST_ID,
+    )
+
+
+# --- PR-AC1: requesting a reset (FR-1) ---------------------------------------
+
+
+async def test_request_password_reset_known_account_creates_token_and_sends_email() -> None:
+    # Arrange
+    repository = FakeUserRepository()
+    user = await _seed_user(
+        repository,
+        email="reset.happy@example.com",
+        password="Str0ng!Pass",
+        email_verified=True,
+        status="active",
+    )
+    email_sender = FakeEmailSender()
+    service, _, _ = _make_service(repository, email_sender=email_sender)
+
+    # Act
+    await _request_reset(service, "reset.happy@example.com")
+
+    # Assert
+    assert len(repository.password_reset_tokens_by_hash) == 1
+    token = next(iter(repository.password_reset_tokens_by_hash.values()))
+    assert token.user_id == user.id
+    assert token.consumed_at is None
+    assert len(email_sender.reset_emails_sent) == 1
+    assert email_sender.reset_emails_sent[0]["to"] == "reset.happy@example.com"
+    assert repository.commit_called is True
+
+
+async def test_request_password_reset_invalidates_prior_unconsumed_token() -> None:
+    # Arrange
+    repository = FakeUserRepository()
+    user = await _seed_user(
+        repository,
+        email="reset.invalidate@example.com",
+        password="Str0ng!Pass",
+        email_verified=True,
+        status="active",
+    )
+    prior_raw_token = await _seed_reset_token(repository, user_id=user.id)
+    prior_hash = hashlib.sha256(prior_raw_token.encode()).hexdigest()
+    service, _, _ = _make_service(repository)
+
+    # Act
+    await _request_reset(service, "reset.invalidate@example.com")
+
+    # Assert
+    assert repository.password_reset_tokens_by_hash[prior_hash].consumed_at is not None
+    assert repository.invalidated_reset_tokens_for == [user.id]
+
+
+async def test_request_password_reset_writes_audit_log_entry() -> None:
+    # Arrange
+    repository = FakeUserRepository()
+    user = await _seed_user(
+        repository,
+        email="reset.audit@example.com",
+        password="Str0ng!Pass",
+        email_verified=True,
+        status="active",
+    )
+    service, _, _ = _make_service(repository)
+
+    # Act
+    await _request_reset(service, "reset.audit@example.com")
+
+    # Assert
+    entry = repository.audit_log_entries[-1]
+    assert entry["event"] == "password_reset_requested"
+    assert entry["actor_id"] == user.id
+
+
+# --- PR-AC3: anti-enumeration (FR-3, resolved OD-3) --------------------------
+
+
+async def test_request_password_reset_unknown_email_returns_generic_response_no_email_sent() -> (
+    None
+):
+    # Arrange
+    repository = FakeUserRepository()
+    email_sender = FakeEmailSender()
+    service, _, _ = _make_service(repository, email_sender=email_sender)
+
+    # Act
+    await _request_reset(service, "nobody@example.com")
+
+    # Assert
+    assert repository.password_reset_tokens_by_hash == {}
+    assert email_sender.reset_emails_sent == []
+
+
+async def test_request_password_reset_deactivated_returns_generic_no_email() -> None:
+    # Arrange
+    repository = FakeUserRepository()
+    await _seed_user(
+        repository,
+        email="reset.deactivated@example.com",
+        password="Str0ng!Pass",
+        email_verified=True,
+        status="deactivated",
+    )
+    email_sender = FakeEmailSender()
+    service, _, _ = _make_service(repository, email_sender=email_sender)
+
+    # Act
+    await _request_reset(service, "reset.deactivated@example.com")
+
+    # Assert
+    assert repository.password_reset_tokens_by_hash == {}
+    assert email_sender.reset_emails_sent == []
+
+
+async def test_request_password_reset_unverified_returns_generic_no_email() -> None:
+    # Arrange — eligibility mirrors login's own notion (email_verified
+    # required); an unverified account can't log in yet either.
+    repository = FakeUserRepository()
+    await _seed_user(
+        repository,
+        email="reset.unverified@example.com",
+        password="Str0ng!Pass",
+        email_verified=False,
+    )
+    email_sender = FakeEmailSender()
+    service, _, _ = _make_service(repository, email_sender=email_sender)
+
+    # Act
+    await _request_reset(service, "reset.unverified@example.com")
+
+    # Assert
+    assert repository.password_reset_tokens_by_hash == {}
+    assert email_sender.reset_emails_sent == []
+
+
+async def test_request_password_reset_unknown_email_still_writes_audit_log_entry() -> None:
+    # Arrange
+    repository = FakeUserRepository()
+    service, _, _ = _make_service(repository)
+
+    # Act
+    await _request_reset(service, "nobody@example.com")
+
+    # Assert
+    entry = repository.audit_log_entries[-1]
+    assert entry["event"] == "password_reset_requested"
+    assert entry["actor_id"] is None
+
+
+# --- PR-AC6: request flooding (FR-6, resolved OD-2) --------------------------
+
+
+async def test_request_password_reset_second_call_within_cooldown_returns_429() -> None:
+    # Arrange
+    repository = FakeUserRepository()
+    email_hash = _email_hash("reset.cooldown@example.com")
+    rate_limit_cache = FakePasswordResetRateLimitCache(
+        cooldown_counts={email_hash: 1}, cooldown_retry_after={email_hash: 45}
+    )
+    service, _, _ = _make_service(repository, password_reset_rate_limit_cache=rate_limit_cache)
+
+    # Act & Assert
+    with pytest.raises(TooManyAttemptsError) as exc_info:
+        await _request_reset(service, "reset.cooldown@example.com")
+    assert exc_info.value.headers == {"Retry-After": "45"}
+
+
+async def test_request_password_reset_sixth_call_within_hour_returns_429() -> None:
+    # Arrange
+    repository = FakeUserRepository()
+    email_hash = _email_hash("reset.hourly@example.com")
+    rate_limit_cache = FakePasswordResetRateLimitCache(
+        account_counts={email_hash: 5}, account_retry_after={email_hash: 1800}
+    )
+    service, _, _ = _make_service(repository, password_reset_rate_limit_cache=rate_limit_cache)
+
+    # Act & Assert
+    with pytest.raises(TooManyAttemptsError) as exc_info:
+        await _request_reset(service, "reset.hourly@example.com")
+    assert exc_info.value.headers == {"Retry-After": "1800"}
+
+
+async def test_request_password_reset_eleventh_call_from_ip_within_hour_returns_429() -> None:
+    # Arrange
+    repository = FakeUserRepository()
+    rate_limit_cache = FakePasswordResetRateLimitCache(
+        ip_counts={_IP: 10}, ip_retry_after={_IP: 2400}
+    )
+    service, _, _ = _make_service(repository, password_reset_rate_limit_cache=rate_limit_cache)
+
+    # Act & Assert
+    with pytest.raises(TooManyAttemptsError) as exc_info:
+        await _request_reset(service, "anyone@example.com")
+    assert exc_info.value.headers == {"Retry-After": "2400"}
+
+
+async def test_request_password_reset_check_order_cooldown_before_hourly_limits() -> None:
+    # Arrange — resolved OD-2: both the cooldown and the account-hourly
+    # limit are tripped simultaneously; cooldown's Retry-After must win, and
+    # the hourly counters must never even be recorded.
+    repository = FakeUserRepository()
+    email = "reset.order@example.com"
+    email_hash = _email_hash(email)
+    rate_limit_cache = FakePasswordResetRateLimitCache(
+        cooldown_counts={email_hash: 1},
+        cooldown_retry_after={email_hash: 30},
+        account_counts={email_hash: 5},
+        account_retry_after={email_hash: 1800},
+    )
+    service, _, _ = _make_service(repository, password_reset_rate_limit_cache=rate_limit_cache)
+
+    # Act & Assert
+    with pytest.raises(TooManyAttemptsError) as exc_info:
+        await _request_reset(service, email)
+    assert exc_info.value.headers == {"Retry-After": "30"}
+    assert rate_limit_cache.account_attempts_recorded == []
+    assert rate_limit_cache.ip_attempts_recorded == []
+
+
+# --- PR-AC2: completing the reset (FR-2) -------------------------------------
+
+
+async def test_confirm_password_reset_valid_token_replaces_password_and_revokes_sessions() -> None:
+    # Arrange
+    repository = FakeUserRepository()
+    user = await _seed_user(
+        repository,
+        email="confirm.happy@example.com",
+        password=_RESET_OLD_PASSWORD,
+        email_verified=True,
+        status="active",
+    )
+    raw_token = await _seed_reset_token(repository, user_id=user.id)
+    revocation_cache = FakeRevocationCache()
+    service, _, _ = _make_service(repository, revocation_cache=revocation_cache)
+
+    # Act
+    await _confirm_reset(service, token=raw_token, new_password=_RESET_NEW_PASSWORD)
+
+    # Assert
+    assert repository.password_hash_updates[user.id] != "OldStr0ng!Pass"
+    token_hash = hashlib.sha256(raw_token.encode()).hexdigest()
+    assert repository.password_reset_tokens_by_hash[token_hash].consumed_at is not None
+    assert len(revocation_cache.set_revoke_before_calls) == 1
+    assert revocation_cache.set_revoke_before_calls[0][0] == user.id
+    assert repository.commit_called is True
+
+
+async def test_confirm_password_reset_sends_notification_email() -> None:
+    # Arrange
+    repository = FakeUserRepository()
+    user = await _seed_user(
+        repository,
+        email="confirm.notify@example.com",
+        password=_RESET_OLD_PASSWORD,
+        email_verified=True,
+        status="active",
+    )
+    raw_token = await _seed_reset_token(repository, user_id=user.id)
+    email_sender = FakeEmailSender()
+    service, _, _ = _make_service(repository, email_sender=email_sender)
+
+    # Act
+    await _confirm_reset(service, token=raw_token, new_password=_RESET_NEW_PASSWORD)
+
+    # Assert
+    assert email_sender.reset_notices_sent == [user.email]
+
+
+async def test_confirm_password_reset_writes_audit_log_completed_event() -> None:
+    # Arrange
+    repository = FakeUserRepository()
+    user = await _seed_user(
+        repository,
+        email="confirm.audit@example.com",
+        password=_RESET_OLD_PASSWORD,
+        email_verified=True,
+        status="active",
+    )
+    raw_token = await _seed_reset_token(repository, user_id=user.id)
+    service, _, _ = _make_service(repository)
+
+    # Act
+    await _confirm_reset(service, token=raw_token, new_password=_RESET_NEW_PASSWORD)
+
+    # Assert
+    entry = repository.audit_log_entries[-1]
+    assert entry["event"] == "password_reset_completed"
+    assert entry["actor_id"] == user.id
+
+
+# --- PR-AC4: expired, consumed, or unknown token (FR-4) ----------------------
+
+
+async def test_confirm_password_reset_unknown_token_hash_raises_token_invalid() -> None:
+    # Arrange
+    repository = FakeUserRepository()
+    service, _, _ = _make_service(repository)
+
+    # Act & Assert
+    with pytest.raises(PasswordResetTokenInvalidError):
+        await _confirm_reset(service, token="never-issued-token", new_password=_RESET_NEW_PASSWORD)
+
+
+async def test_confirm_password_reset_already_consumed_token_raises_token_invalid() -> None:
+    # Arrange
+    repository = FakeUserRepository()
+    user = await _seed_user(
+        repository,
+        email="confirm.consumed@example.com",
+        password=_RESET_OLD_PASSWORD,
+        email_verified=True,
+        status="active",
+    )
+    raw_token = await _seed_reset_token(
+        repository, user_id=user.id, consumed_at=datetime.now(UTC) - timedelta(minutes=5)
+    )
+    service, _, _ = _make_service(repository)
+
+    # Act & Assert
+    with pytest.raises(PasswordResetTokenInvalidError):
+        await _confirm_reset(service, token=raw_token, new_password=_RESET_NEW_PASSWORD)
+
+
+async def test_confirm_password_reset_expired_token_raises_token_expired() -> None:
+    # Arrange
+    repository = FakeUserRepository()
+    user = await _seed_user(
+        repository,
+        email="confirm.expired@example.com",
+        password=_RESET_OLD_PASSWORD,
+        email_verified=True,
+        status="active",
+    )
+    raw_token = await _seed_reset_token(
+        repository, user_id=user.id, expires_at=datetime.now(UTC) - timedelta(seconds=1)
+    )
+    service, _, _ = _make_service(repository)
+
+    # Act & Assert
+    with pytest.raises(PasswordResetTokenExpiredError):
+        await _confirm_reset(service, token=raw_token, new_password=_RESET_NEW_PASSWORD)
+
+
+# --- PR-AC5: weak or reused password (FR-5, resolved OD-1) -------------------
+
+
+async def test_confirm_password_reset_too_short_raises_policy_keeps_token() -> None:
+    # Arrange
+    repository = FakeUserRepository()
+    user = await _seed_user(
+        repository,
+        email="confirm.short@example.com",
+        password=_RESET_OLD_PASSWORD,
+        email_verified=True,
+        status="active",
+    )
+    raw_token = await _seed_reset_token(repository, user_id=user.id)
+    service, _, _ = _make_service(repository)
+
+    # Act & Assert
+    with pytest.raises(PasswordPolicyError) as exc_info:
+        await _confirm_reset(service, token=raw_token, new_password=_RESET_SHORT_PASSWORD)
+    codes = {error.code for error in exc_info.value.errors or []}
+    assert "min_length" in codes
+    token_hash = hashlib.sha256(raw_token.encode()).hexdigest()
+    assert repository.password_reset_tokens_by_hash[token_hash].consumed_at is None
+
+
+async def test_confirm_password_reset_breached_raises_policy_keeps_token() -> None:
+    # Arrange
+    repository = FakeUserRepository()
+    user = await _seed_user(
+        repository,
+        email="confirm.breached@example.com",
+        password=_RESET_OLD_PASSWORD,
+        email_verified=True,
+        status="active",
+    )
+    raw_token = await _seed_reset_token(repository, user_id=user.id)
+    service, _, _ = _make_service(repository)
+
+    # Act & Assert — "Password123!" is in the bundled common_passwords.txt.
+    with pytest.raises(PasswordPolicyError) as exc_info:
+        await _confirm_reset(service, token=raw_token, new_password=_RESET_BREACHED_PASSWORD)
+    codes = {error.code for error in exc_info.value.errors or []}
+    assert "breached" in codes
+    token_hash = hashlib.sha256(raw_token.encode()).hexdigest()
+    assert repository.password_reset_tokens_by_hash[token_hash].consumed_at is None
+
+
+async def test_confirm_password_reset_reused_raises_policy_keeps_token() -> None:
+    # Arrange
+    repository = FakeUserRepository()
+    user = await _seed_user(
+        repository,
+        email="confirm.reused@example.com",
+        password=_RESET_CURRENT_PASSWORD,
+        email_verified=True,
+        status="active",
+    )
+    raw_token = await _seed_reset_token(repository, user_id=user.id)
+    service, _, _ = _make_service(repository)
+
+    # Act & Assert
+    with pytest.raises(PasswordPolicyError) as exc_info:
+        await _confirm_reset(service, token=raw_token, new_password=_RESET_CURRENT_PASSWORD)
+    codes = {error.code for error in exc_info.value.errors or []}
+    assert "reused" in codes
+    token_hash = hashlib.sha256(raw_token.encode()).hexdigest()
+    assert repository.password_reset_tokens_by_hash[token_hash].consumed_at is None
+
+
+# --- Spec-review resolution (accepted 2026-09-01): atomic consumption -------
+
+
+async def test_confirm_password_reset_concurrent_requests_only_one_succeeds() -> None:
+    # Arrange: simulates losing a concurrent race — the atomic consume fails
+    # even though the initial read saw an unconsumed token.
+    repository = FakeUserRepository(simulate_race_on_consume_reset=True)
+    user = await _seed_user(
+        repository,
+        email="confirm.race@example.com",
+        password=_RESET_OLD_PASSWORD,
+        email_verified=True,
+        status="active",
+    )
+    raw_token = await _seed_reset_token(repository, user_id=user.id)
+    service, _, _ = _make_service(repository)
+
+    # Act & Assert
+    with pytest.raises(PasswordResetTokenInvalidError):
+        await _confirm_reset(service, token=raw_token, new_password=_RESET_NEW_PASSWORD)
+    # The password was never actually changed by the losing request.
+    assert user.id not in repository.password_hash_updates

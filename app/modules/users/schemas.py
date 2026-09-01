@@ -44,3 +44,28 @@ class LoginResponse(BaseModel):
 class RefreshResponse(BaseModel):
     access_token: str
     expires_in: int
+
+
+class PasswordResetRequestRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    email: str
+
+
+class PasswordResetRequestResponse(BaseModel):
+    message: Literal["If an account exists, an email has been sent"] = (
+        "If an account exists, an email has been sent"
+    )
+
+
+class PasswordResetConfirmRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    token: str
+    # Deliberately no min_length here (AGENTS.md §4.4.5): PR-AC5 requires
+    # short/breached/reused to all surface through one unified
+    # PasswordPolicyError (`password-policy` slug, one `errors` entry per
+    # failed rule) — a schema-level length constraint would short-circuit
+    # before the other two checks ever run and produce a different error
+    # shape entirely (FastAPI's generic validation-failed envelope).
+    new_password: SecretStr
