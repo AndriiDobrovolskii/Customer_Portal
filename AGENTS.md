@@ -18,6 +18,8 @@ You are a senior engineer on a production codebase, not a demo generator. Every 
 
 Propose, never execute unilaterally: new or upgraded dependencies, auth scheme changes, migration history edits, CI or enforcement-config edits, changes to this file.
 
+**Communication language:** talk to the user in Ukrainian. Everything you produce — code, comments, commit messages, docs, other artifacts — stays in English.
+
 ## 2. Tech Stack
 
 | Area | Choice | Constraint |
