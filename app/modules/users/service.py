@@ -27,10 +27,23 @@ from app.modules.users.exceptions import (
     EmailNotVerifiedError,
     InvalidCredentialsError,
     RegistrationValidationError,
+    TokenInvalidError,
     TooManyAttemptsError,
 )
 from app.modules.users.models import RefreshToken, User, UserSession
-from app.modules.users.schemas import LoginRequest, LoginResponse, UserCreate, UserRead, UserStatus
+from app.modules.users.schemas import (
+    LoginRequest,
+    LoginResponse,
+    RefreshResponse,
+    UserCreate,
+    UserRead,
+    UserStatus,
+)
+
+_REFRESH_IDLE_TIMEOUT = timedelta(days=14)
+_REFRESH_CONCURRENT_GRACE_WINDOW = timedelta(seconds=10)
+_REFRESH_RATE_LIMIT_MAX_REQUESTS = 60
+_REFRESH_RATE_LIMIT_WINDOW_SECONDS = 3600
 
 logger = logging.getLogger(__name__)
 
@@ -67,6 +80,10 @@ class UserRepositoryProtocol(Protocol):
 
     async def revoke_refresh_token_family(self, *, family_id: uuid.UUID) -> None: ...
 
+    async def consume_refresh_token(self, *, token_hash: str) -> RefreshToken | None: ...
+
+    async def get_by_id(self, user_id: uuid.UUID) -> User | None: ...
+
     async def update_last_login_at(self, *, user_id: uuid.UUID) -> None: ...
 
     async def create_auth_audit_log_entry(
@@ -79,6 +96,7 @@ class UserRepositoryProtocol(Protocol):
         ip: str,
         user_agent: str | None,
         request_id: str,
+        severity: str | None = None,
     ) -> None: ...
 
     async def create_refresh_token(
@@ -88,6 +106,9 @@ class UserRepositoryProtocol(Protocol):
         family_id: uuid.UUID,
         user_id: uuid.UUID,
         expires_at: datetime,
+        ip: str | None = None,
+        user_agent: str | None = None,
+        last_used_at: datetime | None = None,
     ) -> RefreshToken: ...
 
     async def commit(self) -> None: ...
@@ -117,6 +138,12 @@ class LoginThrottleCacheProtocol(Protocol):
     async def get_ip_retry_after_seconds(self, ip: str) -> int: ...
 
     async def reset_account_failures(self, user_id: uuid.UUID) -> None: ...
+
+
+class RefreshRateLimitCacheProtocol(Protocol):
+    async def record_request(self, family_id: uuid.UUID, *, window_seconds: int) -> int: ...
+
+    async def get_retry_after_seconds(self, family_id: uuid.UUID) -> int: ...
 
 
 class AccountServiceProtocol(Protocol):
@@ -189,6 +216,7 @@ class UserService:
         revocation_cache: RevocationCacheProtocol,
         throttle_cache: LoginThrottleCacheProtocol,
         account_service: AccountServiceProtocol,
+        refresh_rate_limit_cache: RefreshRateLimitCacheProtocol,
     ) -> None:
         self._repository = repository
         self._issuer = issuer
@@ -196,6 +224,7 @@ class UserService:
         self._revocation_cache = revocation_cache
         self._throttle_cache = throttle_cache
         self._account_service = account_service
+        self._refresh_rate_limit_cache = refresh_rate_limit_cache
 
     async def register_user(self, payload: UserCreate) -> UserRead:
         errors: list[FieldError] = []
@@ -266,6 +295,7 @@ class UserService:
                 ip=ip,
                 user_agent=user_agent,
                 request_id=request_id,
+                severity=None,
             )
             await self._repository.commit()
             # Cache write after the commit (AGENTS.md §3).
@@ -286,6 +316,7 @@ class UserService:
                 ip=ip,
                 user_agent=user_agent,
                 request_id=request_id,
+                severity=None,
             )
             await self._repository.commit()
             await self._throttle_cache.record_account_failure(
@@ -310,6 +341,7 @@ class UserService:
                     ip=ip,
                     user_agent=user_agent,
                     request_id=request_id,
+                    severity=None,
                 )
                 await self._repository.commit()
                 raise AccountDeactivatedError
@@ -324,6 +356,7 @@ class UserService:
                 ip=ip,
                 user_agent=user_agent,
                 request_id=request_id,
+                severity=None,
             )
             await self._repository.commit()
             raise EmailNotVerifiedError
@@ -345,6 +378,8 @@ class UserService:
             family_id=uuid.uuid4(),
             user_id=user.id,
             expires_at=refresh_expires_at,
+            ip=ip,
+            user_agent=user_agent,
         )
 
         await self._repository.update_last_login_at(user_id=user.id)
@@ -356,6 +391,7 @@ class UserService:
             ip=ip,
             user_agent=user_agent,
             request_id=request_id,
+            severity=None,
         )
         await self._repository.commit()
 
@@ -453,6 +489,7 @@ class UserService:
             ip=ip,
             user_agent=user_agent,
             request_id=request_id,
+            severity=None,
         )
         await self._repository.commit()
 
@@ -476,6 +513,7 @@ class UserService:
             ip=ip,
             user_agent=user_agent,
             request_id=request_id,
+            severity=None,
         )
         await self._repository.commit()
 
@@ -490,3 +528,155 @@ class UserService:
         """
         await self._repository.revoke_sessions_except(user_id=user_id, except_jti=except_jti)
         await self._repository.commit()
+
+    async def rotate_refresh_token(
+        self, raw_token: str | None, *, ip: str, user_agent: str | None, request_id: str
+    ) -> tuple[RefreshResponse, str]:
+        """FR-1-FR-7 (RT-AC1-RT-AC6): single-use rotation, reuse detection,
+        idle/absolute lifetime enforcement, account eligibility, a per-family
+        rate limit (resolved OD-1), and an atomic check-and-consume.
+
+        Check order (resolved OD-5; rate-limit position and the expired-vs-
+        reused precedence resolved in the 2026-09-01 spec review addendum):
+        unknown -> rate limit -> expired/absolute-cap -> revoked-by-logout ->
+        already-consumed/reuse -> account eligibility -> idle timeout ->
+        atomic consume-and-rotate. Every rejection raises the identical
+        `TokenInvalidError` (FR-3's indistinguishability, resolved OD-3).
+
+        Returns (response, raw_refresh_token) — mirrors `authenticate_user`'s
+        tuple-return pattern for a value the router needs beyond the schema.
+        """
+        if raw_token is None:
+            raise TokenInvalidError
+
+        settings = get_settings()
+        token_hash = hash_refresh_token(raw_token)
+        existing = await self._repository.get_refresh_token_by_hash(token_hash)
+        if existing is None:
+            raise TokenInvalidError
+
+        # Resolved OD-1: keyed by family_id, checked as soon as a family is
+        # known — a client hammering a real family is throttled regardless
+        # of whether this specific call would otherwise succeed or 401.
+        request_count = await self._refresh_rate_limit_cache.record_request(
+            existing.family_id, window_seconds=_REFRESH_RATE_LIMIT_WINDOW_SECONDS
+        )
+        if request_count > _REFRESH_RATE_LIMIT_MAX_REQUESTS:
+            retry_after = await self._refresh_rate_limit_cache.get_retry_after_seconds(
+                existing.family_id
+            )
+            raise TooManyAttemptsError(retry_after_seconds=retry_after)
+
+        now = datetime.now(UTC)
+
+        # FR-5 (absolute cap): `expires_at` is fixed at family creation and
+        # copied forward unchanged by every rotation (FR-1 below), so this
+        # single check also covers FR-3's "expired" case — no separate
+        # family-creation timestamp is needed.
+        if existing.expires_at <= now:
+            raise TokenInvalidError
+
+        # FR-3's "revoked by logout" case, checked before reuse per resolved
+        # OD-5 / the spec's own FR-3 note ("first check... before reuse").
+        if existing.revoked_at is not None:
+            raise TokenInvalidError
+
+        if existing.consumed_at is not None:
+            await self._handle_reuse_or_race(
+                existing, now=now, ip=ip, user_agent=user_agent, request_id=request_id
+            )
+            raise TokenInvalidError
+
+        user = await self._repository.get_by_id(existing.user_id)
+        if user is None or user.status == UserStatus.DEACTIVATED.value:
+            raise TokenInvalidError
+        revoke_before = await self._revocation_cache.get_revoke_before(existing.user_id)
+        if revoke_before is not None and existing.issued_at <= revoke_before:
+            raise TokenInvalidError
+
+        last_used_reference = existing.last_used_at or existing.issued_at
+        if now - last_used_reference > _REFRESH_IDLE_TIMEOUT:
+            raise TokenInvalidError
+
+        consumed = await self._repository.consume_refresh_token(token_hash=token_hash)
+        if consumed is None:
+            # Lost a concurrent race (RT-AC6): another request consumed this
+            # token between the read above and this atomic attempt. Re-fetch
+            # to apply the same grace-window-vs-reuse logic as above.
+            raced = await self._repository.get_refresh_token_by_hash(token_hash)
+            if raced is not None:
+                await self._handle_reuse_or_race(
+                    raced,
+                    now=datetime.now(UTC),
+                    ip=ip,
+                    user_agent=user_agent,
+                    request_id=request_id,
+                )
+            raise TokenInvalidError
+
+        new_raw_token, new_token_hash = generate_refresh_token()
+        await self._repository.create_refresh_token(
+            token_hash=new_token_hash,
+            family_id=consumed.family_id,
+            user_id=consumed.user_id,
+            expires_at=consumed.expires_at,
+            ip=ip,
+            user_agent=user_agent,
+            last_used_at=now,
+        )
+
+        jti = uuid.uuid4()
+        session_expires_at = now + timedelta(seconds=settings.access_token_ttl_seconds)
+        await self._repository.create_session(
+            user_id=consumed.user_id, jti=jti, expires_at=session_expires_at
+        )
+        await self._repository.commit()
+
+        response = RefreshResponse(
+            access_token=encode_access_token(user_id=consumed.user_id, jti=jti),
+            expires_in=settings.access_token_ttl_seconds,
+        )
+        return response, new_raw_token
+
+    async def _handle_reuse_or_race(
+        self,
+        token: RefreshToken,
+        *,
+        now: datetime,
+        ip: str,
+        user_agent: str | None,
+        request_id: str,
+    ) -> None:
+        """RT-AC2 vs. RT-AC6: a token already marked `consumed_at` is either
+        a losing concurrent request inside the 10-second grace window (a
+        race, not an attack — no revocation) or genuine reuse of an
+        already-completed rotation (the whole family is destroyed and the
+        owner is alerted). Runs regardless of account eligibility (resolved
+        OD-5) — reuse of a consumed token is evidence of compromise
+        independent of the account's current status.
+        """
+        consumed_at = token.consumed_at
+        if consumed_at is not None and now - consumed_at <= _REFRESH_CONCURRENT_GRACE_WINDOW:
+            return
+
+        await self._repository.revoke_refresh_token_family(family_id=token.family_id)
+        await self._repository.create_auth_audit_log_entry(
+            event="refresh_reuse_detected",
+            reason=None,
+            scope=None,
+            actor_id=token.user_id,
+            ip=ip,
+            user_agent=user_agent,
+            request_id=request_id,
+            severity="high",
+        )
+        await self._repository.commit()
+
+        # Fire-and-forget (resolved 2026-09-01 spec review): the revocation/
+        # audit outcome above does not wait on or depend on this succeeding.
+        user = await self._repository.get_by_id(token.user_id)
+        if user is not None:
+            try:
+                await self._email_sender.send_refresh_reuse_alert(to=user.email)
+            except Exception:
+                logger.exception("failed to send refresh reuse alert email")

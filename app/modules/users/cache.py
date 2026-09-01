@@ -2,7 +2,7 @@ import uuid
 
 from redis.asyncio import Redis
 
-from app.core.cache_keys import login_fail_account_key, login_fail_ip_key
+from app.core.cache_keys import login_fail_account_key, login_fail_ip_key, refresh_rate_limit_key
 
 
 class LoginThrottleCache:
@@ -60,4 +60,34 @@ class LoginThrottleCache:
 
     async def _get_ttl(self, key: str) -> int:
         ttl = await self._client.ttl(key)
+        return max(int(ttl), 0)
+
+
+class RefreshRateLimitCache:
+    """Per-family_id request counter for POST /v1/auth/refresh (resolved OD-1).
+
+    Advisory rate-limit state, same class of gateway as LoginThrottleCache:
+    no DB-backed source of truth to degrade to on a Valkey outage, so this
+    gateway does not catch client errors itself — the service decides how
+    to handle an outage, per AGENTS.md §3's default (only the token
+    denylist fails closed).
+    """
+
+    def __init__(self, client: Redis) -> None:
+        self._client = client
+
+    async def record_request(self, family_id: uuid.UUID, *, window_seconds: int) -> int:
+        key = refresh_rate_limit_key(family_id)
+        async with self._client.pipeline(transaction=True) as pipe:
+            pipe.incr(key)
+            pipe.expire(key, window_seconds)
+            count, _ = await pipe.execute()
+        return int(count)
+
+    async def get_request_count(self, family_id: uuid.UUID) -> int:
+        raw = await self._client.get(refresh_rate_limit_key(family_id))
+        return int(raw) if raw is not None else 0
+
+    async def get_retry_after_seconds(self, family_id: uuid.UUID) -> int:
+        ttl = await self._client.ttl(refresh_rate_limit_key(family_id))
         return max(int(ttl), 0)

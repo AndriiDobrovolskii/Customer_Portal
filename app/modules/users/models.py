@@ -48,6 +48,7 @@ class AuthAuditLog(Base):
     event: Mapped[str] = mapped_column(String(32), nullable=False)
     reason: Mapped[str | None] = mapped_column(String(32))
     scope: Mapped[str | None] = mapped_column(String(32))
+    severity: Mapped[str | None] = mapped_column(String(16))
     # Deliberately no FK: the row must survive the eventual 30-day-grace-
     # period account deletion/anonymization (BR-007), matching every other
     # audit table in this project.
@@ -74,3 +75,7 @@ class RefreshToken(Base):
     )
     expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    consumed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    last_used_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    ip: Mapped[str | None] = mapped_column(String(45))
+    user_agent: Mapped[str | None] = mapped_column(Text())

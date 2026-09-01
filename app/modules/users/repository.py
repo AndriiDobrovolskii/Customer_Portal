@@ -18,6 +18,10 @@ class UserRepository:
         )
         return result.scalar_one_or_none()
 
+    async def get_by_id(self, user_id: uuid.UUID) -> User | None:
+        result = await self._session.execute(select(User).where(User.id == user_id))
+        return result.scalar_one_or_none()
+
     async def create(self, *, email: str, hashed_password: str, status: str) -> User | None:
         user = User(email=email, hashed_password=hashed_password, status=status)
         self._session.add(user)
@@ -68,6 +72,22 @@ class UserRepository:
             .values(revoked_at=func.now())
         )
 
+    async def consume_refresh_token(self, *, token_hash: str) -> RefreshToken | None:
+        """Atomic check-and-consume (RT-AC7): a conditional UPDATE guarded by
+        `consumed_at IS NULL`, so two concurrent callers presenting the same
+        token can never both succeed — a read-then-write pair here would be
+        a TOCTOU bug (both would observe `consumed_at IS NULL` and rotate).
+        Returns `None` when the token was already consumed (by a prior
+        rotation, or by a losing concurrent request).
+        """
+        result = await self._session.execute(
+            update(RefreshToken)
+            .where(RefreshToken.token_hash == token_hash, RefreshToken.consumed_at.is_(None))
+            .values(consumed_at=func.now())
+            .returning(RefreshToken)
+        )
+        return result.scalar_one_or_none()
+
     async def update_last_login_at(self, *, user_id: uuid.UUID) -> None:
         await self._session.execute(
             update(User).where(User.id == user_id).values(last_login_at=func.now())
@@ -83,12 +103,14 @@ class UserRepository:
         ip: str,
         user_agent: str | None,
         request_id: str,
+        severity: str | None = None,
     ) -> None:
         self._session.add(
             AuthAuditLog(
                 event=event,
                 reason=reason,
                 scope=scope,
+                severity=severity,
                 actor_id=actor_id,
                 ip=ip,
                 user_agent=user_agent,
@@ -103,9 +125,18 @@ class UserRepository:
         family_id: uuid.UUID,
         user_id: uuid.UUID,
         expires_at: datetime,
+        ip: str | None = None,
+        user_agent: str | None = None,
+        last_used_at: datetime | None = None,
     ) -> RefreshToken:
         refresh_token = RefreshToken(
-            token_hash=token_hash, family_id=family_id, user_id=user_id, expires_at=expires_at
+            token_hash=token_hash,
+            family_id=family_id,
+            user_id=user_id,
+            expires_at=expires_at,
+            ip=ip,
+            user_agent=user_agent,
+            last_used_at=last_used_at,
         )
         self._session.add(refresh_token)
         await self._session.flush()

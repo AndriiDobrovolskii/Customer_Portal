@@ -49,6 +49,19 @@ class TooManyAttemptsError(ProblemError):
         self.headers = {"Retry-After": str(retry_after_seconds)}
 
 
+class TokenInvalidError(ProblemError):
+    """Raised for RT-AC2/RT-AC3/RT-AC5/RT-AC6 — reused uniformly so an
+    unknown, expired, revoked-by-logout, reused, or raced-out refresh token
+    all produce an identical response (FR-3's indistinguishability
+    requirement, resolved OD-3 scoped to status/body only).
+    """
+
+    type_slug = "token-invalid"
+    title = "Refresh Token Invalid"
+    status = 401
+    detail = "This session can no longer be refreshed. Sign in again."
+
+
 class UnauthenticatedError(ProblemError):
     type_slug = "unauthenticated"
     title = "Unauthenticated"

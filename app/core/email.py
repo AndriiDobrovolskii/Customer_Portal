@@ -11,6 +11,8 @@ class EmailSender(Protocol):
 
     async def send_email_change_notice(self, *, to: str) -> None: ...
 
+    async def send_refresh_reuse_alert(self, *, to: str) -> None: ...
+
 
 class LoggingEmailSender:
     """No-op sender that logs dispatch without a real mail provider.
@@ -27,6 +29,9 @@ class LoggingEmailSender:
 
     async def send_email_change_notice(self, *, to: str) -> None:
         logger.info("email change notice dispatched")
+
+    async def send_refresh_reuse_alert(self, *, to: str) -> None:
+        logger.info("refresh reuse alert dispatched")
 
 
 def get_email_sender() -> EmailSender:
