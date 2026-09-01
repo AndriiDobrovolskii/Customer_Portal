@@ -906,3 +906,399 @@ async def test_logout_all_does_not_share_logout_leniency_rejects_revoked_token(
 
     # Assert: no leniency here — 401, not 204
     assert response.status_code == 401
+
+
+# --- US-2.3 (spec US-007): refresh token rotation ----------------------------
+
+_REFRESH_TEST_PASSWORD = "Str0ng!Pass1"  # pragma: allowlist secret
+
+
+async def _login_for_refresh(
+    client: AsyncClient, db_session: AsyncSession, *, email: str
+) -> tuple[User, str]:
+    """Seeds an active/verified user, logs in through the real endpoint, and
+    returns (user, raw_refresh_token) — the raw cookie value is also left in
+    the client's cookie jar, exactly as a browser would carry it forward.
+    """
+    user = await _seed_login_user(
+        db_session,
+        email=email,
+        password=_REFRESH_TEST_PASSWORD,
+        email_verified=True,
+        status="active",
+    )
+    response = await client.post(
+        "/api/v1/auth/login", json={"email": email, "password": _REFRESH_TEST_PASSWORD}
+    )
+    assert response.status_code == 200
+    raw_refresh_token = client.cookies.get("refresh_token")
+    assert raw_refresh_token is not None
+    return user, raw_refresh_token
+
+
+async def _seed_refresh_token_row(
+    db_session: AsyncSession,
+    *,
+    user_id: uuid.UUID,
+    family_id: uuid.UUID | None = None,
+    expires_at: datetime | None = None,
+    consumed_at: datetime | None = None,
+    revoked_at: datetime | None = None,
+    last_used_at: datetime | None = None,
+    issued_at: datetime | None = None,
+) -> str:
+    """Directly seeds a refresh_tokens row for full control over its state
+    (idle/absolute/revoked/consumed), returning the raw presented value.
+    """
+    raw_token = f"raw-refresh-{uuid.uuid4()}"
+    row = RefreshToken(
+        token_hash=hash_refresh_token(raw_token),
+        family_id=family_id or uuid.uuid4(),
+        user_id=user_id,
+        expires_at=expires_at or (datetime.now(UTC) + timedelta(days=30)),
+        last_used_at=last_used_at,
+    )
+    db_session.add(row)
+    await db_session.flush()
+    row.issued_at = issued_at or datetime.now(UTC)
+    if consumed_at is not None:
+        row.consumed_at = consumed_at
+    if revoked_at is not None:
+        row.revoked_at = revoked_at
+    await db_session.flush()
+    return raw_token
+
+
+def _set_refresh_cookie(client: AsyncClient, raw_token: str) -> None:
+    client.cookies.set("refresh_token", raw_token, path="/api/v1/auth")
+
+
+# --- RT-AC1: successful rotation (FR-1) --------------------------------------
+
+
+async def test_refresh_returns_200_and_rotates_cookie(
+    client: AsyncClient, db_session: AsyncSession
+) -> None:
+    # Arrange
+    user, old_raw_token = await _login_for_refresh(
+        client, db_session, email="refresh.happy@example.com"
+    )
+    old_row = (
+        await db_session.execute(
+            select(RefreshToken).where(RefreshToken.token_hash == hash_refresh_token(old_raw_token))
+        )
+    ).scalar_one()
+
+    # Act
+    response = await client.post("/api/v1/auth/refresh")
+
+    # Assert: status + body shape (no token_type, unlike login)
+    assert response.status_code == 200
+    body = response.json()
+    assert set(body.keys()) == {"access_token", "expires_in"}
+    assert body["expires_in"] == 900
+    claims = decode_access_token(body["access_token"])
+    assert claims.user_id == user.id
+
+    # Assert: Set-Cookie rotates the value, same attributes as /login
+    set_cookie_headers = response.headers.get_list("set-cookie")
+    assert len(set_cookie_headers) == 1
+    cookie_header = set_cookie_headers[0]
+    assert cookie_header.startswith("refresh_token=")
+    assert f"refresh_token={old_raw_token}" not in cookie_header
+    assert "Path=/api/v1/auth" in cookie_header
+    assert "HttpOnly" in cookie_header
+    assert "Secure" in cookie_header
+
+    # Assert: persisted state
+    await db_session.refresh(old_row)
+    assert old_row.consumed_at is not None
+    new_result = await db_session.execute(
+        select(RefreshToken).where(
+            RefreshToken.user_id == user.id, RefreshToken.token_hash != old_row.token_hash
+        )
+    )
+    new_row = new_result.scalar_one()
+    assert new_row.family_id == old_row.family_id
+    assert new_row.expires_at == old_row.expires_at
+
+    # Assert: a new user_sessions row backs the new access token
+    session_result = await db_session.execute(
+        select(UserSession).where(UserSession.jti == claims.jti)
+    )
+    assert session_result.scalar_one().revoked_at is None
+
+
+# --- RT-AC2: reuse detection (FR-2) -------------------------------------------
+
+
+async def test_refresh_reuse_returns_401_and_revokes_family(
+    client: AsyncClient, db_session: AsyncSession
+) -> None:
+    # Arrange: rotate once (consuming the original token), then replay it.
+    user, old_raw_token = await _login_for_refresh(
+        client, db_session, email="refresh.reuse@example.com"
+    )
+    user_id = user.id
+    old_row = (
+        await db_session.execute(
+            select(RefreshToken).where(RefreshToken.token_hash == hash_refresh_token(old_raw_token))
+        )
+    ).scalar_one()
+    family_id = old_row.family_id
+    first_refresh = await client.post("/api/v1/auth/refresh")
+    assert first_refresh.status_code == 200
+
+    # Backdate consumption past the 10s concurrency grace window (RT-AC6) —
+    # otherwise this immediate replay would read as a race, not reuse, per
+    # FR-7's own deliberate design (a real attacker replaying within that
+    # window is indistinguishable from a legitimate double-render).
+    db_session.expire_all()
+    await db_session.refresh(old_row)
+    old_row.consumed_at = datetime.now(UTC) - timedelta(minutes=1)
+    await db_session.flush()
+
+    # Act: replay the already-consumed original token
+    _set_refresh_cookie(client, old_raw_token)
+    response = await client.post("/api/v1/auth/refresh")
+
+    # Assert
+    assert response.status_code == 401
+    assert response.headers["content-type"] == "application/problem+json"
+    assert response.json()["type"] == "https://portal.internal/errors/token-invalid"
+
+    # expire_all(): the test's session already holds `old_row` in its
+    # identity map from the query above; without expiring, a second query
+    # for the same rows would return the pre-request cached objects instead
+    # of the app's committed changes (expire_on_commit=False, per conftest).
+    db_session.expire_all()
+    family_result = await db_session.execute(
+        select(RefreshToken).where(RefreshToken.family_id == family_id)
+    )
+    for row in family_result.scalars().all():
+        assert row.revoked_at is not None
+
+    audit_result = await db_session.execute(
+        select(AuthAuditLog).where(
+            AuthAuditLog.event == "refresh_reuse_detected", AuthAuditLog.actor_id == user_id
+        )
+    )
+    audit_entry = audit_result.scalar_one()
+    assert audit_entry.severity == "high"
+
+
+# --- RT-AC3: unknown / expired / revoked-by-logout, indistinguishable (FR-3) -
+
+
+async def test_refresh_no_cookie_returns_401(client: AsyncClient) -> None:
+    # Arrange: this project's per-protected-route "no token" security case
+    # (AGENTS.md §5) — this route's equivalent credential is the cookie,
+    # not a Bearer token, so "no token" means no cookie at all.
+    # Act
+    response = await client.post("/api/v1/auth/refresh")
+
+    # Assert
+    assert response.status_code == 401
+    assert response.json()["type"] == "https://portal.internal/errors/token-invalid"
+
+
+async def test_refresh_unknown_expired_revoked_return_identical_401_body(
+    client: AsyncClient, db_session: AsyncSession
+) -> None:
+    # Arrange
+    user = await _seed_login_user(
+        db_session,
+        email="refresh.threecases@example.com",
+        password=_REFRESH_TEST_PASSWORD,
+        email_verified=True,
+        status="active",
+    )
+    expired_raw = await _seed_refresh_token_row(
+        db_session, user_id=user.id, expires_at=datetime.now(UTC) - timedelta(seconds=1)
+    )
+    revoked_raw = await _seed_refresh_token_row(
+        db_session, user_id=user.id, revoked_at=datetime.now(UTC)
+    )
+
+    # Act
+    _set_refresh_cookie(client, "never-issued-token-value")
+    unknown_response = await client.post("/api/v1/auth/refresh")
+    _set_refresh_cookie(client, expired_raw)
+    expired_response = await client.post("/api/v1/auth/refresh")
+    _set_refresh_cookie(client, revoked_raw)
+    revoked_response = await client.post("/api/v1/auth/refresh")
+
+    # Assert: identical status + body across all three (resolved OD-3)
+    assert unknown_response.status_code == expired_response.status_code == 401
+    assert revoked_response.status_code == 401
+    assert unknown_response.json() == expired_response.json() == revoked_response.json()
+
+
+# --- RT-AC4: idle timeout and absolute cap (FR-4, FR-5) ----------------------
+
+
+async def test_refresh_idle_timeout_returns_401(
+    client: AsyncClient, db_session: AsyncSession
+) -> None:
+    # Arrange
+    user = await _seed_login_user(
+        db_session,
+        email="refresh.idle@example.com",
+        password=_REFRESH_TEST_PASSWORD,
+        email_verified=True,
+        status="active",
+    )
+    raw_token = await _seed_refresh_token_row(
+        db_session, user_id=user.id, last_used_at=datetime.now(UTC) - timedelta(days=15)
+    )
+
+    # Act
+    _set_refresh_cookie(client, raw_token)
+    response = await client.post("/api/v1/auth/refresh")
+
+    # Assert
+    assert response.status_code == 401
+    assert response.json()["type"] == "https://portal.internal/errors/token-invalid"
+
+
+async def test_refresh_absolute_cap_returns_401(
+    client: AsyncClient, db_session: AsyncSession
+) -> None:
+    # Arrange: expired family, even though it was used very recently.
+    user = await _seed_login_user(
+        db_session,
+        email="refresh.absolutecap@example.com",
+        password=_REFRESH_TEST_PASSWORD,
+        email_verified=True,
+        status="active",
+    )
+    raw_token = await _seed_refresh_token_row(
+        db_session,
+        user_id=user.id,
+        expires_at=datetime.now(UTC) - timedelta(seconds=1),
+        last_used_at=datetime.now(UTC),
+    )
+
+    # Act
+    _set_refresh_cookie(client, raw_token)
+    response = await client.post("/api/v1/auth/refresh")
+
+    # Assert
+    assert response.status_code == 401
+
+
+# --- RT-AC5: account eligibility (FR-6) --------------------------------------
+
+
+async def test_refresh_deactivated_account_returns_401(
+    client: AsyncClient, db_session: AsyncSession
+) -> None:
+    # Arrange
+    user = await _seed_login_user(
+        db_session,
+        email="refresh.deactivated@example.com",
+        password=_REFRESH_TEST_PASSWORD,
+        email_verified=True,
+        status="deactivated",
+    )
+    raw_token = await _seed_refresh_token_row(db_session, user_id=user.id)
+
+    # Act
+    _set_refresh_cookie(client, raw_token)
+    response = await client.post("/api/v1/auth/refresh")
+
+    # Assert
+    assert response.status_code == 401
+
+
+async def test_refresh_revoke_before_returns_401(
+    client: AsyncClient, db_session: AsyncSession
+) -> None:
+    # Arrange: logout-all sets revoke_before to now; the pre-existing refresh
+    # cookie was issued before that moment.
+    _, access_token = await _login(client, db_session, email="refresh.revokebefore@example.com")
+
+    # Act
+    logout_all_response = await client.post(
+        "/api/v1/auth/logout-all", headers=_auth_headers(access_token)
+    )
+    assert logout_all_response.status_code == 204
+    response = await client.post("/api/v1/auth/refresh")
+
+    # Assert
+    assert response.status_code == 401
+
+
+# --- RT-AC6: atomic concurrent handling (FR-7) -------------------------------
+
+
+async def test_refresh_concurrent_requests_exactly_one_succeeds(
+    real_client: AsyncClient, db_session: AsyncSession, cleanup_users: list[str]
+) -> None:
+    # Arrange
+    email = f"refresh.race.{uuid.uuid4().hex}@example.com"
+    cleanup_users.append(email)
+    await _seed_login_user(
+        db_session,
+        email=email,
+        password=_REFRESH_TEST_PASSWORD,
+        email_verified=True,
+        status="active",
+    )
+    login_response = await real_client.post(
+        "/api/v1/auth/login", json={"email": email, "password": _REFRESH_TEST_PASSWORD}
+    )
+    assert login_response.status_code == 200
+    raw_refresh_token = login_response.cookies.get("refresh_token")
+    assert raw_refresh_token is not None
+    row = (
+        await db_session.execute(
+            select(RefreshToken).where(
+                RefreshToken.token_hash == hash_refresh_token(raw_refresh_token)
+            )
+        )
+    ).scalar_one()
+    family_id = row.family_id
+
+    # Act: two simultaneous requests carrying the same, still-unconsumed token
+    real_client.cookies.set("refresh_token", raw_refresh_token, path="/api/v1/auth")
+    responses = await asyncio.gather(
+        real_client.post("/api/v1/auth/refresh"),
+        real_client.post("/api/v1/auth/refresh"),
+    )
+
+    # Assert: exactly one 200, one 401 — and the family was NOT revoked
+    # (a same-family retry inside the grace window is a race, not an attack).
+    status_codes = sorted(response.status_code for response in responses)
+    assert status_codes == [200, 401]
+
+    engine = app.state.db_engine
+    async with engine.connect() as connection:
+        result = await connection.execute(
+            select(RefreshToken).where(RefreshToken.family_id == family_id)
+        )
+        for persisted_row in result.all():
+            assert persisted_row.revoked_at is None
+
+
+# --- Resolved OD-1: per-family rate limit ------------------------------------
+
+
+async def test_refresh_rate_limit_exceeded_returns_429(
+    client: AsyncClient, db_session: AsyncSession
+) -> None:
+    # Arrange: the client's cookie jar carries the rotated cookie forward on
+    # every call, so 60 successful rotations share one family_id throughout.
+    await _login_for_refresh(client, db_session, email="refresh.ratelimit@example.com")
+    for _ in range(60):
+        response = await client.post("/api/v1/auth/refresh")
+        assert response.status_code == 200
+
+    # Act: the 61st request within the trailing hour is throttled.
+    response = await client.post("/api/v1/auth/refresh")
+
+    # Assert
+    assert response.status_code == 429
+    assert response.headers["content-type"] == "application/problem+json"
+    assert response.json()["type"] == "https://portal.internal/errors/too-many-attempts"
+    assert int(response.headers["retry-after"]) > 0

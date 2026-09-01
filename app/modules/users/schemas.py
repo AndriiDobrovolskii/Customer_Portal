@@ -39,3 +39,8 @@ class LoginResponse(BaseModel):
     access_token: str
     token_type: Literal["Bearer"] = "Bearer"  # noqa: S105 -- OAuth2 field name, not a secret
     expires_in: int
+
+
+class RefreshResponse(BaseModel):
+    access_token: str
+    expires_in: int

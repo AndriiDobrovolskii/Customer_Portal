@@ -8,7 +8,13 @@ from app.modules.users.dependencies import (
     CurrentUserDep,
     UserServiceDep,
 )
-from app.modules.users.schemas import LoginRequest, LoginResponse, UserCreate, UserRead
+from app.modules.users.schemas import (
+    LoginRequest,
+    LoginResponse,
+    RefreshResponse,
+    UserCreate,
+    UserRead,
+)
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
@@ -52,6 +58,34 @@ async def login(
         samesite="strict",
     )
     return login_response
+
+
+@router.post("/refresh", response_model=RefreshResponse, status_code=status.HTTP_200_OK)
+async def refresh_token(
+    service: UserServiceDep,
+    response: Response,
+    request: Request,
+    request_id: Annotated[str, Depends(get_request_id)],
+    refresh_token_cookie: Annotated[str | None, Cookie(alias="refresh_token")] = None,
+) -> RefreshResponse:
+    refresh_response, raw_refresh_token = await service.rotate_refresh_token(
+        refresh_token_cookie,
+        ip=_get_client_ip(request),
+        user_agent=request.headers.get("User-Agent"),
+        request_id=request_id,
+    )
+    # Same cookie attributes login's own Set-Cookie already uses (see the
+    # comment there) — this endpoint's sole credential is this cookie, not
+    # a Bearer token, so there is no CurrentUserDep on this route.
+    response.set_cookie(
+        key="refresh_token",
+        value=raw_refresh_token,
+        path="/api/v1/auth",
+        httponly=True,
+        secure=True,
+        samesite="strict",
+    )
+    return refresh_response
 
 
 @router.post("/logout", response_model=None, status_code=status.HTTP_204_NO_CONTENT)

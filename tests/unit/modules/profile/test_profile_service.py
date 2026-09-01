@@ -183,6 +183,9 @@ class RecordingEmailSender:
     async def send_email_change_notice(self, *, to: str) -> None:
         self.notices_sent.append(to)
 
+    async def send_refresh_reuse_alert(self, *, to: str) -> None:
+        raise NotImplementedError
+
 
 def _make_service(
     repository: FakeProfileRepository,

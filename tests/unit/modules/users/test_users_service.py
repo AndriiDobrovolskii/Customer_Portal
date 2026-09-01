@@ -15,6 +15,7 @@ from app.modules.users.exceptions import (
     EmailNotVerifiedError,
     InvalidCredentialsError,
     RegistrationValidationError,
+    TokenInvalidError,
     TooManyAttemptsError,
 )
 from app.modules.users.models import RefreshToken, User, UserSession
@@ -28,7 +29,9 @@ _REQUEST_ID = "test-request-id"
 
 
 class FakeUserRepository:
-    def __init__(self, *, existing_emails: set[str] | None = None) -> None:
+    def __init__(
+        self, *, existing_emails: set[str] | None = None, simulate_race_on_consume: bool = False
+    ) -> None:
         self.existing_emails = existing_emails or set()
         self.created_with: dict[str, str] | None = None
         self.commit_called = False
@@ -40,6 +43,11 @@ class FakeUserRepository:
         self.refresh_tokens_by_hash: dict[str, RefreshToken] = {}
         self.revoked_session_jtis: list[uuid.UUID] = []
         self.revoked_family_ids: list[uuid.UUID] = []
+        # RT-AC6: simulates a concurrent winner consuming this token between
+        # this fake's own initial read and its atomic-consume call — the
+        # first consume_refresh_token call sets consumed_at (as if another
+        # request just won) and returns None (this request lost the race).
+        self.simulate_race_on_consume = simulate_race_on_consume
 
     async def create(self, *, email: str, hashed_password: str, status: str) -> User | None:
         if email in self.existing_emails:
@@ -52,6 +60,12 @@ class FakeUserRepository:
 
     async def get_by_email(self, email: str) -> User | None:
         return self.users_by_email.get(email.lower())
+
+    async def get_by_id(self, user_id: uuid.UUID) -> User | None:
+        for user in self.users_by_email.values():
+            if user.id == user_id:
+                return user
+        return None
 
     async def create_session(
         self, *, user_id: uuid.UUID, jti: uuid.UUID, expires_at: datetime
@@ -85,6 +99,17 @@ class FakeUserRepository:
             if token.family_id == family_id:
                 token.revoked_at = datetime.now(UTC)
 
+    async def consume_refresh_token(self, *, token_hash: str) -> RefreshToken | None:
+        token = self.refresh_tokens_by_hash.get(token_hash)
+        if token is None or token.consumed_at is not None:
+            return None
+        if self.simulate_race_on_consume:
+            self.simulate_race_on_consume = False
+            token.consumed_at = datetime.now(UTC)
+            return None
+        token.consumed_at = datetime.now(UTC)
+        return token
+
     async def update_last_login_at(self, *, user_id: uuid.UUID) -> None:
         self.last_login_at_updates.append(user_id)
 
@@ -98,12 +123,14 @@ class FakeUserRepository:
         ip: str,
         user_agent: str | None,
         request_id: str,
+        severity: str | None = None,
     ) -> None:
         self.audit_log_entries.append(
             {
                 "event": event,
                 "reason": reason,
                 "scope": scope,
+                "severity": severity,
                 "actor_id": actor_id,
                 "ip": ip,
                 "user_agent": user_agent,
@@ -118,6 +145,9 @@ class FakeUserRepository:
         family_id: uuid.UUID,
         user_id: uuid.UUID,
         expires_at: datetime,
+        ip: str | None = None,
+        user_agent: str | None = None,
+        last_used_at: datetime | None = None,
     ) -> RefreshToken:
         self.refresh_tokens.append(
             {
@@ -125,10 +155,19 @@ class FakeUserRepository:
                 "family_id": family_id,
                 "user_id": user_id,
                 "expires_at": expires_at,
+                "ip": ip,
+                "user_agent": user_agent,
+                "last_used_at": last_used_at,
             }
         )
         token = RefreshToken(
-            token_hash=token_hash, family_id=family_id, user_id=user_id, expires_at=expires_at
+            token_hash=token_hash,
+            family_id=family_id,
+            user_id=user_id,
+            expires_at=expires_at,
+            ip=ip,
+            user_agent=user_agent,
+            last_used_at=last_used_at,
         )
         self.refresh_tokens_by_hash[token_hash] = token
         return token
@@ -225,9 +264,11 @@ class FakeAccountService:
 
 
 class FakeEmailSender:
-    def __init__(self, *, raises: bool = False) -> None:
+    def __init__(self, *, raises: bool = False, raises_reuse_alert: bool = False) -> None:
         self.raises = raises
+        self.raises_reuse_alert = raises_reuse_alert
         self.sent: list[dict[str, str]] = []
+        self.reuse_alerts_sent: list[str] = []
 
     async def send_verification_email(self, *, to: str, raw_token: str) -> None:
         if self.raises:
@@ -240,6 +281,31 @@ class FakeEmailSender:
     async def send_email_change_notice(self, *, to: str) -> None:
         pass
 
+    async def send_refresh_reuse_alert(self, *, to: str) -> None:
+        if self.raises_reuse_alert:
+            raise RuntimeError("reuse alert dispatch failed")
+        self.reuse_alerts_sent.append(to)
+
+
+class FakeRefreshRateLimitCache:
+    def __init__(
+        self,
+        *,
+        counts: dict[uuid.UUID, int] | None = None,
+        retry_after: dict[uuid.UUID, int] | None = None,
+    ) -> None:
+        self.counts = dict(counts or {})
+        self.retry_after = retry_after or {}
+        self.recorded_for: list[uuid.UUID] = []
+
+    async def record_request(self, family_id: uuid.UUID, *, window_seconds: int) -> int:
+        self.recorded_for.append(family_id)
+        self.counts[family_id] = self.counts.get(family_id, 0) + 1
+        return self.counts[family_id]
+
+    async def get_retry_after_seconds(self, family_id: uuid.UUID) -> int:
+        return self.retry_after.get(family_id, 3600)
+
 
 def _make_service(
     repository: FakeUserRepository,
@@ -248,14 +314,22 @@ def _make_service(
     revocation_cache: FakeRevocationCache | None = None,
     throttle_cache: FakeLoginThrottleCache | None = None,
     account_service: FakeAccountService | None = None,
+    refresh_rate_limit_cache: FakeRefreshRateLimitCache | None = None,
 ) -> tuple[UserService, FakeVerificationTokenIssuer, FakeEmailSender]:
     issuer = issuer or FakeVerificationTokenIssuer()
     email_sender = email_sender or FakeEmailSender()
     revocation_cache = revocation_cache or FakeRevocationCache()
     throttle_cache = throttle_cache or FakeLoginThrottleCache()
     account_service = account_service or FakeAccountService()
+    refresh_rate_limit_cache = refresh_rate_limit_cache or FakeRefreshRateLimitCache()
     service = UserService(
-        repository, issuer, email_sender, revocation_cache, throttle_cache, account_service
+        repository,
+        issuer,
+        email_sender,
+        revocation_cache,
+        throttle_cache,
+        account_service,
+        refresh_rate_limit_cache,
     )
     return service, issuer, email_sender
 
@@ -1016,3 +1090,463 @@ async def test_get_authenticated_user_allow_revoked_rejects_unknown_jti() -> Non
 
     # Assert
     assert result is None
+
+
+# --- US-2.3 (spec US-007): refresh token rotation ----------------------------
+
+
+async def _seed_rotatable_token(
+    repository: FakeUserRepository,
+    *,
+    user_id: uuid.UUID,
+    family_id: uuid.UUID | None = None,
+    expires_at: datetime | None = None,
+    consumed_at: datetime | None = None,
+    revoked_at: datetime | None = None,
+    last_used_at: datetime | None = None,
+    issued_at: datetime | None = None,
+) -> str:
+    """Seeds a rotatable refresh_tokens row and returns its raw (presented)
+    value, mirroring how login actually issues one, then overrides whichever
+    state fields the test needs to control.
+    """
+    raw_token = f"raw-refresh-token-{uuid.uuid4()}"
+    token = await repository.create_refresh_token(
+        token_hash=hash_refresh_token(raw_token),
+        family_id=family_id or uuid.uuid4(),
+        user_id=user_id,
+        expires_at=expires_at or (datetime.now(UTC) + timedelta(days=30)),
+        last_used_at=last_used_at,
+    )
+    # `issued_at` is DB `server_default=func.now()` (models.py) — never set
+    # by the Python constructor, so the fake must populate it explicitly,
+    # same as `_seed_session` already does for `UserSession`.
+    token.issued_at = issued_at or datetime.now(UTC)
+    if consumed_at is not None:
+        token.consumed_at = consumed_at
+    if revoked_at is not None:
+        token.revoked_at = revoked_at
+    return raw_token
+
+
+async def _rotate(service: UserService, raw_token: str | None) -> tuple[object, str]:
+    return await service.rotate_refresh_token(
+        raw_token, ip=_IP, user_agent="pytest-agent", request_id=_REQUEST_ID
+    )
+
+
+# --- RT-AC1: successful rotation (FR-1) --------------------------------------
+
+
+async def test_rotate_refresh_token_rotates_and_preserves_family_and_expiry() -> None:
+    # Arrange
+    repository = FakeUserRepository()
+    user = await _seed_user(
+        repository,
+        email="refresh.happy@example.com",
+        password="Str0ng!Pass",
+        email_verified=True,
+        status="active",
+    )
+    family_id = uuid.uuid4()
+    expires_at = datetime.now(UTC) + timedelta(days=20)
+    raw_token = await _seed_rotatable_token(
+        repository, user_id=user.id, family_id=family_id, expires_at=expires_at
+    )
+    old_token_hash = hash_refresh_token(raw_token)
+    service, _, _ = _make_service(repository)
+
+    # Act
+    response, new_raw_token = await _rotate(service, raw_token)
+
+    # Assert
+    assert len(response.access_token) > 0  # type: ignore[attr-defined]
+    assert response.expires_in > 0  # type: ignore[attr-defined]
+    assert new_raw_token != raw_token
+    assert repository.refresh_tokens_by_hash[old_token_hash].consumed_at is not None
+    new_token = repository.refresh_tokens_by_hash[hash_refresh_token(new_raw_token)]
+    assert new_token.family_id == family_id
+    assert new_token.expires_at == expires_at
+    assert repository.commit_called is True
+
+
+async def test_rotate_refresh_token_creates_a_new_session_for_new_access_token() -> None:
+    # Arrange: the new access token's jti must resolve via get_authenticated_
+    # user afterward, which requires a matching user_sessions row.
+    repository = FakeUserRepository()
+    user = await _seed_user(
+        repository,
+        email="refresh.session@example.com",
+        password="Str0ng!Pass",
+        email_verified=True,
+        status="active",
+    )
+    raw_token = await _seed_rotatable_token(repository, user_id=user.id)
+    service, _, _ = _make_service(repository)
+
+    # Act
+    response, _ = await _rotate(service, raw_token)
+
+    # Assert
+    claims = decode_access_token(response.access_token)  # type: ignore[attr-defined]
+    assert claims.jti in repository.sessions_by_jti
+    assert repository.sessions_by_jti[claims.jti].revoked_at is None
+
+
+# --- RT-AC2: reuse detection (FR-2) -------------------------------------------
+
+
+async def test_rotate_refresh_token_reuse_revokes_family_and_alerts() -> None:
+    # Arrange: a token already consumed well outside the concurrency grace
+    # window — genuine reuse of an already-completed rotation.
+    repository = FakeUserRepository()
+    user = await _seed_user(
+        repository,
+        email="refresh.reuse@example.com",
+        password="Str0ng!Pass",
+        email_verified=True,
+        status="active",
+    )
+    family_id = uuid.uuid4()
+    raw_token = await _seed_rotatable_token(
+        repository,
+        user_id=user.id,
+        family_id=family_id,
+        consumed_at=datetime.now(UTC) - timedelta(minutes=5),
+    )
+    email_sender = FakeEmailSender()
+    service, _, _ = _make_service(repository, email_sender=email_sender)
+
+    # Act & Assert
+    with pytest.raises(TokenInvalidError):
+        await _rotate(service, raw_token)
+    assert family_id in repository.revoked_family_ids
+    entry = repository.audit_log_entries[-1]
+    assert entry["event"] == "refresh_reuse_detected"
+    assert entry["severity"] == "high"
+    assert entry["actor_id"] == user.id
+    assert email_sender.reuse_alerts_sent == [user.email]
+
+
+async def test_rotate_refresh_token_reuse_alerts_even_when_account_deactivated() -> None:
+    # Arrange — resolved OD-5: reuse alerting fires regardless of account
+    # eligibility, since it's evidence of compromise independent of status.
+    repository = FakeUserRepository()
+    user = await _seed_user(
+        repository,
+        email="refresh.reuse.deactivated@example.com",
+        password="Str0ng!Pass",
+        email_verified=True,
+        status="deactivated",
+    )
+    family_id = uuid.uuid4()
+    raw_token = await _seed_rotatable_token(
+        repository,
+        user_id=user.id,
+        family_id=family_id,
+        consumed_at=datetime.now(UTC) - timedelta(minutes=5),
+    )
+    email_sender = FakeEmailSender()
+    service, _, _ = _make_service(repository, email_sender=email_sender)
+
+    # Act & Assert
+    with pytest.raises(TokenInvalidError):
+        await _rotate(service, raw_token)
+    assert family_id in repository.revoked_family_ids
+    assert repository.audit_log_entries[-1]["severity"] == "high"
+    assert email_sender.reuse_alerts_sent == [user.email]
+
+
+async def test_rotate_refresh_token_reuse_email_failure_does_not_block_response() -> None:
+    # Arrange — fire-and-forget (resolved 2026-09-01 spec review): a failed
+    # alert email must not prevent the revocation/audit outcome.
+    repository = FakeUserRepository()
+    user = await _seed_user(
+        repository,
+        email="refresh.reuse.emailfail@example.com",
+        password="Str0ng!Pass",
+        email_verified=True,
+        status="active",
+    )
+    family_id = uuid.uuid4()
+    raw_token = await _seed_rotatable_token(
+        repository,
+        user_id=user.id,
+        family_id=family_id,
+        consumed_at=datetime.now(UTC) - timedelta(minutes=5),
+    )
+    email_sender = FakeEmailSender(raises_reuse_alert=True)
+    service, _, _ = _make_service(repository, email_sender=email_sender)
+
+    # Act & Assert
+    with pytest.raises(TokenInvalidError):
+        await _rotate(service, raw_token)
+    assert family_id in repository.revoked_family_ids
+    assert repository.audit_log_entries[-1]["severity"] == "high"
+
+
+# --- RT-AC3: unknown / revoked-by-logout, indistinguishable (FR-3) ----------
+
+
+async def test_rotate_refresh_token_unknown_token_returns_token_invalid() -> None:
+    # Arrange
+    repository = FakeUserRepository()
+    service, _, _ = _make_service(repository)
+
+    # Act & Assert
+    with pytest.raises(TokenInvalidError):
+        await _rotate(service, "never-issued-token-value")
+
+
+async def test_rotate_refresh_token_no_cookie_returns_token_invalid() -> None:
+    # Arrange
+    repository = FakeUserRepository()
+    service, _, _ = _make_service(repository)
+
+    # Act & Assert
+    with pytest.raises(TokenInvalidError):
+        await _rotate(service, None)
+
+
+async def test_rotate_refresh_token_revoked_by_logout_returns_token_invalid() -> None:
+    # Arrange: revoked by a prior /logout call, never consumed — must NOT be
+    # treated as reuse (checked before the consumed_at branch per FR-3).
+    repository = FakeUserRepository()
+    user = await _seed_user(
+        repository,
+        email="refresh.revoked@example.com",
+        password="Str0ng!Pass",
+        email_verified=True,
+        status="active",
+    )
+    family_id = uuid.uuid4()
+    raw_token = await _seed_rotatable_token(
+        repository, user_id=user.id, family_id=family_id, revoked_at=datetime.now(UTC)
+    )
+    service, _, _ = _make_service(repository)
+
+    # Act & Assert
+    with pytest.raises(TokenInvalidError):
+        await _rotate(service, raw_token)
+    assert repository.revoked_family_ids == []
+    assert repository.audit_log_entries == []
+
+
+async def test_rotate_refresh_token_expired_and_consumed_resolves_as_expired() -> None:
+    # Arrange — spec-review finding, resolved 2026-09-01: expired takes
+    # precedence over reuse, so no family revocation/audit/email fires.
+    repository = FakeUserRepository()
+    user = await _seed_user(
+        repository,
+        email="refresh.expired.reused@example.com",
+        password="Str0ng!Pass",
+        email_verified=True,
+        status="active",
+    )
+    family_id = uuid.uuid4()
+    raw_token = await _seed_rotatable_token(
+        repository,
+        user_id=user.id,
+        family_id=family_id,
+        expires_at=datetime.now(UTC) - timedelta(seconds=1),
+        consumed_at=datetime.now(UTC) - timedelta(days=1),
+    )
+    email_sender = FakeEmailSender()
+    service, _, _ = _make_service(repository, email_sender=email_sender)
+
+    # Act & Assert
+    with pytest.raises(TokenInvalidError):
+        await _rotate(service, raw_token)
+    assert repository.revoked_family_ids == []
+    assert repository.audit_log_entries == []
+    assert email_sender.reuse_alerts_sent == []
+
+
+# --- RT-AC4: idle timeout and absolute cap (FR-4, FR-5) ----------------------
+
+
+async def test_rotate_refresh_token_idle_timeout_returns_token_invalid() -> None:
+    # Arrange
+    repository = FakeUserRepository()
+    user = await _seed_user(
+        repository,
+        email="refresh.idle@example.com",
+        password="Str0ng!Pass",
+        email_verified=True,
+        status="active",
+    )
+    raw_token = await _seed_rotatable_token(
+        repository, user_id=user.id, last_used_at=datetime.now(UTC) - timedelta(days=15)
+    )
+    service, _, _ = _make_service(repository)
+
+    # Act & Assert
+    with pytest.raises(TokenInvalidError):
+        await _rotate(service, raw_token)
+
+
+async def test_rotate_refresh_token_idle_timeout_falls_back_to_issued_at_when_never_rotated() -> (
+    None
+):
+    # Arrange: never rotated since login — last_used_at is NULL, so the
+    # 14-day check falls back to issued_at.
+    repository = FakeUserRepository()
+    user = await _seed_user(
+        repository,
+        email="refresh.idle.fallback@example.com",
+        password="Str0ng!Pass",
+        email_verified=True,
+        status="active",
+    )
+    raw_token = await _seed_rotatable_token(
+        repository, user_id=user.id, issued_at=datetime.now(UTC) - timedelta(days=15)
+    )
+    service, _, _ = _make_service(repository)
+
+    # Act & Assert
+    with pytest.raises(TokenInvalidError):
+        await _rotate(service, raw_token)
+
+
+async def test_rotate_refresh_token_within_idle_window_succeeds() -> None:
+    # Arrange: last used 10 days ago — inside the 14-day idle window.
+    repository = FakeUserRepository()
+    user = await _seed_user(
+        repository,
+        email="refresh.idle.ok@example.com",
+        password="Str0ng!Pass",
+        email_verified=True,
+        status="active",
+    )
+    raw_token = await _seed_rotatable_token(
+        repository, user_id=user.id, last_used_at=datetime.now(UTC) - timedelta(days=10)
+    )
+    service, _, _ = _make_service(repository)
+
+    # Act
+    response, _ = await _rotate(service, raw_token)
+
+    # Assert
+    assert len(response.access_token) > 0  # type: ignore[attr-defined]
+
+
+async def test_rotate_refresh_token_absolute_cap_ignores_recent_use() -> None:
+    # Arrange: family created (and its expires_at fixed) beyond the 30-day
+    # cap, even though it was used very recently — FR-5's "regardless of
+    # recent activity."
+    repository = FakeUserRepository()
+    user = await _seed_user(
+        repository,
+        email="refresh.absolute@example.com",
+        password="Str0ng!Pass",
+        email_verified=True,
+        status="active",
+    )
+    raw_token = await _seed_rotatable_token(
+        repository,
+        user_id=user.id,
+        expires_at=datetime.now(UTC) - timedelta(seconds=1),
+        last_used_at=datetime.now(UTC),
+    )
+    service, _, _ = _make_service(repository)
+
+    # Act & Assert
+    with pytest.raises(TokenInvalidError):
+        await _rotate(service, raw_token)
+
+
+# --- RT-AC5: account eligibility (FR-6) --------------------------------------
+
+
+async def test_rotate_refresh_token_deactivated_account_returns_token_invalid() -> None:
+    # Arrange
+    repository = FakeUserRepository()
+    user = await _seed_user(
+        repository,
+        email="refresh.deactivated@example.com",
+        password="Str0ng!Pass",
+        email_verified=True,
+        status="deactivated",
+    )
+    raw_token = await _seed_rotatable_token(repository, user_id=user.id)
+    service, _, _ = _make_service(repository)
+
+    # Act & Assert
+    with pytest.raises(TokenInvalidError):
+        await _rotate(service, raw_token)
+
+
+async def test_rotate_refresh_token_revoke_before_returns_token_invalid() -> None:
+    # Arrange
+    repository = FakeUserRepository()
+    user = await _seed_user(
+        repository,
+        email="refresh.revokebefore@example.com",
+        password="Str0ng!Pass",
+        email_verified=True,
+        status="active",
+    )
+    issued_at = datetime.now(UTC) - timedelta(hours=1)
+    raw_token = await _seed_rotatable_token(repository, user_id=user.id, issued_at=issued_at)
+    cache = FakeRevocationCache(revoke_before_by_user={user.id: issued_at + timedelta(minutes=1)})
+    service, _, _ = _make_service(repository, revocation_cache=cache)
+
+    # Act & Assert
+    with pytest.raises(TokenInvalidError):
+        await _rotate(service, raw_token)
+
+
+# --- RT-AC6: atomic concurrent handling (FR-7) -------------------------------
+
+
+async def test_rotate_refresh_token_concurrent_race_within_grace_returns_401_no_revocation() -> (
+    None
+):
+    # Arrange: simulates losing a concurrent race — the atomic consume fails
+    # even though the initial read saw an unconsumed token.
+    repository = FakeUserRepository(simulate_race_on_consume=True)
+    user = await _seed_user(
+        repository,
+        email="refresh.race@example.com",
+        password="Str0ng!Pass",
+        email_verified=True,
+        status="active",
+    )
+    family_id = uuid.uuid4()
+    raw_token = await _seed_rotatable_token(repository, user_id=user.id, family_id=family_id)
+    email_sender = FakeEmailSender()
+    service, _, _ = _make_service(repository, email_sender=email_sender)
+
+    # Act & Assert
+    with pytest.raises(TokenInvalidError):
+        await _rotate(service, raw_token)
+    assert repository.revoked_family_ids == []
+    assert email_sender.reuse_alerts_sent == []
+
+
+# --- Resolved OD-1: per-family rate limit ------------------------------------
+
+
+async def test_rotate_refresh_token_rate_limit_exceeded_raises_too_many_attempts() -> None:
+    # Arrange: this family is already at the 60/hour ceiling.
+    repository = FakeUserRepository()
+    user = await _seed_user(
+        repository,
+        email="refresh.ratelimited@example.com",
+        password="Str0ng!Pass",
+        email_verified=True,
+        status="active",
+    )
+    family_id = uuid.uuid4()
+    raw_token = await _seed_rotatable_token(repository, user_id=user.id, family_id=family_id)
+    rate_limit_cache = FakeRefreshRateLimitCache(
+        counts={family_id: 60}, retry_after={family_id: 120}
+    )
+    service, _, _ = _make_service(repository, refresh_rate_limit_cache=rate_limit_cache)
+
+    # Act & Assert
+    with pytest.raises(TooManyAttemptsError) as exc_info:
+        await _rotate(service, raw_token)
+    assert exc_info.value.headers == {"Retry-After": "120"}
+    # No rotation was attempted against this token.
+    assert repository.refresh_tokens_by_hash[hash_refresh_token(raw_token)].consumed_at is None
