@@ -20,7 +20,11 @@ status: DONE
 # committed/pushed - awaiting explicit user instruction. US-2.5
 # (MFA/TOTP) remains parked/BLOCKED, ready to resume once this branch
 # merges. See docs/workflow/history.jsonl for the full T1-T9 substep
-# trail.
+# trail. Committed as fb70f66+795223b, moved onto a proper feature branch
+# (feat/us-3.2-manage-roles) after being caught committed directly to
+# main by mistake - local main reset to match origin (safe, nothing had
+# been pushed yet, both commits preserved). Pushed and opened as GitHub
+# PR #9.
 
 # --- prior story: US-2.5 (BLOCKED, parked) ---
 # story: US-2.5
