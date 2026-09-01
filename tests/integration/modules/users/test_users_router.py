@@ -11,10 +11,16 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.cache_keys import login_fail_account_key, login_fail_ip_key
 from app.core.config import get_settings
-from app.core.security import decode_access_token, hash_password, hash_refresh_token
+from app.core.security import (
+    decode_access_token,
+    encode_access_token,
+    hash_password,
+    hash_refresh_token,
+)
 from app.main import app
 from app.modules.account.models import AccountLifecycleAuditLog
 from app.modules.email_verification.models import EmailVerificationToken
+from app.modules.roles.models import Role, UserRole
 from app.modules.users.models import (
     AuthAuditLog,
     PasswordResetToken,
@@ -1702,3 +1708,96 @@ async def test_password_reset_confirm_concurrent_same_token_exactly_one_succeeds
         )
     )
     assert result.scalar_one().consumed_at is not None
+
+
+# --- MR-AC2 (US-3.2/spec US-012): login/refresh carry the scopes claim,
+# stale access tokens after a role change ------------------------------------
+
+
+async def test_login_response_access_token_carries_current_scopes(
+    client: AsyncClient, db_session: AsyncSession
+) -> None:
+    # Arrange
+    email = "login.scopes@example.com"
+    password = "Str0ng!Pass1"
+    user = await _seed_login_user(
+        db_session, email=email, password=password, email_verified=True, status="active"
+    )
+    role_id = (
+        await db_session.execute(select(Role.id).where(Role.name == "support_agent"))
+    ).scalar_one()
+    db_session.add(UserRole(user_id=user.id, role_id=role_id))
+    await db_session.flush()
+
+    # Act
+    response = await client.post("/api/v1/auth/login", json={"email": email, "password": password})
+
+    # Assert
+    assert response.status_code == 200
+    claims = decode_access_token(response.json()["access_token"])
+    assert sorted(claims.scopes) == ["tickets:read", "tickets:write"]
+
+
+async def test_stale_access_token_after_role_change_returns_401_then_refresh_carries_new_scopes(
+    client: AsyncClient, db_session: AsyncSession
+) -> None:
+    # Arrange: target logs in first (no roles yet, so no scopes)
+    target_email = "target.stale@example.com"
+    target, target_access_token = await _login(client, db_session, email=target_email)
+
+    # An admin actor grants the target account the auditor role via a
+    # second, independent client (this test's `client` fixture's cookie
+    # jar must stay bound to the target's session, not the admin's).
+    admin = await _seed_login_user(
+        db_session,
+        email="admin.stale@example.com",
+        password="Str0ng!Pass1",
+        email_verified=True,
+        status="active",
+    )
+    admin_role_id = (
+        await db_session.execute(select(Role.id).where(Role.name == "admin"))
+    ).scalar_one()
+    db_session.add(UserRole(user_id=admin.id, role_id=admin_role_id))
+    await db_session.flush()
+    admin_jti = uuid.uuid4()
+    db_session.add(
+        UserSession(
+            jti=admin_jti, user_id=admin.id, expires_at=datetime.now(UTC) + timedelta(hours=1)
+        )
+    )
+    await db_session.flush()
+    admin_token = encode_access_token(
+        user_id=admin.id,
+        jti=admin_jti,
+        scopes=[
+            "users:read",
+            "users:write",
+            "roles:write",
+            "audit:read",
+            "tickets:read",
+            "tickets:write",
+        ],
+    )
+    grant_response = await client.put(
+        f"/api/v1/admin/users/{target.id}/roles",
+        json={"roles": ["auditor"]},
+        headers=_auth_headers(admin_token),
+    )
+    assert grant_response.status_code == 200
+
+    # Act: the target's OLD access token (issued before the grant) is now stale.
+    stale_response = await client.get(
+        "/api/v1/admin/roles", headers=_auth_headers(target_access_token)
+    )
+
+    # Assert
+    assert stale_response.status_code == 401
+    assert stale_response.json()["type"].endswith("/token-stale")
+
+    # Act: refreshing (using the target's own cookie, still in the jar from
+    # its login) issues a new access token carrying the updated scopes.
+    refresh_response = await client.post("/api/v1/auth/refresh")
+    assert refresh_response.status_code == 200
+    new_claims = decode_access_token(refresh_response.json()["access_token"])
+    assert new_claims.scopes == ["audit:read"]

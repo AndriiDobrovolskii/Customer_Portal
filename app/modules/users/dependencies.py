@@ -6,10 +6,12 @@ from redis.asyncio import Redis
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.email import EmailSender, get_email_sender
-from app.core.revocation_cache import RevocationCache
+from app.core.revocation_cache import PermissionEpochCache, RevocationCache
 from app.db.dependencies import get_db_session, get_valkey_client
 from app.modules.account.dependencies import AccountServiceDep
 from app.modules.email_verification.dependencies import EmailVerificationServiceDep
+from app.modules.roles.repository import RoleRepository, UserRoleRepository
+from app.modules.roles.service import RoleService
 from app.modules.users.cache import (
     LoginThrottleCache,
     PasswordResetRateLimitCache,
@@ -35,6 +37,14 @@ def get_user_service(
     throttle_cache = LoginThrottleCache(valkey_client)
     refresh_rate_limit_cache = RefreshRateLimitCache(valkey_client)
     password_reset_rate_limit_cache = PasswordResetRateLimitCache(valkey_client)
+    permission_epoch_cache = PermissionEpochCache(valkey_client)
+    # Built directly, not via roles.dependencies.RoleServiceDep: that module
+    # imports CurrentUserDep from this one (for its require_scope check),
+    # so importing RoleServiceDep back here would be a circular import.
+    # roles.repository/roles.service have no such reverse dependency.
+    role_service = RoleService(
+        RoleRepository(session), UserRoleRepository(session), permission_epoch_cache
+    )
     return UserService(
         repository,
         issuer,
@@ -44,6 +54,8 @@ def get_user_service(
         account_service,
         refresh_rate_limit_cache,
         password_reset_rate_limit_cache,
+        permission_epoch_cache,
+        role_service,
     )
 
 

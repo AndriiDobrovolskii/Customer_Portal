@@ -113,6 +113,20 @@ class PasswordPolicyError(ProblemError):
         ]
 
 
+class TokenStaleError(ProblemError):
+    """MR-AC2 (US-3.2/spec US-012): the session's access token was issued
+    before the target's last role change (`perm_epoch`). Deliberately a
+    distinct type slug from `UnauthenticatedError` — the client is meant
+    to react by calling `/auth/refresh`, not by re-authenticating from
+    scratch, since `perm_epoch` invalidates access tokens only.
+    """
+
+    type_slug = "token-stale"
+    title = "Token Predates a Permission Change"
+    status = 401
+    detail = "Your permissions changed. Refresh the session to continue."
+
+
 class UnauthenticatedError(ProblemError):
     type_slug = "unauthenticated"
     title = "Unauthenticated"

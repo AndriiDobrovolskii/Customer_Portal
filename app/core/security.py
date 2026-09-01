@@ -95,12 +95,13 @@ class AccessTokenClaims:
     user_id: uuid.UUID
     jti: uuid.UUID
     exp: datetime
+    scopes: list[str]
 
 
-def encode_access_token(*, user_id: uuid.UUID, jti: uuid.UUID) -> str:
+def encode_access_token(*, user_id: uuid.UUID, jti: uuid.UUID, scopes: list[str]) -> str:
     settings = get_settings()
     expires_at = datetime.now(UTC) + timedelta(seconds=settings.access_token_ttl_seconds)
-    payload = {"sub": str(user_id), "jti": str(jti), "exp": expires_at}
+    payload = {"sub": str(user_id), "jti": str(jti), "exp": expires_at, "scopes": scopes}
     return jwt.encode(
         payload, settings.jwt_secret_key.get_secret_value(), algorithm=settings.jwt_algorithm
     )
@@ -116,6 +117,11 @@ def decode_access_token(token: str) -> AccessTokenClaims:
             user_id=uuid.UUID(payload["sub"]),
             jti=uuid.UUID(payload["jti"]),
             exp=datetime.fromtimestamp(payload["exp"], tz=UTC),
+            # Absent on a token minted before this story (US-3.2): defaults
+            # to no scopes rather than raising InvalidTokenError, so an
+            # already-issued token stays valid for identity/revocation
+            # checks until it naturally expires.
+            scopes=list(payload.get("scopes", [])),
         )
     except (jwt.PyJWTError, KeyError, ValueError) as exc:
         raise InvalidTokenError from exc

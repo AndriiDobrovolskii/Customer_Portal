@@ -1,0 +1,258 @@
+openapi: 3.0.3
+info:
+  title: Manage Roles (US-3.2 / spec US-012) — fragment
+  version: "1.0"
+paths:
+  /v1/admin/roles:
+    get:
+      operationId: listRoleCatalogue
+      summary: Read the fixed role catalogue and the permission scopes each role grants
+      tags: [admin, roles]
+      security:
+        - bearerAuth: []
+      responses:
+        "200":
+          description: >
+            The four seeded roles (`customer`, `support_agent`, `admin`,
+            `auditor`) and the permission scopes each grants (FR-3). Field
+            names and nesting per the source story's API Contract table.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RoleCatalogueResponse"
+        "401":
+          description: No valid access token — cross-cutting for every authenticated endpoint, not new to this story.
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/UnauthorizedProblem"
+        "403":
+          description: >
+            Caller's access token lacks the `users:read` scope. Reuses the
+            `insufficient-permission` slug already established by US-3.1's
+            MU-AC2 for the identical cross-cutting scope-check pattern —
+            not a new slug introduced by this story.
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/InsufficientPermissionProblem"
+  /v1/admin/users/{id}/roles:
+    put:
+      operationId: replaceUserRoles
+      summary: Replace a user's full role set
+      tags: [admin, roles]
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - name: If-Match
+          in: header
+          required: true
+          schema:
+            type: string
+          description: >
+            The target user's current ETag. Required per the source
+            story's API Contract table; the spec does not state the
+            response when it is absent or stale — see Open Questions in
+            US-012-api-design.md (deferred to PLANNING, not decided here).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ReplaceUserRolesRequest"
+      responses:
+        "200":
+          description: >
+            Full replacement applied (FR-1) — idempotent on repeat.
+            `perm_epoch:{target_id}` set to now; `admin_audit_log` entry
+            written with old/new role sets and the actor. Response carries
+            a new `ETag` header reflecting the post-update role set.
+          headers:
+            ETag:
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ReplaceUserRolesResponse"
+        "401":
+          description: No valid access token — cross-cutting, not new to this story.
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/UnauthorizedProblem"
+        "403":
+          description: >
+            Three distinct causes share this status, each a separate
+            `type` slug: caller lacks `roles:write` entirely
+            (`insufficient-permission`, reused from US-3.1 MU-AC2, cross-
+            cutting scope-check pattern); caller targets their own account
+            (`cannot-target-self`, FR-5); caller attempts to grant a
+            permission they don't themselves hold (`privilege-escalation`,
+            FR-6, `admin_audit_log` entry with `event=authz_denied`,
+            `severity=high`).
+          content:
+            application/problem+json:
+              schema:
+                oneOf:
+                  - $ref: "#/components/schemas/InsufficientPermissionProblem"
+                  - $ref: "#/components/schemas/CannotTargetSelfProblem"
+                  - $ref: "#/components/schemas/PrivilegeEscalationProblem"
+        "409":
+          description: >
+            Target is the only active account holding `admin`, and the
+            requested set excludes it (FR-7). Check-and-update run in one
+            transaction so two concurrent requests cannot together remove
+            both remaining admins.
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/LastAdminProblem"
+        "422":
+          description: >
+            The request contains a role name outside the catalogue (FR-4).
+            The entire request is rejected — no role in the list is
+            applied.
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ValidationFailedProblem"
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+  schemas:
+    RoleCatalogueResponse:
+      type: object
+      required: [roles]
+      properties:
+        roles:
+          type: array
+          items:
+            type: object
+            required: [name, permissions]
+            properties:
+              name:
+                type: string
+                enum: [customer, support_agent, admin, auditor]
+              permissions:
+                type: array
+                items:
+                  type: string
+                  enum: [users:read, users:write, roles:write, audit:read, tickets:read, tickets:write]
+      description: >
+        Per FR-3's stated body shape. The exact name-to-scope mapping is an
+        Open Question in the spec (not stated by the source story) — see
+        US-012-api-design.md.
+    ReplaceUserRolesRequest:
+      type: object
+      required: [roles]
+      additionalProperties: false
+      properties:
+        roles:
+          type: array
+          items:
+            type: string
+          description: >
+            Full replacement set (FR-1). Whether duplicate entries or an
+            empty array are valid is unresolved — see Open Questions in
+            US-012-api-design.md; not decided here.
+    ReplaceUserRolesResponse:
+      type: object
+      required: [roles]
+      properties:
+        roles:
+          type: array
+          items:
+            type: string
+          description: The resulting role set after the replacement (FR-1).
+    UnauthorizedProblem:
+      allOf:
+        - $ref: "#/components/schemas/ProblemBase"
+      properties:
+        type:
+          type: string
+          example: ".../errors/unauthorized"
+        status:
+          type: integer
+          example: 401
+      description: Cross-cutting slug shared by every authenticated endpoint in this project — not new here.
+    InsufficientPermissionProblem:
+      allOf:
+        - $ref: "#/components/schemas/ProblemBase"
+      properties:
+        type:
+          type: string
+          example: ".../errors/insufficient-permission"
+        status:
+          type: integer
+          example: 403
+      description: Reused from US-3.1 MU-AC2 — not a new slug introduced by this story.
+    CannotTargetSelfProblem:
+      allOf:
+        - $ref: "#/components/schemas/ProblemBase"
+      properties:
+        type:
+          type: string
+          example: ".../errors/cannot-target-self"
+        status:
+          type: integer
+          example: 403
+      description: Introduced by this story (FR-5).
+    PrivilegeEscalationProblem:
+      allOf:
+        - $ref: "#/components/schemas/ProblemBase"
+      properties:
+        type:
+          type: string
+          example: ".../errors/privilege-escalation"
+        status:
+          type: integer
+          example: 403
+      description: Introduced by this story (FR-6).
+    LastAdminProblem:
+      allOf:
+        - $ref: "#/components/schemas/ProblemBase"
+      properties:
+        type:
+          type: string
+          example: ".../errors/last-admin"
+        status:
+          type: integer
+          example: 409
+      description: Introduced by this story (FR-7), matches the source story's Error Envelope example verbatim.
+    ValidationFailedProblem:
+      allOf:
+        - $ref: "#/components/schemas/ProblemBase"
+      properties:
+        type:
+          type: string
+          example: ".../errors/validation-failed"
+        status:
+          type: integer
+          example: 422
+      description: Reused cross-project slug (FR-4) — not new here.
+    ProblemBase:
+      type: object
+      description: RFC 7807 problem body. `type` is an absolute/relative URI ending in the slug named per response.
+      required: [type, title, status, detail, instance]
+      properties:
+        type:
+          type: string
+        title:
+          type: string
+        status:
+          type: integer
+        detail:
+          type: string
+        instance:
+          type: string
+          example: /v1/admin/users/{id}/roles

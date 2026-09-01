@@ -1,8 +1,44 @@
-story: US-2.4
+story: US-3.2
 
 current_stage: PR
 
 status: DONE
+# Every stage Pass through PR draft (see docs/pr/US-012-pr-description.md).
+# gate-enforcer PASS: 7/7 hooks, mypy strict clean (94 files), lint-imports
+# 6/6, 281/281 tests, 97.27% coverage. VERIFICATION: Pass, 1 SS5 gap
+# found+fixed (4 new security-case tests). SECURITY_REVIEW: Pass, 4/6 SS7
+# rows N/A/Pass, 3 Low advisories. RECONCILIATION: Pass, 2 gaps
+# found+fixed (stale matrix, MR-AC1 perm_epoch assertion). New
+# app/modules/roles/ module; cross-cutting changes to core/security.py
+# (scopes claim), core/revocation_cache.py (PermissionEpochCache),
+# users/service.py (perm_epoch check, token-stale). 2 real bugs
+# found+fixed during implementation: (1) a genuine FR-7 concurrency race
+# (no row locking), fixed with SELECT...FOR UPDATE; (2) a pre-existing
+# flaky test, made deterministic. One user-approved exception:
+# migrations/env.py gained one model-registration import line, matching
+# the identical pattern used for every prior new module. Not yet
+# committed/pushed - awaiting explicit user instruction. US-2.5
+# (MFA/TOTP) remains parked/BLOCKED, ready to resume once this branch
+# merges. See docs/workflow/history.jsonl for the full T1-T9 substep
+# trail. Committed as fb70f66+795223b, moved onto a proper feature branch
+# (feat/us-3.2-manage-roles) after being caught committed directly to
+# main by mistake - local main reset to match origin (safe, nothing had
+# been pushed yet, both commits preserved). Pushed and opened as GitHub
+# PR #9.
+
+# --- prior story: US-2.5 (BLOCKED, parked) ---
+# story: US-2.5
+# current_stage: CLARIFICATION
+# status: BLOCKED
+# us-clarifier ran 2026-09-01: Not Ready. 6 Open Decisions logged
+# (docs/decisions/US-2.5-open-decisions.md). OD-1 (BLOCKING - US-3.2
+# dependency) resolved 2026-09-01: user chose to build US-3.2 first.
+# Resume US-2.5 and re-run clarification once US-3.2 reaches PR/merge.
+
+# --- prior story: US-2.4 (DONE) ---
+# story: US-2.4
+# current_stage: PR
+# status: DONE
 # Every stage Pass through PR (see docs/catalog/US-2.4-pipeline-status.md).
 # Committed (c973548) and opened as GitHub PR #7, stacked on #6
 # (feat/us-2.3-refresh-token). #6 merged first (28c1f5a); GitHub then

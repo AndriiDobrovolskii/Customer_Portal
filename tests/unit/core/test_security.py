@@ -56,18 +56,47 @@ def test_encode_decode_access_token_round_trip() -> None:
     jti = uuid.uuid4()
 
     # Act
-    token = encode_access_token(user_id=user_id, jti=jti)
+    token = encode_access_token(user_id=user_id, jti=jti, scopes=["users:read"])
     claims = decode_access_token(token)
 
     # Assert
     assert claims.user_id == user_id
     assert claims.jti == jti
+    assert claims.scopes == ["users:read"]
+
+
+def test_decode_access_token_missing_scopes_claim_defaults_empty() -> None:
+    # Arrange: a token minted before US-3.2, with no "scopes" key at all.
+    settings = get_settings()
+    payload = {
+        "sub": str(uuid.uuid4()),
+        "jti": str(uuid.uuid4()),
+        "exp": datetime.now(UTC) + timedelta(seconds=60),
+    }
+    token = jwt.encode(
+        payload, settings.jwt_secret_key.get_secret_value(), algorithm=settings.jwt_algorithm
+    )
+
+    # Act
+    claims = decode_access_token(token)
+
+    # Assert
+    assert claims.scopes == []
 
 
 def test_decode_access_token_tampered_signature_raises_invalid_token() -> None:
-    # Arrange
-    token = encode_access_token(user_id=uuid.uuid4(), jti=uuid.uuid4())
-    tampered = token[:-1] + ("a" if token[-1] != "a" else "b")
+    # Arrange: flip a character in the middle of the signature, not the
+    # very last one — the final base64 character of a 32-byte HMAC-SHA256
+    # signature only carries 4 significant bits (2-byte tail group), so
+    # some character pairs there decode to the same effective byte value
+    # and the corruption is silently absorbed, making a last-char flip
+    # occasionally (and non-deterministically) fail to actually tamper
+    # the signature.
+    token = encode_access_token(user_id=uuid.uuid4(), jti=uuid.uuid4(), scopes=[])
+    signature_start = token.rindex(".") + 1
+    flip_index = signature_start + (len(token) - signature_start) // 2
+    flipped_char = "a" if token[flip_index] != "a" else "b"
+    tampered = token[:flip_index] + flipped_char + token[flip_index + 1 :]
 
     # Act & Assert
     with pytest.raises(InvalidTokenError):

@@ -3,7 +3,7 @@ from datetime import UTC, datetime
 
 from redis.asyncio import Redis
 
-from app.core.cache_keys import revoke_before_key
+from app.core.cache_keys import perm_epoch_key, revoke_before_key
 
 
 class RevocationCache:
@@ -37,6 +37,36 @@ class RevocationCache:
             return None
         # decode_responses=True on the client guarantees str at runtime;
         # the installed stub still types redis.get()'s return as bytes|str.
+        if isinstance(raw, bytes):
+            raw = raw.decode()
+        return datetime.fromisoformat(raw)
+
+
+class PermissionEpochCache:
+    """The single read/write surface for `perm_epoch:{user_id}`.
+
+    Sibling to `RevocationCache` for the same reason (US-3.2/spec US-012's
+    Non-Functional Requirements): `roles.service` writes it on every role
+    change, `users.service` reads it on every authenticated request — no
+    single module owns this. Deliberately a separate key/class from
+    `revoke_before` (not reused): `revoke_before` kills the whole session
+    including refresh (correct for deactivation); `perm_epoch` invalidates
+    access tokens only, so a permission change refreshes transparently
+    instead of forcing a full re-login.
+    """
+
+    def __init__(self, client: Redis) -> None:
+        self._client = client
+
+    async def set_perm_epoch(self, user_id: uuid.UUID, *, ttl_seconds: int) -> None:
+        await self._client.set(
+            perm_epoch_key(user_id), datetime.now(UTC).isoformat(), ex=ttl_seconds
+        )
+
+    async def get_perm_epoch(self, user_id: uuid.UUID) -> datetime | None:
+        raw = await self._client.get(perm_epoch_key(user_id))
+        if raw is None:
+            return None
         if isinstance(raw, bytes):
             raw = raw.decode()
         return datetime.fromisoformat(raw)

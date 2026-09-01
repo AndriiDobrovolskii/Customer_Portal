@@ -20,6 +20,7 @@ from app.modules.users.exceptions import (
     PasswordResetTokenInvalidError,
     RegistrationValidationError,
     TokenInvalidError,
+    TokenStaleError,
     TooManyAttemptsError,
 )
 from app.modules.users.models import PasswordResetToken, RefreshToken, User, UserSession
@@ -431,6 +432,29 @@ class FakePasswordResetRateLimitCache:
         return self.ip_retry_after.get(ip, 3600)
 
 
+class FakePermissionEpochCache:
+    def __init__(
+        self, epochs: dict[uuid.UUID, datetime] | None = None, *, raises: bool = False
+    ) -> None:
+        self.epochs = dict(epochs or {})
+        self.raises = raises
+
+    async def get_perm_epoch(self, user_id: uuid.UUID) -> datetime | None:
+        if self.raises:
+            raise ConnectionError("valkey unreachable")
+        return self.epochs.get(user_id)
+
+
+class FakeRoleService:
+    def __init__(self, scopes_by_user: dict[uuid.UUID, list[str]] | None = None) -> None:
+        self.scopes_by_user = dict(scopes_by_user or {})
+        self.resolved_for: list[uuid.UUID] = []
+
+    async def resolve_scopes_for_user(self, user_id: uuid.UUID) -> list[str]:
+        self.resolved_for.append(user_id)
+        return self.scopes_by_user.get(user_id, [])
+
+
 def _email_hash(email: str) -> str:
     """Test-side mirror of the service's own normalized-email hashing, used
     only to pre-seed/assert against the fake rate-limit cache's keys.
@@ -447,6 +471,8 @@ def _make_service(
     account_service: FakeAccountService | None = None,
     refresh_rate_limit_cache: FakeRefreshRateLimitCache | None = None,
     password_reset_rate_limit_cache: FakePasswordResetRateLimitCache | None = None,
+    permission_epoch_cache: FakePermissionEpochCache | None = None,
+    role_service: FakeRoleService | None = None,
 ) -> tuple[UserService, FakeVerificationTokenIssuer, FakeEmailSender]:
     issuer = issuer or FakeVerificationTokenIssuer()
     email_sender = email_sender or FakeEmailSender()
@@ -457,6 +483,8 @@ def _make_service(
     password_reset_rate_limit_cache = (
         password_reset_rate_limit_cache or FakePasswordResetRateLimitCache()
     )
+    permission_epoch_cache = permission_epoch_cache or FakePermissionEpochCache()
+    role_service = role_service or FakeRoleService()
     service = UserService(
         repository,
         issuer,
@@ -466,6 +494,8 @@ def _make_service(
         account_service,
         refresh_rate_limit_cache,
         password_reset_rate_limit_cache,
+        permission_epoch_cache,
+        role_service,
     )
     return service, issuer, email_sender
 
@@ -974,7 +1004,7 @@ async def _seed_session(
     )
     session.issued_at = issued_at
     repository.sessions_by_jti[jti] = session
-    return encode_access_token(user_id=user_id, jti=jti)
+    return encode_access_token(user_id=user_id, jti=jti, scopes=[])
 
 
 async def test_get_authenticated_user_token_before_revoke_before_rejected() -> None:
@@ -1040,6 +1070,51 @@ async def test_get_authenticated_user_cache_read_error_rejected() -> None:
     # Assert: fail closed on a cache-read error, per AGENTS.md §3's
     # denylist carve-out — an outage must reject, not accept, the token.
     assert result is None
+
+
+async def test_get_authenticated_user_perm_epoch_cache_read_error_rejected() -> None:
+    # Arrange
+    user_id = uuid.uuid4()
+    repository = FakeUserRepository()
+    token = await _seed_session(repository, user_id=user_id, issued_at=datetime.now(UTC))
+    permission_epoch_cache = FakePermissionEpochCache(raises=True)
+    service, _, _ = _make_service(repository, permission_epoch_cache=permission_epoch_cache)
+
+    # Act
+    result = await service.get_authenticated_user(token)
+
+    # Assert: same fail-closed rationale as revoke_before's cache-read-error case.
+    assert result is None
+
+
+async def test_get_authenticated_user_token_before_perm_epoch_raises_token_stale() -> None:
+    # Arrange
+    user_id = uuid.uuid4()
+    repository = FakeUserRepository()
+    issued_at = datetime.now(UTC)
+    token = await _seed_session(repository, user_id=user_id, issued_at=issued_at)
+    permission_epoch_cache = FakePermissionEpochCache({user_id: issued_at + timedelta(seconds=5)})
+    service, _, _ = _make_service(repository, permission_epoch_cache=permission_epoch_cache)
+
+    # Act & Assert: distinct from every other failure in this method (MR-AC2,
+    # US-3.2) — raised, not returned as None.
+    with pytest.raises(TokenStaleError):
+        await service.get_authenticated_user(token)
+
+
+async def test_get_authenticated_user_perm_epoch_absent_accepted() -> None:
+    # Arrange
+    user_id = uuid.uuid4()
+    repository = FakeUserRepository()
+    token = await _seed_session(repository, user_id=user_id, issued_at=datetime.now(UTC))
+    service, _, _ = _make_service(repository)
+
+    # Act
+    result = await service.get_authenticated_user(token)
+
+    # Assert
+    assert result is not None
+    assert result.user_id == user_id
 
 
 # --- US-2.2 (spec US-006): logout / logout-all -------------------------------
@@ -1218,7 +1293,7 @@ async def test_get_authenticated_user_allow_revoked_rejects_unknown_jti() -> Non
     # "revoked" and "never existed" are different failure modes (Open
     # Question #2, US-006-api-design.md).
     repository = FakeUserRepository()
-    token = encode_access_token(user_id=uuid.uuid4(), jti=uuid.uuid4())
+    token = encode_access_token(user_id=uuid.uuid4(), jti=uuid.uuid4(), scopes=[])
     service, _, _ = _make_service(repository)
 
     # Act

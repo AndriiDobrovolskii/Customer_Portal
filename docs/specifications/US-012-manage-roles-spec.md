@@ -3,7 +3,7 @@
 **Source:** docs/stories/US-3.2-manage-roles.md
 **Story ID:** US-012
 **Generated:** 2026-08-22
-**Status:** Draft (refined 2026-08-22 per docs/reviews/specifications/US-012-spec-review.md)
+**Status:** Draft (refined 2026-08-22 per docs/reviews/specifications/US-012-spec-review.md; revised 2026-09-01 to incorporate docs/decisions/US-3.2-open-decisions.md OD-1, OD-2)
 
 ## Summary
 
@@ -67,7 +67,7 @@ Given the target is the only active account holding the `admin` role, when `PUT 
 
 - `perm_epoch:{user_id}` and `revoke_before:{user_id}` (US-1.4) are two separate Valkey keys by design: `revoke_before` kills the whole session including refresh, which is correct for deactivation; `perm_epoch` invalidates access tokens only, so a permission change refreshes transparently. Both are checked in the same shared middleware.
 - MR-AC5 and MR-AC6 together close both self-elevation paths; the emergency route is an out-of-band runbook, not an API endpoint.
-- An Alembic hook in `env.py` MUST fail the migration if any scope referenced in code is missing from `permissions`, or if a `role_permissions` row references an unknown scope.
+- A CI check MUST fail the build if any scope referenced in code (route dependencies, `role_permissions` seed data) is missing a matching `permissions` row, or if a `role_permissions` row references an unknown scope. This is implemented as a standalone CI test, not an Alembic `env.py` hook — `migrations/env.py` MUST NOT be edited, per `AGENTS.md` §7.9 (a binding project rule that takes precedence over the source story's original wording; resolved as OD-1 in `docs/decisions/US-3.2-open-decisions.md`).
 - Permission checks resolve from the JWT `scopes` claim — no database round trip on the hot path; only `perm_epoch` is read from Valkey.
 - Error responses use the RFC 7807 `application/problem+json` envelope (`type`, `title`, `status`, `detail`, `instance`), with `type` values rooted at `https://portal.internal/errors/...`.
 - The `token-stale` error type slug is introduced by this story.
@@ -78,9 +78,9 @@ Given the target is the only active account holding the `admin` role, when `PUT 
 
 - Custom/tenant-defined roles
 - Per-resource (row-level) permissions
-- Break-glass admin recovery — a CI/CD-gated Alembic command, not an API
+- Break-glass admin recovery — a CI/CD-gated Alembic command, not an API. This same command also serves as the initial-administrator bootstrap mechanism (there is no other way to grant the first `admin` role, since every in-scope path requires already holding `roles:write`) — building the command is tracked separately from this story; this story's implementation only depends on the command existing before go-live, it does not build it. (Resolved as OD-2 in `docs/decisions/US-3.2-open-decisions.md`.)
 
-**Derived from:** Out of Scope section of the source.
+**Derived from:** Out of Scope section of the source; bootstrap dependency per OD-2.
 
 ## Open Questions
 
