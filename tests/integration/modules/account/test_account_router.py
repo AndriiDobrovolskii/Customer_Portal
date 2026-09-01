@@ -51,7 +51,7 @@ async def _seed_session_and_token(
         )
     )
     await db_session.flush()
-    return encode_access_token(user_id=user_id, jti=jti)
+    return encode_access_token(user_id=user_id, jti=jti, scopes=[])
 
 
 async def test_deactivate_correct_password_returns_200(
@@ -238,7 +238,7 @@ async def test_deactivate_revoked_session_token_returns_401(
     session.revoked_at = datetime.now(UTC)
     db_session.add(session)
     await db_session.flush()
-    token = encode_access_token(user_id=user.id, jti=jti)
+    token = encode_access_token(user_id=user.id, jti=jti, scopes=[])
 
     # Act
     response = await client.post(
@@ -275,7 +275,7 @@ async def test_deactivate_concurrent_requests_only_one_succeeds(real_client: Asy
                 jti=jti, user_id=user_id, expires_at=datetime.now(UTC) + timedelta(hours=1)
             )
         )
-    token = encode_access_token(user_id=user_id, jti=jti)
+    token = encode_access_token(user_id=user_id, jti=jti, scopes=[])
 
     # Act
     responses = await asyncio.gather(

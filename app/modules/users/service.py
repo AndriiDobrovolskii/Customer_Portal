@@ -34,6 +34,7 @@ from app.modules.users.exceptions import (
     PasswordResetTokenInvalidError,
     RegistrationValidationError,
     TokenInvalidError,
+    TokenStaleError,
     TooManyAttemptsError,
 )
 from app.modules.users.models import PasswordResetToken, RefreshToken, User, UserSession
@@ -79,6 +80,7 @@ class AuthenticatedUser:
 
     user_id: uuid.UUID
     jti: uuid.UUID
+    scopes: list[str]
 
 
 class UserRepositoryProtocol(Protocol):
@@ -160,6 +162,20 @@ class RevocationCacheProtocol(Protocol):
     async def get_revoke_before(self, user_id: uuid.UUID) -> datetime | None: ...
 
     async def set_revoke_before(self, user_id: uuid.UUID, *, ttl_seconds: int) -> None: ...
+
+
+class PermissionEpochCacheProtocol(Protocol):
+    async def get_perm_epoch(self, user_id: uuid.UUID) -> datetime | None: ...
+
+
+class RoleServiceProtocol(Protocol):
+    """Cross-module collaborator (US-3.2/spec US-012): resolves the
+    permission scopes a JWT `scopes` claim carries at token issuance,
+    called here via `roles.service`, never its router/repository —
+    mirrors `AccountServiceProtocol`'s existing cross-module pattern.
+    """
+
+    async def resolve_scopes_for_user(self, user_id: uuid.UUID) -> list[str]: ...
 
 
 class LoginThrottleCacheProtocol(Protocol):
@@ -270,6 +286,8 @@ class UserService:
         account_service: AccountServiceProtocol,
         refresh_rate_limit_cache: RefreshRateLimitCacheProtocol,
         password_reset_rate_limit_cache: PasswordResetRateLimitCacheProtocol,
+        permission_epoch_cache: PermissionEpochCacheProtocol,
+        role_service: RoleServiceProtocol,
     ) -> None:
         self._repository = repository
         self._issuer = issuer
@@ -279,6 +297,8 @@ class UserService:
         self._account_service = account_service
         self._refresh_rate_limit_cache = refresh_rate_limit_cache
         self._password_reset_rate_limit_cache = password_reset_rate_limit_cache
+        self._permission_epoch_cache = permission_epoch_cache
+        self._role_service = role_service
 
     async def register_user(self, payload: UserCreate) -> UserRead:
         errors: list[FieldError] = []
@@ -453,8 +473,9 @@ class UserService:
         # per-IP counter is deliberately left alone.
         await self._throttle_cache.reset_account_failures(user.id)
 
+        scopes = await self._role_service.resolve_scopes_for_user(user.id)
         response = LoginResponse(
-            access_token=encode_access_token(user_id=user.id, jti=jti),
+            access_token=encode_access_token(user_id=user.id, jti=jti, scopes=scopes),
             expires_in=settings.access_token_ttl_seconds,
         )
         return response, raw_refresh_token
@@ -496,7 +517,21 @@ class UserService:
         if revoke_before is not None and session.issued_at <= revoke_before:
             return None
 
-        return AuthenticatedUser(user_id=claims.user_id, jti=claims.jti)
+        try:
+            perm_epoch = await self._permission_epoch_cache.get_perm_epoch(claims.user_id)
+        except Exception:
+            # Same fail-closed rationale as the revoke_before check above.
+            logger.exception("perm_epoch check failed; rejecting token")
+            return None
+        if perm_epoch is not None and session.issued_at <= perm_epoch:
+            # Deliberately raised, not returned as None (MR-AC2, US-3.2):
+            # every other failure in this method is intentionally
+            # indistinguishable (a generic 401), but a stale-permission
+            # token needs its own `token-stale` type slug so the client
+            # knows to call /auth/refresh rather than re-authenticate.
+            raise TokenStaleError
+
+        return AuthenticatedUser(user_id=claims.user_id, jti=claims.jti, scopes=claims.scopes)
 
     async def logout(
         self,
@@ -686,8 +721,9 @@ class UserService:
         )
         await self._repository.commit()
 
+        scopes = await self._role_service.resolve_scopes_for_user(consumed.user_id)
         response = RefreshResponse(
-            access_token=encode_access_token(user_id=consumed.user_id, jti=jti),
+            access_token=encode_access_token(user_id=consumed.user_id, jti=jti, scopes=scopes),
             expires_in=settings.access_token_ttl_seconds,
         )
         return response, new_raw_token

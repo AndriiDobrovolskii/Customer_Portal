@@ -29,6 +29,7 @@ class Settings(BaseSettings):
     password_reset_account_hourly_limit: int = 5
     password_reset_ip_hourly_limit: int = 10
     breached_password_list_path: str = "app/core/data/common_passwords.txt"  # noqa: S105
+    perm_epoch_ttl_seconds: int = 900
 
 
 @lru_cache

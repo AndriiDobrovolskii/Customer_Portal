@@ -16,6 +16,7 @@ from app.modules.email_verification import (  # noqa: F401  # registers models w
     models as email_verification_models,
 )
 from app.modules.profile import models as profile_models  # noqa: F401  # registers models
+from app.modules.roles import models as roles_models  # noqa: F401  # registers models
 from app.modules.users import models as users_models  # noqa: F401  # registers User with Base
 
 # this is the Alembic Config object, which provides

@@ -273,7 +273,7 @@ async def test_update_profile_revoked_session_returns_401(
     session.revoked_at = datetime.now(UTC)
     db_session.add(session)
     await db_session.flush()
-    token = encode_access_token(user_id=user.id, jti=jti)
+    token = encode_access_token(user_id=user.id, jti=jti, scopes=[])
 
     # Act
     response = await client.patch(

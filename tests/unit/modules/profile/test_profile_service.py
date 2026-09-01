@@ -651,7 +651,7 @@ async def test_confirm_email_change_with_valid_bearer_exempts_that_session() -> 
         user_id=user.id, raw_token="raw-token", expires_at=_FIXED_NOW + timedelta(hours=1)
     )
     jti = uuid.uuid4()
-    token = encode_access_token(user_id=user.id, jti=jti)
+    token = encode_access_token(user_id=user.id, jti=jti, scopes=[])
     service, session_revoker, _ = _make_service(repository)
 
     # Act

@@ -1,12 +1,26 @@
-active_story: US-2.4
+active_story: US-3.2
 
-# US-2.4 (Password Reset, Epic 2) is now active per the user's explicit
-# request on 2026-09-01 to continue with docs/stories/US-2.4-password-reset.md,
-# right after US-2.3's tracking files were reconciled to match its actual
-# completed state (see workflow-state.yaml note). Pipeline not yet started
-# for US-2.4 - us-clarifier has not run.
+# US-3.2 (Manage Roles, Epic 3) is now active. US-2.5 (MFA/TOTP)'s
+# us-clarifier run on 2026-09-01 found a BLOCKING dependency (OD-1 in
+# docs/decisions/US-2.5-open-decisions.md): US-2.5 needs a role/
+# permission-scope system that doesn't exist in the codebase yet, and
+# this project's own docs/stories/README.md documents US-3.2 as the
+# prerequisite ("US-3.2 first - everything else checks its scopes").
+# User chose 2026-09-01 to pause US-2.5 and build US-3.2 first. Pipeline
+# not yet started for US-3.2 - us-clarifier has not run. Once US-3.2
+# reaches PR/merge, resume US-2.5 and re-run its clarification against
+# the then-current codebase before trusting MF-AC6's assumptions.
 
 # --- prior story history retained for context ---
+# US-2.5 (MFA/TOTP, Epic 2) - CLARIFICATION ran 2026-09-01, verdict Not
+# Ready, blocked on US-3.2 dependency (see above). Story parked, not
+# abandoned; docs/decisions/US-2.5-open-decisions.md and
+# docs/evidence/US-2.5-clarification-report.md preserved for when work
+# resumes.
+# US-2.4 (Password Reset, Epic 2) reached PR with every stage Pass (see
+# docs/catalog/US-2.4-pipeline-status.md), was committed (c973548) and
+# merged as PR #8 (800a405) after #7 was auto-closed by #6's merge -
+# confirmed via `git log`, 2026-09-01.
 # US-2.3 (Refresh Token, Epic 2) reached PR with every stage Pass (see
 # docs/catalog/US-2.3-pipeline-status.md), was committed (c0fc4d8) and
 # opened as GitHub PR #6 (state: OPEN, unmerged) - confirmed via `gh pr
