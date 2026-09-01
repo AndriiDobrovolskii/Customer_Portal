@@ -2,7 +2,14 @@ import uuid
 
 from redis.asyncio import Redis
 
-from app.core.cache_keys import login_fail_account_key, login_fail_ip_key, refresh_rate_limit_key
+from app.core.cache_keys import (
+    login_fail_account_key,
+    login_fail_ip_key,
+    password_reset_account_hourly_key,
+    password_reset_cooldown_key,
+    password_reset_ip_hourly_key,
+    refresh_rate_limit_key,
+)
 
 
 class LoginThrottleCache:
@@ -90,4 +97,56 @@ class RefreshRateLimitCache:
 
     async def get_retry_after_seconds(self, family_id: uuid.UUID) -> int:
         ttl = await self._client.ttl(refresh_rate_limit_key(family_id))
+        return max(int(ttl), 0)
+
+
+class PasswordResetRateLimitCache:
+    """Three-limit request throttle for POST /v1/auth/password-reset/request
+    (resolved OD-2): a 60 s per-account cooldown, a 5/hour per-account
+    limit, and a 10/hour per-IP limit, checked by the service in that order.
+
+    The account-scoped counters are keyed by a hash of the normalized email,
+    not `user_id` — FR-3's anti-enumeration requirement means these limits
+    must apply identically to an unknown email, which has no `user_id`
+    (plan.md's Architectural Change #2). The cooldown and hourly counters
+    use separate keys (not one counter read two ways) since they need
+    different TTLs.
+
+    Same advisory-rate-limit class as `LoginThrottleCache`/
+    `RefreshRateLimitCache`: no DB-backed source of truth to degrade to on a
+    Valkey outage, so this gateway does not catch client errors itself.
+    """
+
+    def __init__(self, client: Redis) -> None:
+        self._client = client
+
+    async def record_cooldown_attempt(self, email_hash: str, *, window_seconds: int) -> int:
+        return await self._incr_with_ttl(password_reset_cooldown_key(email_hash), window_seconds)
+
+    async def get_cooldown_retry_after_seconds(self, email_hash: str) -> int:
+        return await self._get_ttl(password_reset_cooldown_key(email_hash))
+
+    async def record_account_attempt(self, email_hash: str, *, window_seconds: int) -> int:
+        return await self._incr_with_ttl(
+            password_reset_account_hourly_key(email_hash), window_seconds
+        )
+
+    async def get_account_retry_after_seconds(self, email_hash: str) -> int:
+        return await self._get_ttl(password_reset_account_hourly_key(email_hash))
+
+    async def record_ip_attempt(self, ip: str, *, window_seconds: int) -> int:
+        return await self._incr_with_ttl(password_reset_ip_hourly_key(ip), window_seconds)
+
+    async def get_ip_retry_after_seconds(self, ip: str) -> int:
+        return await self._get_ttl(password_reset_ip_hourly_key(ip))
+
+    async def _incr_with_ttl(self, key: str, window_seconds: int) -> int:
+        async with self._client.pipeline(transaction=True) as pipe:
+            pipe.incr(key)
+            pipe.expire(key, window_seconds)
+            count, _ = await pipe.execute()
+        return int(count)
+
+    async def _get_ttl(self, key: str) -> int:
+        ttl = await self._client.ttl(key)
         return max(int(ttl), 0)

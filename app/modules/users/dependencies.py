@@ -10,7 +10,11 @@ from app.core.revocation_cache import RevocationCache
 from app.db.dependencies import get_db_session, get_valkey_client
 from app.modules.account.dependencies import AccountServiceDep
 from app.modules.email_verification.dependencies import EmailVerificationServiceDep
-from app.modules.users.cache import LoginThrottleCache, RefreshRateLimitCache
+from app.modules.users.cache import (
+    LoginThrottleCache,
+    PasswordResetRateLimitCache,
+    RefreshRateLimitCache,
+)
 from app.modules.users.exceptions import UnauthenticatedError
 from app.modules.users.repository import UserRepository
 from app.modules.users.service import AuthenticatedUser, UserService
@@ -30,6 +34,7 @@ def get_user_service(
     revocation_cache = RevocationCache(valkey_client)
     throttle_cache = LoginThrottleCache(valkey_client)
     refresh_rate_limit_cache = RefreshRateLimitCache(valkey_client)
+    password_reset_rate_limit_cache = PasswordResetRateLimitCache(valkey_client)
     return UserService(
         repository,
         issuer,
@@ -38,6 +43,7 @@ def get_user_service(
         throttle_cache,
         account_service,
         refresh_rate_limit_cache,
+        password_reset_rate_limit_cache,
     )
 
 

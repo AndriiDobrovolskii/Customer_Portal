@@ -5,7 +5,13 @@ from sqlalchemy import func, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.modules.users.models import AuthAuditLog, RefreshToken, User, UserSession
+from app.modules.users.models import (
+    AuthAuditLog,
+    PasswordResetToken,
+    RefreshToken,
+    User,
+    UserSession,
+)
 
 
 class UserRepository:
@@ -93,6 +99,17 @@ class UserRepository:
             update(User).where(User.id == user_id).values(last_login_at=func.now())
         )
 
+    async def update_password_hash(self, *, user_id: uuid.UUID, hashed_password: str) -> None:
+        """FR-2: no existing write path actually covers this — registration
+        `create`s a new row and login never writes `hashed_password` — so
+        this is a genuinely new method, found while building the service
+        (impact-analysis's "existing write path" note undersold it; same
+        class of gap US-2.3 hit with `get_by_id`).
+        """
+        await self._session.execute(
+            update(User).where(User.id == user_id).values(hashed_password=hashed_password)
+        )
+
     async def create_auth_audit_log_entry(
         self,
         *,
@@ -141,6 +158,56 @@ class UserRepository:
         self._session.add(refresh_token)
         await self._session.flush()
         return refresh_token
+
+    async def invalidate_password_reset_tokens_for_user(self, *, user_id: uuid.UUID) -> None:
+        """FR-1: any previously issued, unconsumed reset token for the
+        account is invalidated when a new one issues. Reuses `consumed_at`
+        itself as the invalidation marker (per db-design.md) — a row
+        invalidated this way is indistinguishable at the DB level from one
+        consumed by actual use, which is correct: both must reject
+        identically at `confirm` (FR-4).
+        """
+        await self._session.execute(
+            update(PasswordResetToken)
+            .where(PasswordResetToken.user_id == user_id, PasswordResetToken.consumed_at.is_(None))
+            .values(consumed_at=func.now())
+        )
+
+    async def create_password_reset_token(
+        self, *, user_id: uuid.UUID, token_hash: str, expires_at: datetime
+    ) -> PasswordResetToken:
+        reset_token = PasswordResetToken(
+            user_id=user_id, token_hash=token_hash, expires_at=expires_at
+        )
+        self._session.add(reset_token)
+        await self._session.flush()
+        return reset_token
+
+    async def get_password_reset_token_by_hash(self, token_hash: str) -> PasswordResetToken | None:
+        result = await self._session.execute(
+            select(PasswordResetToken).where(PasswordResetToken.token_hash == token_hash)
+        )
+        return result.scalar_one_or_none()
+
+    async def consume_password_reset_token(self, *, token_hash: str) -> PasswordResetToken | None:
+        """Atomic check-and-consume, same pattern as `consume_refresh_token`
+        (RT-AC7) and required by the US-008 spec review's accepted Missing
+        Edge Cases finding: a conditional UPDATE guarded by `consumed_at IS
+        NULL` so two concurrent `confirm` calls against the same token can
+        never both succeed. Returns `None` when the token was already
+        consumed (by prior use, by FR-1's invalidation, or by a losing
+        concurrent request).
+        """
+        result = await self._session.execute(
+            update(PasswordResetToken)
+            .where(
+                PasswordResetToken.token_hash == token_hash,
+                PasswordResetToken.consumed_at.is_(None),
+            )
+            .values(consumed_at=func.now())
+            .returning(PasswordResetToken)
+        )
+        return result.scalar_one_or_none()
 
     async def commit(self) -> None:
         await self._session.commit()

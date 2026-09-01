@@ -1,33 +1,23 @@
-active_story: US-2.3
+active_story: US-2.4
 
-# US-2.3 (Refresh Token, Epic 2) is now active per the user's explicit
-# request on 2026-09-01 to continue with docs/stories/US-2.3-refresh-token.md.
-# us-clarifier ran: a spec + review (US-007) already existed outside this
-# pipeline (drafted 2026-08-22, Pass with Issues, same pattern as
-# US-005/US-006), but predates US-2.1's and US-2.2's actual implementation.
-# Reading the now-real codebase surfaced 6 Open Decisions in
-# docs/decisions/US-2.3-open-decisions.md, all resolved by the user
-# 2026-09-01 (recommended option accepted in every case): OD-1 refresh
-# rate-limit response is 429+Retry-After keyed by family_id (reusing
-# TooManyAttemptsError), OD-2 mobile (X-Client-Type) body-delivery
-# descoped as a follow-up, OD-3 RT-AC3's "indistinguishable" scoped to
-# status/body only (no timing-safe dummy needed, unlike login), OD-4 adds
-# a dedicated auth_audit_log.severity column, OD-5 reuse detection is
-# checked before account-eligibility (always alerts even against a
-# deactivated account), OD-6 accepts a <=15-minute residual access-token
-# window on reuse (no family_id link added to user_sessions). Two
-# spec-review findings carried forward (RFC 7807 envelope shape, cookie
-# Path=/v1/auth scoping) to be addressed explicitly in the revised spec.
-# See docs/evidence/US-2.3-clarification-report.md. Now advancing to
-# SPECIFICATION: story-spec-writer revising the existing
-# US-007-refresh-token-spec.md to incorporate OD-1-6 plus the two
-# carried-forward findings before SPEC_REVIEW is re-run.
-#
+# US-2.4 (Password Reset, Epic 2) is now active per the user's explicit
+# request on 2026-09-01 to continue with docs/stories/US-2.4-password-reset.md,
+# right after US-2.3's tracking files were reconciled to match its actual
+# completed state (see workflow-state.yaml note). Pipeline not yet started
+# for US-2.4 - us-clarifier has not run.
+
+# --- prior story history retained for context ---
+# US-2.3 (Refresh Token, Epic 2) reached PR with every stage Pass (see
+# docs/catalog/US-2.3-pipeline-status.md), was committed (c0fc4d8) and
+# opened as GitHub PR #6 (state: OPEN, unmerged) - confirmed via `gh pr
+# list` and `git log`, 2026-09-01. workflow-state.yaml/history.jsonl were
+# stale (never updated when the story actually completed in a prior
+# session) and were backfilled 2026-09-01 before advancing to US-2.4.
 # US-2.2 (Logout, Epic 2) reached PR with every stage Pass (post-PR IDOR
 # fix included), was committed and merged as PR #5 on GitHub (commit
 # 157fa36, merge 76e70e8) - confirmed via git log on main, 2026-09-01.
 
-# --- prior story history retained for context ---
+# --- older history retained for context ---
 # US-001, US-002, US-003 are implemented per git history (commits b6dc29e,
 # ed6e2a9, 90a612b, 1f8d2a5, 1ee7dc5), though not tracked through this
 # pipeline. US-004 (Deactivate Account, Epic 1 / "1.4") completed the full
@@ -35,10 +25,5 @@ active_story: US-2.3
 # GitHub (confirmed via `gh pr view 1`, state: MERGED, 2026-08-31).
 # US-2.1 (Login, Epic 2) completed the full pipeline through PR (see
 # docs/catalog/US-2.1-pipeline-status.md, all stages Pass), was committed
-# and merged as PR #2 on GitHub (confirmed via git log on main: commit
-# 1ecedb0 "feat: implement US-2.1 login", merged via d14a51b "Merge pull
+# and merged as PR #2 on GitHub (commit 1ecedb0, merge d14a51b "Merge pull
 # request #2 from AndriiDobrovolskii/feat/us-2.1-login").
-# US-2.2 (Logout, Epic 2) is now active per the user's explicit request on
-# 2026-08-31 to continue with docs/stories/US-2.2-logout.md. The story doc
-# is fully drafted (assumptions, API contract, ACs) but has not yet been
-# run through us-clarifier.

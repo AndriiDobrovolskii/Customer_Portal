@@ -1,4 +1,6 @@
+import hashlib
 import logging
+import secrets
 import string
 import uuid
 from dataclasses import dataclass
@@ -8,6 +10,7 @@ from typing import Protocol
 from email_validator import EmailNotValidError, validate_email
 from pydantic import SecretStr
 
+from app.core.breached_passwords import is_breached_password
 from app.core.config import get_settings
 from app.core.email import EmailSender
 from app.core.exceptions import FieldError
@@ -26,14 +29,20 @@ from app.modules.users.exceptions import (
     DuplicateEmailError,
     EmailNotVerifiedError,
     InvalidCredentialsError,
+    PasswordPolicyError,
+    PasswordResetTokenExpiredError,
+    PasswordResetTokenInvalidError,
     RegistrationValidationError,
     TokenInvalidError,
     TooManyAttemptsError,
 )
-from app.modules.users.models import RefreshToken, User, UserSession
+from app.modules.users.models import PasswordResetToken, RefreshToken, User, UserSession
 from app.modules.users.schemas import (
     LoginRequest,
     LoginResponse,
+    PasswordResetConfirmRequest,
+    PasswordResetRequestRequest,
+    PasswordResetRequestResponse,
     RefreshResponse,
     UserCreate,
     UserRead,
@@ -44,11 +53,24 @@ _REFRESH_IDLE_TIMEOUT = timedelta(days=14)
 _REFRESH_CONCURRENT_GRACE_WINDOW = timedelta(seconds=10)
 _REFRESH_RATE_LIMIT_MAX_REQUESTS = 60
 _REFRESH_RATE_LIMIT_WINDOW_SECONDS = 3600
+_PASSWORD_RESET_TOKEN_BYTES = 32
+_PASSWORD_RESET_HOURLY_WINDOW_SECONDS = 3600
+_MIN_RESET_PASSWORD_LENGTH = 12
 
 logger = logging.getLogger(__name__)
 
 _SPECIAL_CHARACTERS = set(string.punctuation)
 _MIN_PASSWORD_LENGTH = 8
+
+
+def _hash_password_reset_token(raw_token: str) -> str:
+    """Module-local, same pattern as `email_verification.service._hash_token`
+    — password_reset_tokens is explicitly modeled on email_verification_tokens
+    (source story's Data Model Notes), so it gets its own local hash helper
+    the same way, rather than reusing `hash_refresh_token` (a different
+    token type/table, US-2.3's own naming).
+    """
+    return hashlib.sha256(raw_token.encode()).hexdigest()
 
 
 @dataclass(frozen=True, slots=True)
@@ -111,6 +133,22 @@ class UserRepositoryProtocol(Protocol):
         last_used_at: datetime | None = None,
     ) -> RefreshToken: ...
 
+    async def update_password_hash(self, *, user_id: uuid.UUID, hashed_password: str) -> None: ...
+
+    async def invalidate_password_reset_tokens_for_user(self, *, user_id: uuid.UUID) -> None: ...
+
+    async def create_password_reset_token(
+        self, *, user_id: uuid.UUID, token_hash: str, expires_at: datetime
+    ) -> PasswordResetToken: ...
+
+    async def get_password_reset_token_by_hash(
+        self, token_hash: str
+    ) -> PasswordResetToken | None: ...
+
+    async def consume_password_reset_token(
+        self, *, token_hash: str
+    ) -> PasswordResetToken | None: ...
+
     async def commit(self) -> None: ...
 
 
@@ -144,6 +182,20 @@ class RefreshRateLimitCacheProtocol(Protocol):
     async def record_request(self, family_id: uuid.UUID, *, window_seconds: int) -> int: ...
 
     async def get_retry_after_seconds(self, family_id: uuid.UUID) -> int: ...
+
+
+class PasswordResetRateLimitCacheProtocol(Protocol):
+    async def record_cooldown_attempt(self, email_hash: str, *, window_seconds: int) -> int: ...
+
+    async def get_cooldown_retry_after_seconds(self, email_hash: str) -> int: ...
+
+    async def record_account_attempt(self, email_hash: str, *, window_seconds: int) -> int: ...
+
+    async def get_account_retry_after_seconds(self, email_hash: str) -> int: ...
+
+    async def record_ip_attempt(self, ip: str, *, window_seconds: int) -> int: ...
+
+    async def get_ip_retry_after_seconds(self, ip: str) -> int: ...
 
 
 class AccountServiceProtocol(Protocol):
@@ -217,6 +269,7 @@ class UserService:
         throttle_cache: LoginThrottleCacheProtocol,
         account_service: AccountServiceProtocol,
         refresh_rate_limit_cache: RefreshRateLimitCacheProtocol,
+        password_reset_rate_limit_cache: PasswordResetRateLimitCacheProtocol,
     ) -> None:
         self._repository = repository
         self._issuer = issuer
@@ -225,6 +278,7 @@ class UserService:
         self._throttle_cache = throttle_cache
         self._account_service = account_service
         self._refresh_rate_limit_cache = refresh_rate_limit_cache
+        self._password_reset_rate_limit_cache = password_reset_rate_limit_cache
 
     async def register_user(self, payload: UserCreate) -> UserRead:
         errors: list[FieldError] = []
@@ -680,3 +734,183 @@ class UserService:
                 await self._email_sender.send_refresh_reuse_alert(to=user.email)
             except Exception:
                 logger.exception("failed to send refresh reuse alert email")
+
+    async def request_password_reset(
+        self,
+        payload: PasswordResetRequestRequest,
+        *,
+        ip: str,
+        user_agent: str | None,
+        request_id: str,
+    ) -> PasswordResetRequestResponse:
+        """FR-1/FR-3 (PR-AC1/PR-AC3): the response is identical regardless of
+        whether the email resolves to an eligible account (NFR-002 anti-
+        enumeration). Rate limiting (FR-6, resolved OD-2) is checked first,
+        in cooldown -> per-account/hour -> per-IP/hour order; the account-
+        scoped limits are keyed by a hash of the normalized email, not
+        `user_id`, since an unknown email has none (plan.md's Architectural
+        Change #2).
+
+        "Eligible" mirrors login's own notion (status != deactivated AND
+        email_verified) rather than only PR-AC3's literal "not registered or
+        deactivated" — an unverified account can't log in yet either, so
+        resetting its password wouldn't unblock anything; not itself an
+        Open Decision since it changes no external behavior (still 202,
+        still generic body, still no email observably distinguishable).
+        """
+        settings = get_settings()
+        normalized_email = payload.email.strip().lower()
+        email_hash = hashlib.sha256(normalized_email.encode()).hexdigest()
+
+        cooldown_count = await self._password_reset_rate_limit_cache.record_cooldown_attempt(
+            email_hash, window_seconds=settings.password_reset_cooldown_seconds
+        )
+        if cooldown_count > 1:
+            retry_after = (
+                await self._password_reset_rate_limit_cache.get_cooldown_retry_after_seconds(
+                    email_hash
+                )
+            )
+            raise TooManyAttemptsError(retry_after_seconds=retry_after)
+
+        account_count = await self._password_reset_rate_limit_cache.record_account_attempt(
+            email_hash, window_seconds=_PASSWORD_RESET_HOURLY_WINDOW_SECONDS
+        )
+        if account_count > settings.password_reset_account_hourly_limit:
+            retry_after = (
+                await self._password_reset_rate_limit_cache.get_account_retry_after_seconds(
+                    email_hash
+                )
+            )
+            raise TooManyAttemptsError(retry_after_seconds=retry_after)
+
+        ip_count = await self._password_reset_rate_limit_cache.record_ip_attempt(
+            ip, window_seconds=_PASSWORD_RESET_HOURLY_WINDOW_SECONDS
+        )
+        if ip_count > settings.password_reset_ip_hourly_limit:
+            retry_after = await self._password_reset_rate_limit_cache.get_ip_retry_after_seconds(ip)
+            raise TooManyAttemptsError(retry_after_seconds=retry_after)
+
+        user = await self._repository.get_by_email(normalized_email)
+        eligible = (
+            user is not None and user.status != UserStatus.DEACTIVATED.value and user.email_verified
+        )
+
+        raw_token: str | None = None
+        if eligible and user is not None:
+            await self._repository.invalidate_password_reset_tokens_for_user(user_id=user.id)
+            raw_token = secrets.token_urlsafe(_PASSWORD_RESET_TOKEN_BYTES)
+            token_hash = _hash_password_reset_token(raw_token)
+            expires_at = datetime.now(UTC) + timedelta(
+                minutes=settings.password_reset_token_ttl_minutes
+            )
+            await self._repository.create_password_reset_token(
+                user_id=user.id, token_hash=token_hash, expires_at=expires_at
+            )
+
+        # OD-3: written for every attempt, including an unknown/deactivated/
+        # unverified email — server-side only, doesn't affect the response.
+        await self._repository.create_auth_audit_log_entry(
+            event="password_reset_requested",
+            reason=None,
+            scope=None,
+            actor_id=user.id if user is not None else None,
+            ip=ip,
+            user_agent=user_agent,
+            request_id=request_id,
+            severity=None,
+        )
+        await self._repository.commit()
+
+        if eligible and user is not None and raw_token is not None:
+            # Best-effort, after commit (AGENTS.md §3): a failed dispatch
+            # must not undo the already-committed token issuance/audit
+            # entry — mirrors register_user's verification-email pattern.
+            try:
+                await self._email_sender.send_password_reset_email(
+                    to=user.email, raw_token=raw_token
+                )
+            except Exception:
+                logger.exception("failed to send password reset email")
+
+        return PasswordResetRequestResponse()
+
+    async def confirm_password_reset(
+        self,
+        payload: PasswordResetConfirmRequest,
+        *,
+        ip: str,
+        user_agent: str | None,
+        request_id: str,
+    ) -> None:
+        """FR-2/FR-4/FR-5 (PR-AC2/PR-AC4/PR-AC5). Token-state mapping
+        resolved by precedent (`email_verification`): unknown hash and
+        already-consumed both -> `PasswordResetTokenInvalidError` (400),
+        expired -> `PasswordResetTokenExpiredError` (400). A password-policy
+        failure (422) does NOT consume the token (FR-5) — checked before the
+        atomic consume. Consumption is atomic (spec-review resolution,
+        accepted 2026-09-01) via the same check-and-consume pattern as
+        `consume_refresh_token`; losing the race is treated identically to
+        any other invalid-token case.
+        """
+        token_hash = _hash_password_reset_token(payload.token)
+        token = await self._repository.get_password_reset_token_by_hash(token_hash)
+        if token is None:
+            raise PasswordResetTokenInvalidError
+        if token.consumed_at is not None:
+            raise PasswordResetTokenInvalidError
+        if token.expires_at <= datetime.now(UTC):
+            raise PasswordResetTokenExpiredError
+
+        user = await self._repository.get_by_id(token.user_id)
+        if user is None:
+            raise PasswordResetTokenInvalidError
+
+        new_password = payload.new_password.get_secret_value()
+        rules: list[str] = []
+        if len(new_password) < _MIN_RESET_PASSWORD_LENGTH:
+            rules.append("min_length")
+        if is_breached_password(new_password):
+            rules.append("breached")
+        if await verify_password(new_password, user.hashed_password):
+            rules.append("reused")
+        if rules:
+            raise PasswordPolicyError(rules=rules)
+
+        consumed = await self._repository.consume_password_reset_token(token_hash=token_hash)
+        if consumed is None:
+            # Lost a concurrent race (spec-review resolution): another
+            # request consumed this token between the read above and this
+            # atomic attempt.
+            raise PasswordResetTokenInvalidError
+
+        hashed_password = await hash_password(new_password)
+        await self._repository.update_password_hash(
+            user_id=user.id, hashed_password=hashed_password
+        )
+
+        # revoke_before set before the commit below, matching logout_all's
+        # existing ordering for this exact cache (not the module's own
+        # cache.py — RevocationCache is shared core infra with its own
+        # established precedent here).
+        settings = get_settings()
+        await self._revocation_cache.set_revoke_before(
+            user.id, ttl_seconds=settings.refresh_token_ttl_seconds
+        )
+        await self._repository.create_auth_audit_log_entry(
+            event="password_reset_completed",
+            reason=None,
+            scope=None,
+            actor_id=user.id,
+            ip=ip,
+            user_agent=user_agent,
+            request_id=request_id,
+            severity=None,
+        )
+        await self._repository.commit()
+
+        # Best-effort, after commit (AGENTS.md §3).
+        try:
+            await self._email_sender.send_password_reset_notice(to=user.email)
+        except Exception:
+            logger.exception("failed to send password reset notice email")

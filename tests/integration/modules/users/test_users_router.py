@@ -1,4 +1,5 @@
 import asyncio
+import hashlib
 import uuid
 from datetime import UTC, datetime, timedelta
 
@@ -14,7 +15,13 @@ from app.core.security import decode_access_token, hash_password, hash_refresh_t
 from app.main import app
 from app.modules.account.models import AccountLifecycleAuditLog
 from app.modules.email_verification.models import EmailVerificationToken
-from app.modules.users.models import AuthAuditLog, RefreshToken, User, UserSession
+from app.modules.users.models import (
+    AuthAuditLog,
+    PasswordResetToken,
+    RefreshToken,
+    User,
+    UserSession,
+)
 
 pytestmark = pytest.mark.integration
 
@@ -1302,3 +1309,396 @@ async def test_refresh_rate_limit_exceeded_returns_429(
     assert response.headers["content-type"] == "application/problem+json"
     assert response.json()["type"] == "https://portal.internal/errors/too-many-attempts"
     assert int(response.headers["retry-after"]) > 0
+
+
+# --- US-2.4 (spec US-008): password reset ------------------------------------
+
+_RESET_TEST_PASSWORD = "OldStr0ng!Pass1"  # pragma: allowlist secret
+_RESET_NEW_PASSWORD = "BrandNewStr0ngPass1!"  # pragma: allowlist secret
+_RESET_SHORT_PASSWORD = "Sh0rt!"  # pragma: allowlist secret
+_RESET_RACE_PASSWORD = "AnotherStr0ngPass2!"  # pragma: allowlist secret
+
+
+async def _seed_reset_token_row(
+    db_session: AsyncSession,
+    *,
+    user_id: uuid.UUID,
+    expires_at: datetime | None = None,
+    consumed_at: datetime | None = None,
+) -> str:
+    """Directly seeds a password_reset_tokens row for full control over its
+    state (expired/consumed), returning the raw presented value.
+    """
+    raw_token = f"raw-reset-{uuid.uuid4()}"
+    row = PasswordResetToken(
+        user_id=user_id,
+        token_hash=hashlib.sha256(raw_token.encode()).hexdigest(),
+        expires_at=expires_at or (datetime.now(UTC) + timedelta(minutes=30)),
+    )
+    if consumed_at is not None:
+        row.consumed_at = consumed_at
+    db_session.add(row)
+    await db_session.flush()
+    return raw_token
+
+
+# --- PR-AC1: requesting a reset (FR-1) ---------------------------------------
+
+
+async def test_password_reset_request_returns_202_with_generic_body(
+    client: AsyncClient, db_session: AsyncSession
+) -> None:
+    # Arrange
+    await _seed_login_user(
+        db_session,
+        email="reset.request@example.com",
+        password=_RESET_TEST_PASSWORD,
+        email_verified=True,
+        status="active",
+    )
+
+    # Act
+    response = await client.post(
+        "/api/v1/auth/password-reset/request", json={"email": "reset.request@example.com"}
+    )
+
+    # Assert
+    assert response.status_code == 202
+    assert response.json() == {"message": "If an account exists, an email has been sent"}
+
+    token_result = await db_session.execute(select(PasswordResetToken))
+    assert len(token_result.scalars().all()) == 1
+    audit_result = await db_session.execute(
+        select(AuthAuditLog).where(AuthAuditLog.event == "password_reset_requested")
+    )
+    assert audit_result.scalar_one() is not None
+
+
+# --- PR-AC3: anti-enumeration (FR-3, resolved OD-3) --------------------------
+
+
+async def test_password_reset_request_unknown_email_returns_202_identical_body(
+    client: AsyncClient, db_session: AsyncSession
+) -> None:
+    # Arrange
+    await _seed_login_user(
+        db_session,
+        email="reset.known@example.com",
+        password=_RESET_TEST_PASSWORD,
+        email_verified=True,
+        status="active",
+    )
+
+    # Act
+    known_response = await client.post(
+        "/api/v1/auth/password-reset/request", json={"email": "reset.known@example.com"}
+    )
+    unknown_response = await client.post(
+        "/api/v1/auth/password-reset/request", json={"email": "reset.unknown@example.com"}
+    )
+
+    # Assert: identical status and body regardless of account existence.
+    assert known_response.status_code == unknown_response.status_code == 202
+    assert known_response.json() == unknown_response.json()
+
+    # No token was created for the unknown email.
+    token_result = await db_session.execute(select(PasswordResetToken))
+    assert len(token_result.scalars().all()) == 1
+
+
+# --- PR-AC2: completing the reset (FR-2) -------------------------------------
+
+
+async def test_password_reset_confirm_returns_200_and_persists_new_password_hash(
+    client: AsyncClient, db_session: AsyncSession
+) -> None:
+    # Arrange
+    user = await _seed_login_user(
+        db_session,
+        email="reset.confirm@example.com",
+        password=_RESET_TEST_PASSWORD,
+        email_verified=True,
+        status="active",
+    )
+    raw_token = await _seed_reset_token_row(db_session, user_id=user.id)
+
+    # Act
+    response = await client.post(
+        "/api/v1/auth/password-reset/confirm",
+        json={
+            "token": raw_token,
+            "new_password": _RESET_NEW_PASSWORD,
+        },
+    )
+
+    # Assert
+    assert response.status_code == 200
+    assert response.content == b""
+
+    await db_session.refresh(user)
+    assert user.hashed_password != await hash_password(_RESET_TEST_PASSWORD)
+    assert user.hashed_password.startswith("$argon2id$")
+
+    token_result = await db_session.execute(
+        select(PasswordResetToken).where(
+            PasswordResetToken.token_hash == hashlib.sha256(raw_token.encode()).hexdigest()
+        )
+    )
+    assert token_result.scalar_one().consumed_at is not None
+
+    audit_result = await db_session.execute(
+        select(AuthAuditLog).where(
+            AuthAuditLog.event == "password_reset_completed", AuthAuditLog.actor_id == user.id
+        )
+    )
+    assert audit_result.scalar_one() is not None
+
+
+async def test_password_reset_confirm_revokes_all_sessions_and_refresh_families(
+    client: AsyncClient, db_session: AsyncSession
+) -> None:
+    # Arrange: a real prior login, so there's an actual session/refresh
+    # token to prove got revoked.
+    email = "reset.revoke@example.com"
+    user = await _seed_login_user(
+        db_session, email=email, password=_RESET_TEST_PASSWORD, email_verified=True, status="active"
+    )
+    login_response = await client.post(
+        "/api/v1/auth/login", json={"email": email, "password": _RESET_TEST_PASSWORD}
+    )
+    assert login_response.status_code == 200
+    old_access_token = login_response.json()["access_token"]
+    raw_token = await _seed_reset_token_row(db_session, user_id=user.id)
+
+    # Act
+    confirm_response = await client.post(
+        "/api/v1/auth/password-reset/confirm",
+        json={
+            "token": raw_token,
+            "new_password": _RESET_NEW_PASSWORD,
+        },
+    )
+    assert confirm_response.status_code == 200
+
+    # Assert: the old access token no longer authenticates anything.
+    follow_up = await client.patch(
+        "/api/v1/profile", json={}, headers=_auth_headers(old_access_token)
+    )
+    assert follow_up.status_code == 401
+
+    # Assert: the old refresh cookie no longer rotates either.
+    refresh_follow_up = await client.post("/api/v1/auth/refresh")
+    assert refresh_follow_up.status_code == 401
+
+
+# --- PR-AC4: expired, consumed, or unknown token (FR-4) ----------------------
+
+
+async def test_password_reset_confirm_expired_token_returns_400_token_expired(
+    client: AsyncClient, db_session: AsyncSession
+) -> None:
+    # Arrange
+    user = await _seed_login_user(
+        db_session,
+        email="reset.expired@example.com",
+        password=_RESET_TEST_PASSWORD,
+        email_verified=True,
+        status="active",
+    )
+    raw_token = await _seed_reset_token_row(
+        db_session, user_id=user.id, expires_at=datetime.now(UTC) - timedelta(seconds=1)
+    )
+
+    # Act
+    response = await client.post(
+        "/api/v1/auth/password-reset/confirm",
+        json={
+            "token": raw_token,
+            "new_password": _RESET_NEW_PASSWORD,
+        },
+    )
+
+    # Assert
+    assert response.status_code == 400
+    assert response.headers["content-type"] == "application/problem+json"
+    assert response.json()["type"] == "https://portal.internal/errors/token-expired"
+
+
+async def test_password_reset_confirm_unknown_token_returns_400_token_invalid(
+    client: AsyncClient,
+) -> None:
+    # Act
+    response = await client.post(
+        "/api/v1/auth/password-reset/confirm",
+        json={
+            "token": "never-issued-token",
+            "new_password": _RESET_NEW_PASSWORD,
+        },
+    )
+
+    # Assert
+    assert response.status_code == 400
+    assert response.headers["content-type"] == "application/problem+json"
+    assert response.json()["type"] == "https://portal.internal/errors/token-invalid"
+
+
+async def test_password_reset_confirm_consumed_token_returns_400_token_invalid(
+    client: AsyncClient, db_session: AsyncSession
+) -> None:
+    # Arrange
+    user = await _seed_login_user(
+        db_session,
+        email="reset.consumed@example.com",
+        password=_RESET_TEST_PASSWORD,
+        email_verified=True,
+        status="active",
+    )
+    raw_token = await _seed_reset_token_row(
+        db_session, user_id=user.id, consumed_at=datetime.now(UTC) - timedelta(minutes=5)
+    )
+
+    # Act
+    response = await client.post(
+        "/api/v1/auth/password-reset/confirm",
+        json={
+            "token": raw_token,
+            "new_password": _RESET_NEW_PASSWORD,
+        },
+    )
+
+    # Assert
+    assert response.status_code == 400
+    assert response.json()["type"] == "https://portal.internal/errors/token-invalid"
+
+
+# --- PR-AC5: weak or reused password (FR-5, resolved OD-1) -------------------
+
+
+async def test_password_reset_confirm_weak_password_returns_422_token_not_consumed(
+    client: AsyncClient, db_session: AsyncSession
+) -> None:
+    # Arrange
+    user = await _seed_login_user(
+        db_session,
+        email="reset.weak@example.com",
+        password=_RESET_TEST_PASSWORD,
+        email_verified=True,
+        status="active",
+    )
+    raw_token = await _seed_reset_token_row(db_session, user_id=user.id)
+
+    # Act
+    response = await client.post(
+        "/api/v1/auth/password-reset/confirm",
+        json={
+            "token": raw_token,
+            "new_password": _RESET_SHORT_PASSWORD,
+        },  # pragma: allowlist secret
+    )
+
+    # Assert
+    assert response.status_code == 422
+    assert response.headers["content-type"] == "application/problem+json"
+    body = response.json()
+    assert body["type"] == "https://portal.internal/errors/password-policy"
+    assert any(error["code"] == "min_length" for error in body["errors"])
+
+    # Assert: the token survives — a retry with the same link still works.
+    token_result = await db_session.execute(
+        select(PasswordResetToken).where(
+            PasswordResetToken.token_hash == hashlib.sha256(raw_token.encode()).hexdigest()
+        )
+    )
+    assert token_result.scalar_one().consumed_at is None
+
+    retry_response = await client.post(
+        "/api/v1/auth/password-reset/confirm",
+        json={
+            "token": raw_token,
+            "new_password": _RESET_NEW_PASSWORD,
+        },
+    )
+    assert retry_response.status_code == 200
+
+
+# --- PR-AC6: request flooding (FR-6, resolved OD-2) --------------------------
+
+
+async def test_password_reset_request_flooding_returns_429_with_retry_after(
+    client: AsyncClient, db_session: AsyncSession
+) -> None:
+    # Arrange
+    await _seed_login_user(
+        db_session,
+        email="reset.flood@example.com",
+        password=_RESET_TEST_PASSWORD,
+        email_verified=True,
+        status="active",
+    )
+    first = await client.post(
+        "/api/v1/auth/password-reset/request", json={"email": "reset.flood@example.com"}
+    )
+    assert first.status_code == 202
+
+    # Act: a second request for the same account inside the 60s cooldown.
+    response = await client.post(
+        "/api/v1/auth/password-reset/request", json={"email": "reset.flood@example.com"}
+    )
+
+    # Assert
+    assert response.status_code == 429
+    assert response.headers["content-type"] == "application/problem+json"
+    assert response.json()["type"] == "https://portal.internal/errors/too-many-attempts"
+    assert int(response.headers["retry-after"]) > 0
+
+
+# --- Spec-review resolution (accepted 2026-09-01): atomic consumption -------
+
+
+async def test_password_reset_confirm_concurrent_same_token_exactly_one_succeeds(
+    real_client: AsyncClient, db_session: AsyncSession, cleanup_users: list[str]
+) -> None:
+    # Arrange
+    email = f"reset.race.{uuid.uuid4().hex}@example.com"
+    cleanup_users.append(email)
+    user = await _seed_login_user(
+        db_session, email=email, password=_RESET_TEST_PASSWORD, email_verified=True, status="active"
+    )
+    raw_token = await _seed_reset_token_row(db_session, user_id=user.id)
+
+    # Act: two simultaneous confirm calls against the same, still-unconsumed
+    # token, via real_client's own independent DB connections.
+    responses = await asyncio.gather(
+        real_client.post(
+            "/api/v1/auth/password-reset/confirm",
+            json={
+                "token": raw_token,
+                "new_password": _RESET_NEW_PASSWORD,
+            },
+        ),
+        real_client.post(
+            "/api/v1/auth/password-reset/confirm",
+            json={
+                "token": raw_token,
+                "new_password": _RESET_RACE_PASSWORD,
+            },
+        ),
+    )
+
+    # Assert: exactly one 200, one 400 (token-invalid) — never both succeed.
+    status_codes = sorted(response.status_code for response in responses)
+    assert status_codes == [200, 400]
+
+    # Verified through db_session, not a fresh engine connection: the app's
+    # get_db_session is overridden to this exact session for the duration of
+    # the test (join_transaction_mode="create_savepoint"), so nothing here
+    # is ever a real cross-connection commit — a genuinely separate
+    # connection can't see any of this test's writes at all, seeded row
+    # included, which is why RT-AC6's own equivalent check queries the same
+    # way in spirit but happens to pass vacuously on an empty result.
+    result = await db_session.execute(
+        select(PasswordResetToken).where(
+            PasswordResetToken.token_hash == hashlib.sha256(raw_token.encode()).hexdigest()
+        )
+    )
+    assert result.scalar_one().consumed_at is not None

@@ -13,6 +13,10 @@ class EmailSender(Protocol):
 
     async def send_refresh_reuse_alert(self, *, to: str) -> None: ...
 
+    async def send_password_reset_email(self, *, to: str, raw_token: str) -> None: ...
+
+    async def send_password_reset_notice(self, *, to: str) -> None: ...
+
 
 class LoggingEmailSender:
     """No-op sender that logs dispatch without a real mail provider.
@@ -32,6 +36,12 @@ class LoggingEmailSender:
 
     async def send_refresh_reuse_alert(self, *, to: str) -> None:
         logger.info("refresh reuse alert dispatched")
+
+    async def send_password_reset_email(self, *, to: str, raw_token: str) -> None:
+        logger.info("password reset email dispatched")
+
+    async def send_password_reset_notice(self, *, to: str) -> None:
+        logger.info("password reset notice dispatched")
 
 
 def get_email_sender() -> EmailSender:

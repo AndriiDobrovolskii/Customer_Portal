@@ -24,6 +24,11 @@ class Settings(BaseSettings):
     login_failure_threshold_ip: int = 20
     login_throttle_window_seconds: int = 900
     refresh_token_ttl_seconds: int = 2_592_000
+    password_reset_token_ttl_minutes: int = 30
+    password_reset_cooldown_seconds: int = 60
+    password_reset_account_hourly_limit: int = 5
+    password_reset_ip_hourly_limit: int = 10
+    breached_password_list_path: str = "app/core/data/common_passwords.txt"  # noqa: S105
 
 
 @lru_cache
