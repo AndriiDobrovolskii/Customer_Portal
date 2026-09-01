@@ -30,4 +30,4 @@
 
 ## Blocking Stage (if any)
 
-None. Story reached PR with every stage Pass. Draft ready for user review at `docs/pr/US-008-pr-description.md`; nothing staged, committed, or pushed yet.
+None. Story reached PR with every stage Pass, was committed (c973548) and opened as GitHub PR #7 stacked on #6 (feat/us-2.3-refresh-token). #6 merged first (28c1f5a); GitHub then auto-closed #7 and permanently refused to reopen it once its base branch was deleted — replaced by PR #8 (same branch/commit, retargeted to `main`), which merged cleanly as 800a405. Both US-2.3 and US-2.4 are now on `main` — confirmed via `git log`, 2026-09-01.
