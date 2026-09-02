@@ -2,16 +2,18 @@ story: US-2.5
 
 current_stage: PR
 
-status: DRAFTED
+status: DONE
 # PR done 2026-09-02: docs/pr/US-009-pr-description.md drafted by
 # pr-preparer. All 4 gates confirmed Pass from their actual reports
 # (gate-enforcer 7/7 + 367/367 tests/97.35% coverage; implementation-
 # verifier Pass; security-reviewer Pass; reconciliation-reviewer Pass).
 # .env.example alignment confirmed (4 new settings, 1:1 with config.py).
 # Commit hygiene confirmed via git status - every changed/new file traces
-# to this story's scope, no drive-by refactor. Not pushed/opened - awaiting
-# explicit user instruction per this skill's own constraint and this
-# session's standing git-safety rule.
+# to this story's scope, no drive-by refactor. User explicitly authorized
+# push+PR ("gp"). One detect-secrets false positive fixed first (a
+# pre-existing "WrongPassword1!" literal shifted line numbers due to this
+# session's own edits, re-flagged; pragma: allowlist secret added).
+# Committed as ae8d2a2, pushed to origin, opened as GitHub PR #10.
 # RECONCILIATION done 2026-09-02: docs/reconciliation/US-009-reconciliation-report.md
 # - Pass (7 gaps found+fixed same-day). All 7 source ACs + FR-8 have full,
 # verified matrix coverage. Initial pass found 7 test functions the
