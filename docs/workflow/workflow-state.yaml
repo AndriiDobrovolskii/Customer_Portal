@@ -8,10 +8,10 @@ status: DONE
 # (gate-enforcer 7/7 + 509/509 tests/96.64% coverage; implementation-
 # verifier Pass; security-reviewer Pass; reconciliation-reviewer Pass).
 # .env.example alignment confirmed (2 new settings, 1:1 with config.py).
-# Commit hygiene confirmed via git status/git log - 5 commits, every
-# changed file traces to this story's scope. Not yet
-# committed/pushed/opened beyond the 5 commits already made locally -
-# awaiting explicit user instruction to push + open the PR.
+# Commit hygiene confirmed via git status/git log - 6 commits, every
+# changed file traces to this story's scope. User explicitly authorized
+# push+PR ("go"). Pushed to origin, opened as GitHub PR #12
+# (https://github.com/AndriiDobrovolskii/Customer_Portal/pull/12).
 # RECONCILIATION done 2026-09-02: docs/reconciliation/US-011-
 # reconciliation-report.md - Pass (initial pass Fail, 2 gaps found+
 # fixed same-day). All 21 source ACs + FR-17b/FR-22/FR-23 (no-AC) have
