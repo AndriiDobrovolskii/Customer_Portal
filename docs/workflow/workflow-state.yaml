@@ -1,8 +1,24 @@
 story: US-3.1
 
-current_stage: RECONCILIATION
+current_stage: PR
 
 status: IN_PROGRESS
+# RECONCILIATION done 2026-09-02: docs/reconciliation/US-011-
+# reconciliation-report.md - Pass (initial pass Fail, 2 gaps found+
+# fixed same-day). All 21 source ACs + FR-17b/FR-22/FR-23 (no-AC) have
+# full, verified matrix coverage. Diffing every matrix-cited test
+# function name against the real test files found 31 mismatches - 29
+# were harmless pre-implementation-to-shipped renames (individually
+# verified), 2 were genuine: MU-AC9 and MU-AC18 both explicitly name
+# "actor" as a required audit-row field, and neither test asserted it
+# (the field was written correctly, just never proven). Fixed same-day
+# with 4 new assertions across 4 existing tests (2 unit, 2 integration)
+# - no new test functions needed. 3 Low disclosed Missing-Edge-Case
+# findings (2 last-admin boundary unit tests, 1 concurrent-PATCH race
+# test, all matrix-planned but never built) noted non-blocking, since
+# none leaves a numbered AC's own text unproven. No spec drift found.
+# Gate re-confirmed green: 509/509 tests, 96.64% coverage. Advances to
+# PR.
 # SECURITY_REVIEW done 2026-09-02: docs/security/US-011-security-
 # review.md - Pass. All 6 AGENTS.md SS7 rows clean (3 N/A - story has
 # no password/credential handling at all, creation is invitation-only

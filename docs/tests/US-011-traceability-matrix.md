@@ -3,6 +3,7 @@
 **Spec:** `docs/specifications/US-011-manage-users-spec.md`
 **Task breakdown:** `docs/plans/US-011-task-breakdown.md` (T7 unit, T8 integration — test code itself deferred to IMPLEMENTATION, matrix only at this stage, same sequencing as US-2.1–US-2.6/US-3.2)
 **Written:** 2026-09-02
+**Note (2026-09-02, post-RECONCILIATION):** this matrix was written before IMPLEMENTATION; several test function names below were renamed during actual coding (e.g. `test_get_admin_users_returns_200_and_paginates` shipped as `test_list_users_returns_200_and_paginates`). `docs/reconciliation/US-011-reconciliation-report.md`'s AC → Test table is the authoritative, verified name mapping — consult it, not this file, for the exact shipped test function per AC.
 
 Every route under `/v1/admin/*` gets the full `AGENTS.md` §5 security case set (missing/invalid/expired token, insufficient permission scope) except `DELETE`, which has no permission check (any authenticated caller gets 405 per FR-17's resolved reading — see `US-011-api-design.md`).
 

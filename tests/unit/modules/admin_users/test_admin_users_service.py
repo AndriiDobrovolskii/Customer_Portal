@@ -396,10 +396,11 @@ async def test_create_user_returns_created_resource_and_provisions_invitation() 
     payload = CreateUserRequest(
         email="New.User@Example.com", display_name="New User", roles=["support_agent"]
     )
+    actor_id = uuid.uuid4()
 
     # Act
     result, etag = await service.create_user(
-        actor_id=uuid.uuid4(), actor_scopes={"tickets:read"}, payload=payload, request_id="req-1"
+        actor_id=actor_id, actor_scopes={"tickets:read"}, payload=payload, request_id="req-1"
     )
 
     # Assert
@@ -409,6 +410,7 @@ async def test_create_user_returns_created_resource_and_provisions_invitation() 
     assert repository.created_users[0][0] == "new.user@example.com"
     assert repository.created_users[0][2] == [role_id]
     assert repository.event_audit_entries[0]["event"] == "user_created"
+    assert repository.event_audit_entries[0]["actor_id"] == actor_id
     assert len(email_sender.invitations_sent) == 1
     assert email_sender.invitations_sent[0]["to"] == "new.user@example.com"
 
@@ -472,10 +474,11 @@ async def test_update_user_returns_updated_resource_and_writes_one_audit_row_per
     current_etag = compute_profile_etag(
         {"display_name": "Old Name", "locale": "en-US", "timezone": None, "avatar_url": None}
     )
+    actor_id = uuid.uuid4()
 
     # Act
     result, new_etag = await service.update_user(
-        actor_id=uuid.uuid4(),
+        actor_id=actor_id,
         target_id=user.id,
         raw_body={"display_name": "New Name", "reason": "typo fix"},
         if_match=current_etag,
@@ -491,6 +494,7 @@ async def test_update_user_returns_updated_resource_and_writes_one_audit_row_per
     assert entry["old_value"] == "Old Name"
     assert entry["new_value"] == "New Name"
     assert entry["reason"] == "typo fix"
+    assert entry["actor_id"] == actor_id
 
 
 async def test_update_user_multiple_fields_writes_multiple_audit_rows() -> None:
@@ -705,14 +709,16 @@ async def test_resend_invite_returns_and_reissues_token() -> None:
     )
     email_sender = FakeEmailSender()
     service, _, _, _, _ = _make_service(repository=repository, email_sender=email_sender)
+    actor_id = uuid.uuid4()
 
     # Act
-    await service.resend_invite(actor_id=uuid.uuid4(), target_id=user.id, request_id="req-18")
+    await service.resend_invite(actor_id=actor_id, target_id=user.id, request_id="req-18")
 
     # Assert
     assert repository.invalidated_tokens == [old_token.id]
     assert len(repository.created_tokens) == 1
     assert repository.event_audit_entries[0]["event"] == "invitation_resent"
+    assert repository.event_audit_entries[0]["actor_id"] == actor_id
     assert len(email_sender.invitations_sent) == 1
 
 

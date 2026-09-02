@@ -598,6 +598,7 @@ async def test_patch_user_returns_200_and_persists_audit_rows(
     assert audit.old_value == "Before"
     assert audit.new_value == "After"
     assert audit.reason == "name correction"
+    assert audit.actor_id == admin.id
 
 
 async def test_patch_user_stale_etag_returns_412(
@@ -1160,7 +1161,7 @@ async def test_resend_invite_returns_202_and_persists_new_token(
             AdminAuditLog.event == "invitation_resent", AdminAuditLog.target_id == target.id
         )
     )
-    assert audit_result.scalar_one() is not None
+    assert audit_result.scalar_one().actor_id == admin.id
 
 
 async def test_resend_invite_active_target_returns_409(
