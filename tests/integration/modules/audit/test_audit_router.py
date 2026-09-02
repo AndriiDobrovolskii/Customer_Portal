@@ -542,9 +542,7 @@ async def test_audit_log_first_ever_row_seeds_from_sentinel(db_session: AsyncSes
     # behind if it failed between insert and cleanup. Assert the
     # precondition explicitly so a leak fails here with a clear message,
     # not as a confusing genesis-hash mismatch.
-    existing_count = (
-        await db_session.execute(text("SELECT COUNT(*) FROM audit_log"))
-    ).scalar_one()
+    existing_count = (await db_session.execute(text("SELECT COUNT(*) FROM audit_log"))).scalar_one()
     assert existing_count == 0, (
         "audit_log was not empty at test start — likely leakage from another "
         "test's committed write, not a bug in genesis-hash seeding itself"
