@@ -4,9 +4,14 @@ from datetime import UTC, datetime, timedelta
 
 import pytest
 
+import app.core.security as security
+from app.core.crypto import encrypt_mfa_secret
 from app.core.security import (
+    current_totp_step,
     decode_access_token,
     encode_access_token,
+    generate_totp_secret,
+    hash_mfa_token,
     hash_password,
     hash_refresh_token,
 )
@@ -15,6 +20,9 @@ from app.modules.users.exceptions import (
     DuplicateEmailError,
     EmailNotVerifiedError,
     InvalidCredentialsError,
+    MfaEnrollmentRequiredError,
+    MfaInvalidCodeError,
+    MfaRequiredForRoleError,
     PasswordPolicyError,
     PasswordResetTokenExpiredError,
     PasswordResetTokenInvalidError,
@@ -23,12 +31,24 @@ from app.modules.users.exceptions import (
     TokenStaleError,
     TooManyAttemptsError,
 )
-from app.modules.users.models import PasswordResetToken, RefreshToken, User, UserSession
+from app.modules.users.models import (
+    MfaRecoveryCode,
+    PasswordResetToken,
+    RefreshToken,
+    User,
+    UserSession,
+)
 from app.modules.users.schemas import (
     LoginRequest,
     LoginResponse,
+    MfaActivateRequest,
+    MfaDisableRequest,
+    MfaEnrollRequest,
+    MfaRequiredResponse,
+    MfaVerifyRequest,
     PasswordResetConfirmRequest,
     PasswordResetRequestRequest,
+    RefreshResponse,
     UserCreate,
     UserStatus,
 )
@@ -62,6 +82,9 @@ class FakeUserRepository:
         self.password_hash_updates: dict[uuid.UUID, str] = {}
         self.password_reset_tokens_by_hash: dict[str, PasswordResetToken] = {}
         self.invalidated_reset_tokens_for: list[uuid.UUID] = []
+        self.recovery_codes_by_user: dict[uuid.UUID, list[MfaRecoveryCode]] = {}
+        self.disable_mfa_calls: list[uuid.UUID] = []
+        self.set_reenrollment_required_calls: list[uuid.UUID] = []
         # RT-AC6: simulates a concurrent winner consuming this token between
         # this fake's own initial read and its atomic-consume call — the
         # first consume_refresh_token call sets consumed_at (as if another
@@ -226,6 +249,62 @@ class FakeUserRepository:
         token.consumed_at = datetime.now(UTC)
         return token
 
+    async def update_mfa_pending_secret(
+        self, *, user_id: uuid.UUID, secret_encrypted: bytes
+    ) -> None:
+        user = await self.get_by_id(user_id)
+        if user is not None:
+            user.mfa_secret_encrypted = secret_encrypted
+
+    async def activate_mfa(self, *, user_id: uuid.UUID) -> None:
+        user = await self.get_by_id(user_id)
+        if user is not None:
+            user.mfa_enabled = True
+            user.mfa_activated_at = datetime.now(UTC)
+            user.mfa_reenrollment_required = False
+
+    async def set_mfa_reenrollment_required(self, *, user_id: uuid.UUID) -> None:
+        self.set_reenrollment_required_calls.append(user_id)
+        user = await self.get_by_id(user_id)
+        if user is not None:
+            user.mfa_reenrollment_required = True
+
+    async def disable_mfa(self, *, user_id: uuid.UUID) -> None:
+        self.disable_mfa_calls.append(user_id)
+        user = await self.get_by_id(user_id)
+        if user is not None:
+            user.mfa_enabled = False
+            user.mfa_secret_encrypted = None
+            user.mfa_activated_at = None
+            user.mfa_reenrollment_required = False
+
+    async def create_recovery_codes(self, *, user_id: uuid.UUID, code_hashes: list[str]) -> None:
+        codes = self.recovery_codes_by_user.setdefault(user_id, [])
+        for code_hash in code_hashes:
+            code = MfaRecoveryCode(user_id=user_id, code_hash=code_hash)
+            code.id = uuid.uuid4()
+            codes.append(code)
+
+    async def list_unconsumed_recovery_codes(self, *, user_id: uuid.UUID) -> list[MfaRecoveryCode]:
+        return [
+            code
+            for code in self.recovery_codes_by_user.get(user_id, [])
+            if code.consumed_at is None
+        ]
+
+    async def consume_recovery_code(self, *, code_id: uuid.UUID) -> MfaRecoveryCode | None:
+        for codes in self.recovery_codes_by_user.values():
+            for code in codes:
+                if code.id == code_id:
+                    if code.consumed_at is not None:
+                        return None
+                    code.consumed_at = datetime.now(UTC)
+                    return code
+        return None
+
+    async def delete_recovery_codes_for_user(self, *, user_id: uuid.UUID) -> None:
+        self.recovery_codes_by_user.pop(user_id, None)
+
     async def commit(self) -> None:
         self.commit_called = True
 
@@ -325,15 +404,18 @@ class FakeEmailSender:
         raises_reuse_alert: bool = False,
         raises_reset_email: bool = False,
         raises_reset_notice: bool = False,
+        raises_mfa_recovery_used_notice: bool = False,
     ) -> None:
         self.raises = raises
         self.raises_reuse_alert = raises_reuse_alert
         self.raises_reset_email = raises_reset_email
         self.raises_reset_notice = raises_reset_notice
+        self.raises_mfa_recovery_used_notice = raises_mfa_recovery_used_notice
         self.sent: list[dict[str, str]] = []
         self.reuse_alerts_sent: list[str] = []
         self.reset_emails_sent: list[dict[str, str]] = []
         self.reset_notices_sent: list[str] = []
+        self.mfa_recovery_used_notices_sent: list[str] = []
 
     async def send_verification_email(self, *, to: str, raw_token: str) -> None:
         if self.raises:
@@ -360,6 +442,11 @@ class FakeEmailSender:
         if self.raises_reset_notice:
             raise RuntimeError("password reset notice dispatch failed")
         self.reset_notices_sent.append(to)
+
+    async def send_mfa_recovery_used_notice(self, *, to: str) -> None:
+        if self.raises_mfa_recovery_used_notice:
+            raise RuntimeError("mfa recovery-used notice dispatch failed")
+        self.mfa_recovery_used_notices_sent.append(to)
 
 
 class FakeRefreshRateLimitCache:
@@ -438,21 +525,71 @@ class FakePermissionEpochCache:
     ) -> None:
         self.epochs = dict(epochs or {})
         self.raises = raises
+        self.set_for: list[tuple[uuid.UUID, int]] = []
 
     async def get_perm_epoch(self, user_id: uuid.UUID) -> datetime | None:
         if self.raises:
             raise ConnectionError("valkey unreachable")
         return self.epochs.get(user_id)
 
+    async def set_perm_epoch(self, user_id: uuid.UUID, *, ttl_seconds: int) -> None:
+        self.set_for.append((user_id, ttl_seconds))
+        self.epochs[user_id] = datetime.now(UTC)
+
 
 class FakeRoleService:
-    def __init__(self, scopes_by_user: dict[uuid.UUID, list[str]] | None = None) -> None:
+    def __init__(
+        self,
+        scopes_by_user: dict[uuid.UUID, list[str]] | None = None,
+        grants_by_user: dict[uuid.UUID, list[tuple[str, datetime]]] | None = None,
+    ) -> None:
         self.scopes_by_user = dict(scopes_by_user or {})
+        self.grants_by_user = dict(grants_by_user or {})
         self.resolved_for: list[uuid.UUID] = []
 
     async def resolve_scopes_for_user(self, user_id: uuid.UUID) -> list[str]:
         self.resolved_for.append(user_id)
         return self.scopes_by_user.get(user_id, [])
+
+    async def get_role_grants_for_user(self, user_id: uuid.UUID) -> list[tuple[str, datetime]]:
+        return self.grants_by_user.get(user_id, [])
+
+
+class FakeMfaTokenCache:
+    def __init__(self) -> None:
+        self.user_id_by_hash: dict[str, uuid.UUID] = {}
+        self.attempt_counts: dict[str, int] = {}
+        self.invalidated: list[str] = []
+
+    async def issue(self, token_hash: str, *, user_id: uuid.UUID, ttl_seconds: int) -> None:
+        self.user_id_by_hash[token_hash] = user_id
+
+    async def get_user_id(self, token_hash: str) -> uuid.UUID | None:
+        return self.user_id_by_hash.get(token_hash)
+
+    async def consume(self, token_hash: str) -> uuid.UUID | None:
+        return self.user_id_by_hash.pop(token_hash, None)
+
+    async def record_failed_attempt(self, token_hash: str, *, window_seconds: int) -> int:
+        self.attempt_counts[token_hash] = self.attempt_counts.get(token_hash, 0) + 1
+        return self.attempt_counts[token_hash]
+
+    async def invalidate(self, token_hash: str) -> None:
+        self.invalidated.append(token_hash)
+        self.user_id_by_hash.pop(token_hash, None)
+        self.attempt_counts.pop(token_hash, None)
+
+
+class FakeMfaReplayCache:
+    def __init__(self, *, already_used_steps: set[tuple[uuid.UUID, int]] | None = None) -> None:
+        self.used_steps: set[tuple[uuid.UUID, int]] = set(already_used_steps or set())
+
+    async def mark_step_used(self, user_id: uuid.UUID, *, step: int, ttl_seconds: int) -> bool:
+        key = (user_id, step)
+        if key in self.used_steps:
+            return False
+        self.used_steps.add(key)
+        return True
 
 
 def _email_hash(email: str) -> str:
@@ -473,6 +610,8 @@ def _make_service(
     password_reset_rate_limit_cache: FakePasswordResetRateLimitCache | None = None,
     permission_epoch_cache: FakePermissionEpochCache | None = None,
     role_service: FakeRoleService | None = None,
+    mfa_token_cache: FakeMfaTokenCache | None = None,
+    mfa_replay_cache: FakeMfaReplayCache | None = None,
 ) -> tuple[UserService, FakeVerificationTokenIssuer, FakeEmailSender]:
     issuer = issuer or FakeVerificationTokenIssuer()
     email_sender = email_sender or FakeEmailSender()
@@ -485,6 +624,8 @@ def _make_service(
     )
     permission_epoch_cache = permission_epoch_cache or FakePermissionEpochCache()
     role_service = role_service or FakeRoleService()
+    mfa_token_cache = mfa_token_cache or FakeMfaTokenCache()
+    mfa_replay_cache = mfa_replay_cache or FakeMfaReplayCache()
     service = UserService(
         repository,
         issuer,
@@ -496,6 +637,8 @@ def _make_service(
         password_reset_rate_limit_cache,
         permission_epoch_cache,
         role_service,
+        mfa_token_cache,
+        mfa_replay_cache,
     )
     return service, issuer, email_sender
 
@@ -698,19 +841,32 @@ async def _seed_user(
     email_verified: bool,
     status: str = "PENDING_VERIFICATION",
     deactivated_at: datetime | None = None,
+    mfa_enabled: bool = False,
+    mfa_secret_encrypted: bytes | None = None,
+    mfa_reenrollment_required: bool = False,
 ) -> User:
     user = User(email=email, hashed_password=await hash_password(password), status=status)
     user.id = uuid.uuid4()
     user.email_verified = email_verified
     user.deactivated_at = deactivated_at
+    user.mfa_enabled = mfa_enabled
+    user.mfa_secret_encrypted = mfa_secret_encrypted
+    user.mfa_reenrollment_required = mfa_reenrollment_required
     repository.users_by_email[email.lower()] = user
     return user
 
 
 async def _login(service: UserService, payload: LoginRequest) -> tuple[LoginResponse, str]:
-    return await service.authenticate_user(
+    """Existing call sites all expect a normal (non-MFA) login — asserts
+    and narrows accordingly. US-009 tests exercising the MFA-challenge
+    branch call `service.authenticate_user` directly instead.
+    """
+    response, raw_refresh_token = await service.authenticate_user(
         payload, ip=_IP, user_agent="pytest-agent", request_id=_REQUEST_ID
     )
+    assert isinstance(response, LoginResponse)
+    assert raw_refresh_token is not None
+    return response, raw_refresh_token
 
 
 # --- LI-AC1: successful login (FR-1) --------------------------------------
@@ -2242,3 +2398,717 @@ async def test_confirm_password_reset_concurrent_requests_only_one_succeeds() ->
         await _confirm_reset(service, token=raw_token, new_password=_RESET_NEW_PASSWORD)
     # The password was never actually changed by the losing request.
     assert user.id not in repository.password_hash_updates
+
+
+# ============================================================================
+# US-2.5 / spec US-009: Multi-Factor Authentication (TOTP)
+# ============================================================================
+
+_MFA_PASSWORD = "Str0ng!Pass"
+
+
+async def _seed_mfa_user(
+    repository: FakeUserRepository,
+    *,
+    email: str = "mfa@example.com",
+    mfa_enabled: bool = False,
+    with_secret: bool = False,
+    mfa_reenrollment_required: bool = False,
+) -> tuple[User, bytes]:
+    secret = generate_totp_secret()
+    user = await _seed_user(
+        repository,
+        email=email,
+        password=_MFA_PASSWORD,
+        email_verified=True,
+        status="active",
+        mfa_enabled=mfa_enabled,
+        mfa_secret_encrypted=encrypt_mfa_secret(secret) if (with_secret or mfa_enabled) else None,
+        mfa_reenrollment_required=mfa_reenrollment_required,
+    )
+    return user, secret
+
+
+def _totp_code(secret: bytes, *, at: datetime | None = None) -> str:
+    step = current_totp_step(at=at or datetime.now(UTC))
+    return security._hotp(secret, step)
+
+
+# --- MF-AC1 / FR-1: enrolment ----------------------------------------------
+
+
+async def test_enroll_mfa_creates_pending_secret_encrypted_at_rest() -> None:
+    # Arrange
+    repository = FakeUserRepository()
+    user = await _seed_user(
+        repository, email="enroll@example.com", password=_MFA_PASSWORD, email_verified=True
+    )
+    service, _, _ = _make_service(repository)
+    payload = MfaEnrollRequest(current_password=_MFA_PASSWORD)
+
+    # Act
+    result = await service.enroll_mfa(user.id, payload)
+
+    # Assert
+    assert result.otpauth_uri.startswith("otpauth://totp/")
+    assert user.mfa_secret_encrypted is not None
+    assert user.mfa_secret_encrypted != result.secret.encode()
+    assert user.mfa_enabled is False
+    assert repository.commit_called is True
+
+
+async def test_enroll_mfa_wrong_password_returns_401() -> None:
+    # Arrange
+    repository = FakeUserRepository()
+    user = await _seed_user(
+        repository, email="enroll2@example.com", password=_MFA_PASSWORD, email_verified=True
+    )
+    service, _, _ = _make_service(repository)
+    payload = MfaEnrollRequest(current_password="WrongPassword1!")
+
+    # Act & Assert
+    with pytest.raises(InvalidCredentialsError):
+        await service.enroll_mfa(user.id, payload)
+
+
+async def test_enroll_mfa_reenroll_while_pending_overwrites_secret() -> None:
+    # Arrange: OD-11 - a second enroll call while PENDING replaces the secret.
+    repository = FakeUserRepository()
+    user, _ = await _seed_mfa_user(repository, with_secret=True)
+    first_secret = user.mfa_secret_encrypted
+    service, _, _ = _make_service(repository)
+    payload = MfaEnrollRequest(current_password=_MFA_PASSWORD)
+
+    # Act
+    await service.enroll_mfa(user.id, payload)
+
+    # Assert
+    assert user.mfa_secret_encrypted != first_secret
+    assert user.mfa_enabled is False
+
+
+# --- MF-AC2 / FR-2: activation and recovery codes --------------------------
+
+
+async def test_activate_mfa_valid_code_issues_recovery_codes_and_enables_mfa() -> None:
+    # Arrange
+    repository = FakeUserRepository()
+    user, secret = await _seed_mfa_user(repository, with_secret=True)
+    service, _, _ = _make_service(repository)
+    payload = MfaActivateRequest(code=_totp_code(secret))
+
+    # Act
+    result = await service.activate_mfa(
+        user.id, payload, ip=_IP, user_agent=None, request_id=_REQUEST_ID
+    )
+
+    # Assert
+    assert len(result.recovery_codes) == 10
+    assert len(set(result.recovery_codes)) == 10
+    assert user.mfa_enabled is True
+    assert repository.audit_log_entries[-1]["event"] == "mfa_enabled"
+    assert repository.commit_called is True
+
+
+async def test_activate_mfa_recovery_codes_stored_as_argon2id_hashes() -> None:
+    # Arrange
+    repository = FakeUserRepository()
+    user, secret = await _seed_mfa_user(repository, with_secret=True)
+    service, _, _ = _make_service(repository)
+    payload = MfaActivateRequest(code=_totp_code(secret))
+
+    # Act
+    result = await service.activate_mfa(
+        user.id, payload, ip=_IP, user_agent=None, request_id=_REQUEST_ID
+    )
+
+    # Assert
+    stored = repository.recovery_codes_by_user[user.id]
+    assert all(code.code_hash.startswith("$argon2id$") for code in stored)
+    assert all(code.code_hash not in result.recovery_codes for code in stored)
+
+
+async def test_activate_mfa_wrong_code_returns_401() -> None:
+    # Arrange
+    repository = FakeUserRepository()
+    user, _ = await _seed_mfa_user(repository, with_secret=True)
+    service, _, _ = _make_service(repository)
+    payload = MfaActivateRequest(code="000000")
+
+    # Act & Assert
+    with pytest.raises(MfaInvalidCodeError):
+        await service.activate_mfa(
+            user.id, payload, ip=_IP, user_agent=None, request_id=_REQUEST_ID
+        )
+
+
+async def test_activate_mfa_no_pending_enrollment_returns_401() -> None:
+    # Arrange: never called enroll - no secret at all.
+    repository = FakeUserRepository()
+    user = await _seed_user(
+        repository, email="nopending@example.com", password=_MFA_PASSWORD, email_verified=True
+    )
+    service, _, _ = _make_service(repository)
+    payload = MfaActivateRequest(code="123456")
+
+    # Act & Assert
+    with pytest.raises(MfaInvalidCodeError):
+        await service.activate_mfa(
+            user.id, payload, ip=_IP, user_agent=None, request_id=_REQUEST_ID
+        )
+
+
+async def test_activate_mfa_privileged_scoped_account_sets_perm_epoch() -> None:
+    # Arrange: an admin role granted well past the grace period, MFA not yet enabled.
+    repository = FakeUserRepository()
+    user, secret = await _seed_mfa_user(repository, with_secret=True)
+    old_grant = datetime.now(UTC) - timedelta(days=30)
+    role_service = FakeRoleService(grants_by_user={user.id: [("admin", old_grant)]})
+    permission_epoch_cache = FakePermissionEpochCache()
+    service, _, _ = _make_service(
+        repository, role_service=role_service, permission_epoch_cache=permission_epoch_cache
+    )
+    payload = MfaActivateRequest(code=_totp_code(secret))
+
+    # Act
+    await service.activate_mfa(user.id, payload, ip=_IP, user_agent=None, request_id=_REQUEST_ID)
+
+    # Assert: FR-2's exit condition fired because the account was scoped.
+    assert len(permission_epoch_cache.set_for) == 1
+    assert permission_epoch_cache.set_for[0][0] == user.id
+
+
+async def test_activate_mfa_ordinary_enrollment_does_not_set_perm_epoch() -> None:
+    # Arrange: a non-privileged, never-scoped self-service enrolment.
+    repository = FakeUserRepository()
+    user, secret = await _seed_mfa_user(repository, with_secret=True)
+    permission_epoch_cache = FakePermissionEpochCache()
+    service, _, _ = _make_service(repository, permission_epoch_cache=permission_epoch_cache)
+    payload = MfaActivateRequest(code=_totp_code(secret))
+
+    # Act
+    await service.activate_mfa(user.id, payload, ip=_IP, user_agent=None, request_id=_REQUEST_ID)
+
+    # Assert
+    assert permission_epoch_cache.set_for == []
+
+
+async def test_activate_mfa_clears_reenrollment_required_and_sets_perm_epoch() -> None:
+    # Arrange: OD-5's recovery-code trigger, already mfa_enabled=true.
+    repository = FakeUserRepository()
+    user, secret = await _seed_mfa_user(
+        repository, with_secret=True, mfa_enabled=True, mfa_reenrollment_required=True
+    )
+    permission_epoch_cache = FakePermissionEpochCache()
+    service, _, _ = _make_service(repository, permission_epoch_cache=permission_epoch_cache)
+    payload = MfaActivateRequest(code=_totp_code(secret))
+
+    # Act
+    await service.activate_mfa(user.id, payload, ip=_IP, user_agent=None, request_id=_REQUEST_ID)
+
+    # Assert
+    assert user.mfa_reenrollment_required is False
+    assert len(permission_epoch_cache.set_for) == 1
+
+
+# --- MF-AC3/MF-AC6 / FR-3/FR-6: login branches -----------------------------
+
+
+async def test_authenticate_user_mfa_enabled_returns_challenge_no_tokens() -> None:
+    # Arrange
+    repository = FakeUserRepository()
+    user, _ = await _seed_mfa_user(repository, mfa_enabled=True)
+    mfa_token_cache = FakeMfaTokenCache()
+    service, _, _ = _make_service(repository, mfa_token_cache=mfa_token_cache)
+    payload = LoginRequest(email=user.email, password=_MFA_PASSWORD)
+
+    # Act
+    response, raw_refresh_token = await service.authenticate_user(
+        payload, ip=_IP, user_agent=None, request_id=_REQUEST_ID
+    )
+
+    # Assert
+    assert isinstance(response, MfaRequiredResponse)
+    assert response.mfa_required is True
+    assert raw_refresh_token is None
+    assert hash_mfa_token(response.mfa_token) in mfa_token_cache.user_id_by_hash
+
+
+async def test_authenticate_user_privileged_role_past_grace_period_issues_scoped_token() -> None:
+    # Arrange
+    repository = FakeUserRepository()
+    user = await _seed_user(
+        repository,
+        email="priv@example.com",
+        password=_MFA_PASSWORD,
+        email_verified=True,
+        status="active",
+    )
+    old_grant = datetime.now(UTC) - timedelta(days=30)
+    role_service = FakeRoleService(grants_by_user={user.id: [("admin", old_grant)]})
+    service, _, _ = _make_service(repository, role_service=role_service)
+    payload = LoginRequest(email=user.email, password=_MFA_PASSWORD)
+
+    # Act
+    response, _ = await _login(service, payload)
+
+    # Assert
+    claims = decode_access_token(response.access_token)
+    assert claims.mfa_enrollment_required is True
+    assert response.mfa_enrollment_deadline is None
+
+
+async def test_authenticate_user_privileged_role_within_grace_returns_deadline_field() -> None:
+    # Arrange
+    repository = FakeUserRepository()
+    user = await _seed_user(
+        repository,
+        email="priv2@example.com",
+        password=_MFA_PASSWORD,
+        email_verified=True,
+        status="active",
+    )
+    recent_grant = datetime.now(UTC) - timedelta(days=1)
+    role_service = FakeRoleService(grants_by_user={user.id: [("admin", recent_grant)]})
+    service, _, _ = _make_service(repository, role_service=role_service)
+    payload = LoginRequest(email=user.email, password=_MFA_PASSWORD)
+
+    # Act
+    response, _ = await _login(service, payload)
+
+    # Assert
+    claims = decode_access_token(response.access_token)
+    assert claims.mfa_enrollment_required is False
+    assert response.mfa_enrollment_deadline == recent_grant + timedelta(days=14)
+
+
+async def test_authenticate_user_reenrollment_required_issues_scoped_token_no_grace() -> None:
+    # Arrange: OD-5 - no grace period for this trigger, and mfa_enabled stays true.
+    repository = FakeUserRepository()
+    user, _ = await _seed_mfa_user(repository, mfa_enabled=False, with_secret=True)
+    user.mfa_enabled = True
+    user.mfa_reenrollment_required = True
+    service, _, _ = _make_service(repository)
+    payload = LoginRequest(email=user.email, password=_MFA_PASSWORD)
+
+    # Act: mfa_enabled=true routes through the MFA challenge (MF-AC3), not a
+    # direct token issuance - assert the challenge fires, since the scoping
+    # decision only materializes once verify_mfa completes the login.
+    response, raw_refresh_token = await service.authenticate_user(
+        payload, ip=_IP, user_agent=None, request_id=_REQUEST_ID
+    )
+
+    # Assert
+    assert isinstance(response, MfaRequiredResponse)
+    assert raw_refresh_token is None
+
+
+async def test_authenticate_user_ordinary_user_unaffected_by_mfa_scoping() -> None:
+    # Arrange: non-privileged, never enrolled, no reenrollment flag.
+    repository = FakeUserRepository()
+    user = await _seed_user(
+        repository,
+        email="ordinary@example.com",
+        password=_MFA_PASSWORD,
+        email_verified=True,
+        status="active",
+    )
+    service, _, _ = _make_service(repository)
+    payload = LoginRequest(email=user.email, password=_MFA_PASSWORD)
+
+    # Act
+    response, _ = await _login(service, payload)
+
+    # Assert
+    claims = decode_access_token(response.access_token)
+    assert claims.mfa_enrollment_required is False
+    assert response.mfa_enrollment_deadline is None
+
+
+# --- FR-6 spec-review resolution: refresh re-evaluates scoping -------------
+
+
+async def test_rotate_refresh_token_reissues_scoped_token_when_condition_still_holds() -> None:
+    # Arrange
+    repository = FakeUserRepository()
+    user = await _seed_user(
+        repository,
+        email="refscope@example.com",
+        password=_MFA_PASSWORD,
+        email_verified=True,
+        status="active",
+    )
+    old_grant = datetime.now(UTC) - timedelta(days=30)
+    role_service = FakeRoleService(grants_by_user={user.id: [("admin", old_grant)]})
+    service, _, _ = _make_service(repository, role_service=role_service)
+    raw_token = await _seed_rotatable_token(repository, user_id=user.id)
+
+    # Act
+    response, _ = await _rotate(service, raw_token)
+
+    # Assert
+    assert isinstance(response, RefreshResponse)
+    claims = decode_access_token(response.access_token)
+    assert claims.mfa_enrollment_required is True
+
+
+async def test_rotate_refresh_token_both_scoping_triggers_true_issues_single_scoped_token() -> None:
+    # Arrange: mfa_reenrollment_required (OD-5) AND a privileged role held
+    # past its grace period are simultaneously true. _resolve_enrollment_
+    # scoping checks mfa_reenrollment_required first and returns before
+    # ever consulting role grants (app/modules/users/service.py:429-433) -
+    # this proves that precedence holds and no deadline from the role
+    # branch leaks through, rather than assuming it from reading the code.
+    repository = FakeUserRepository()
+    user = await _seed_user(
+        repository,
+        email="bothtriggers@example.com",
+        password=_MFA_PASSWORD,
+        email_verified=True,
+        status="active",
+        mfa_enabled=True,
+    )
+    user.mfa_reenrollment_required = True
+    old_grant = datetime.now(UTC) - timedelta(days=30)
+    role_service = FakeRoleService(grants_by_user={user.id: [("admin", old_grant)]})
+    service, _, _ = _make_service(repository, role_service=role_service)
+    raw_token = await _seed_rotatable_token(repository, user_id=user.id)
+
+    # Act
+    response, _ = await _rotate(service, raw_token)
+
+    # Assert: exactly one scoped token, no grace-period deadline leaking
+    # in from the (never-reached) role-grant branch.
+    assert isinstance(response, RefreshResponse)
+    claims = decode_access_token(response.access_token)
+    assert claims.mfa_enrollment_required is True
+    assert response.mfa_enrollment_deadline is None
+
+
+async def test_rotate_refresh_token_reissues_normal_token_when_condition_resolved() -> None:
+    # Arrange: mfa_enabled is now true - condition no longer holds.
+    repository = FakeUserRepository()
+    user = await _seed_user(
+        repository,
+        email="refresolved@example.com",
+        password=_MFA_PASSWORD,
+        email_verified=True,
+        status="active",
+        mfa_enabled=True,
+    )
+    service, _, _ = _make_service(repository)
+    raw_token = await _seed_rotatable_token(repository, user_id=user.id)
+
+    # Act
+    response, _ = await _rotate(service, raw_token)
+
+    # Assert
+    assert isinstance(response, RefreshResponse)
+    claims = decode_access_token(response.access_token)
+    assert claims.mfa_enrollment_required is False
+
+
+# --- MF-AC4/MF-AC5/MF-AC7 / FR-4/FR-5/FR-7: verify_mfa ---------------------
+
+
+async def _issue_mfa_token(mfa_token_cache: FakeMfaTokenCache, user: User) -> str:
+    raw_token = "raw-mfa-token"
+    await mfa_token_cache.issue(hash_mfa_token(raw_token), user_id=user.id, ttl_seconds=300)
+    return raw_token
+
+
+async def test_verify_mfa_valid_totp_completes_login() -> None:
+    # Arrange
+    repository = FakeUserRepository()
+    user, secret = await _seed_mfa_user(repository, mfa_enabled=True)
+    mfa_token_cache = FakeMfaTokenCache()
+    service, _, _ = _make_service(repository, mfa_token_cache=mfa_token_cache)
+    raw_token = await _issue_mfa_token(mfa_token_cache, user)
+    payload = MfaVerifyRequest(mfa_token=raw_token, code=_totp_code(secret))
+
+    # Act
+    response, raw_refresh_token = await service.verify_mfa(
+        payload, ip=_IP, user_agent=None, request_id=_REQUEST_ID
+    )
+
+    # Assert
+    assert len(raw_refresh_token) > 0
+    claims = decode_access_token(response.access_token)
+    assert claims.user_id == user.id
+    assert hash_mfa_token(raw_token) not in mfa_token_cache.user_id_by_hash
+
+
+async def test_verify_mfa_incorrect_code_returns_401() -> None:
+    # Arrange
+    repository = FakeUserRepository()
+    user, _ = await _seed_mfa_user(repository, mfa_enabled=True)
+    mfa_token_cache = FakeMfaTokenCache()
+    service, _, _ = _make_service(repository, mfa_token_cache=mfa_token_cache)
+    raw_token = await _issue_mfa_token(mfa_token_cache, user)
+    payload = MfaVerifyRequest(mfa_token=raw_token, code="000000")
+
+    # Act & Assert
+    with pytest.raises(MfaInvalidCodeError):
+        await service.verify_mfa(payload, ip=_IP, user_agent=None, request_id=_REQUEST_ID)
+
+
+async def test_verify_mfa_invalid_mfa_token_returns_401() -> None:
+    # Arrange
+    repository = FakeUserRepository()
+    service, _, _ = _make_service(repository)
+    payload = MfaVerifyRequest(mfa_token="never-issued", code="123456")
+
+    # Act & Assert
+    with pytest.raises(MfaInvalidCodeError):
+        await service.verify_mfa(payload, ip=_IP, user_agent=None, request_id=_REQUEST_ID)
+
+
+async def test_verify_mfa_replayed_code_returns_401() -> None:
+    # Arrange: the replay cache reports this (user, step) as already used.
+    repository = FakeUserRepository()
+    user, secret = await _seed_mfa_user(repository, mfa_enabled=True)
+    now = datetime.now(UTC)
+    step = current_totp_step(at=now)
+    mfa_token_cache = FakeMfaTokenCache()
+    mfa_replay_cache = FakeMfaReplayCache(already_used_steps={(user.id, step)})
+    service, _, _ = _make_service(
+        repository, mfa_token_cache=mfa_token_cache, mfa_replay_cache=mfa_replay_cache
+    )
+    raw_token = await _issue_mfa_token(mfa_token_cache, user)
+    payload = MfaVerifyRequest(mfa_token=raw_token, code=_totp_code(secret, at=now))
+
+    # Act & Assert
+    with pytest.raises(MfaInvalidCodeError):
+        await service.verify_mfa(payload, ip=_IP, user_agent=None, request_id=_REQUEST_ID)
+
+
+async def test_verify_mfa_fifth_failure_returns_429_invalidates_token() -> None:
+    # Arrange
+    repository = FakeUserRepository()
+    user, _ = await _seed_mfa_user(repository, mfa_enabled=True)
+    mfa_token_cache = FakeMfaTokenCache()
+    service, _, _ = _make_service(repository, mfa_token_cache=mfa_token_cache)
+    raw_token = await _issue_mfa_token(mfa_token_cache, user)
+    payload = MfaVerifyRequest(mfa_token=raw_token, code="000000")
+
+    # Act: 4 failures accumulate normally, the 5th invalidates the token.
+    for _ in range(4):
+        with pytest.raises(MfaInvalidCodeError):
+            await service.verify_mfa(payload, ip=_IP, user_agent=None, request_id=_REQUEST_ID)
+
+    with pytest.raises(TooManyAttemptsError):
+        await service.verify_mfa(payload, ip=_IP, user_agent=None, request_id=_REQUEST_ID)
+
+    # Assert
+    assert hash_mfa_token(raw_token) in mfa_token_cache.invalidated
+
+
+async def test_verify_mfa_wrong_recovery_code_counts_toward_totp_lockout() -> None:
+    # Arrange: OD-10 - a wrong recovery code is a guess against the same
+    # mfa_token as a wrong TOTP code, so it must increment the same
+    # lockout counter, not a separate one.
+    repository = FakeUserRepository()
+    user, _ = await _seed_mfa_user(repository, mfa_enabled=True)
+    await repository.create_recovery_codes(
+        user_id=user.id,
+        code_hashes=[await hash_password("realcode12")],  # pragma: allowlist secret
+    )
+    mfa_token_cache = FakeMfaTokenCache()
+    service, _, _ = _make_service(repository, mfa_token_cache=mfa_token_cache)
+    raw_token = await _issue_mfa_token(mfa_token_cache, user)
+    payload = MfaVerifyRequest(mfa_token=raw_token, code="wrongcode1")  # pragma: allowlist secret
+
+    # Act: 4 wrong-recovery-code guesses accumulate normally, the 5th
+    # (of any kind) invalidates the token via the shared counter.
+    for _ in range(4):
+        with pytest.raises(MfaInvalidCodeError):
+            await service.verify_mfa(payload, ip=_IP, user_agent=None, request_id=_REQUEST_ID)
+
+    with pytest.raises(TooManyAttemptsError):
+        await service.verify_mfa(payload, ip=_IP, user_agent=None, request_id=_REQUEST_ID)
+
+    # Assert
+    assert hash_mfa_token(raw_token) in mfa_token_cache.invalidated
+
+
+async def test_verify_mfa_valid_recovery_code_completes_login_and_consumes_it() -> None:
+    # Arrange
+    repository = FakeUserRepository()
+    user, _ = await _seed_mfa_user(repository, mfa_enabled=True)
+    raw_recovery_code = "a1b2c3d4e5"  # pragma: allowlist secret
+    await repository.create_recovery_codes(
+        user_id=user.id, code_hashes=[await hash_password(raw_recovery_code)]
+    )
+    mfa_token_cache = FakeMfaTokenCache()
+    service, _, email_sender = _make_service(repository, mfa_token_cache=mfa_token_cache)
+    raw_token = await _issue_mfa_token(mfa_token_cache, user)
+    payload = MfaVerifyRequest(mfa_token=raw_token, code=raw_recovery_code)
+
+    # Act
+    response, raw_refresh_token = await service.verify_mfa(
+        payload, ip=_IP, user_agent=None, request_id=_REQUEST_ID
+    )
+
+    # Assert
+    assert len(raw_refresh_token) > 0
+    decode_access_token(response.access_token)
+    stored = repository.recovery_codes_by_user[user.id][0]
+    assert stored.consumed_at is not None
+    assert user.mfa_reenrollment_required is True
+    assert repository.audit_log_entries[-2]["event"] == "mfa_recovery_used"
+    assert isinstance(email_sender, FakeEmailSender)
+    assert email_sender.mfa_recovery_used_notices_sent == [user.email]
+
+
+async def test_verify_mfa_already_consumed_recovery_code_returns_401() -> None:
+    # Arrange
+    repository = FakeUserRepository()
+    user, _ = await _seed_mfa_user(repository, mfa_enabled=True)
+    raw_recovery_code = "f6g7h8i9j0"
+    await repository.create_recovery_codes(
+        user_id=user.id, code_hashes=[await hash_password(raw_recovery_code)]
+    )
+    repository.recovery_codes_by_user[user.id][0].consumed_at = datetime.now(UTC)
+    mfa_token_cache = FakeMfaTokenCache()
+    service, _, _ = _make_service(repository, mfa_token_cache=mfa_token_cache)
+    raw_token = await _issue_mfa_token(mfa_token_cache, user)
+    payload = MfaVerifyRequest(mfa_token=raw_token, code=raw_recovery_code)
+
+    # Act & Assert: falls through to the (also-failing) TOTP path.
+    with pytest.raises(MfaInvalidCodeError):
+        await service.verify_mfa(payload, ip=_IP, user_agent=None, request_id=_REQUEST_ID)
+
+
+# --- MF-AC6/FR-8: disable_mfa -----------------------------------------------
+
+
+@pytest.mark.parametrize("privileged_role", ["admin", "auditor", "support_agent"])
+async def test_disable_mfa_privileged_role_returns_409(privileged_role: str) -> None:
+    # Arrange
+    repository = FakeUserRepository()
+    user, secret = await _seed_mfa_user(repository, mfa_enabled=True, email="priv3@example.com")
+    role_service = FakeRoleService(grants_by_user={user.id: [(privileged_role, datetime.now(UTC))]})
+    service, _, _ = _make_service(repository, role_service=role_service)
+    payload = MfaDisableRequest(current_password=_MFA_PASSWORD, code=_totp_code(secret))
+
+    # Act & Assert
+    with pytest.raises(MfaRequiredForRoleError):
+        await service.disable_mfa(user.id, payload, ip=_IP, user_agent=None, request_id=_REQUEST_ID)
+
+
+async def test_disable_mfa_non_privileged_success_purges_state_and_revokes_sessions() -> None:
+    # Arrange
+    repository = FakeUserRepository()
+    user, secret = await _seed_mfa_user(repository, mfa_enabled=True)
+    await repository.create_recovery_codes(user_id=user.id, code_hashes=["h1", "h2"])
+    revocation_cache = FakeRevocationCache()
+    service, _, _ = _make_service(repository, revocation_cache=revocation_cache)
+    payload = MfaDisableRequest(current_password=_MFA_PASSWORD, code=_totp_code(secret))
+
+    # Act
+    await service.disable_mfa(user.id, payload, ip=_IP, user_agent=None, request_id=_REQUEST_ID)
+
+    # Assert
+    assert user.mfa_enabled is False
+    assert user.mfa_secret_encrypted is None
+    assert user.id not in repository.recovery_codes_by_user
+    assert repository.audit_log_entries[-1]["event"] == "mfa_disabled"
+    assert len(revocation_cache.set_revoke_before_calls) == 1
+    assert revocation_cache.set_revoke_before_calls[0][0] == user.id
+
+
+async def test_disable_mfa_wrong_password_returns_401() -> None:
+    # Arrange
+    repository = FakeUserRepository()
+    user, secret = await _seed_mfa_user(repository, mfa_enabled=True, email="priv4@example.com")
+    service, _, _ = _make_service(repository)
+    payload = MfaDisableRequest(current_password="WrongPassword1!", code=_totp_code(secret))
+
+    # Act & Assert
+    with pytest.raises(InvalidCredentialsError):
+        await service.disable_mfa(user.id, payload, ip=_IP, user_agent=None, request_id=_REQUEST_ID)
+
+
+async def test_disable_mfa_wrong_code_returns_401() -> None:
+    # Arrange
+    repository = FakeUserRepository()
+    user, _ = await _seed_mfa_user(repository, mfa_enabled=True, email="priv5@example.com")
+    service, _, _ = _make_service(repository)
+    payload = MfaDisableRequest(current_password=_MFA_PASSWORD, code="000000")
+
+    # Act & Assert: same exception as a wrong password (see
+    # test_disable_mfa_wrong_password_and_wrong_code_are_indistinguishable) so
+    # a hijacked session can't learn which factor was wrong.
+    with pytest.raises(InvalidCredentialsError):
+        await service.disable_mfa(user.id, payload, ip=_IP, user_agent=None, request_id=_REQUEST_ID)
+
+
+async def test_disable_mfa_wrong_password_and_wrong_code_are_indistinguishable() -> None:
+    # Arrange: two callers, one with a wrong password (correct code), one
+    # with a wrong code (correct password) - both must raise the exact same
+    # exception type so a stolen bearer token can't be used to learn which
+    # factor is correct one guess at a time.
+    repository = FakeUserRepository()
+    user, secret = await _seed_mfa_user(repository, mfa_enabled=True, email="priv6@example.com")
+    service, _, _ = _make_service(repository)
+    wrong_password_payload = MfaDisableRequest(
+        current_password="WrongPassword1!", code=_totp_code(secret)
+    )
+    wrong_code_payload = MfaDisableRequest(current_password=_MFA_PASSWORD, code="000000")
+
+    # Act
+    with pytest.raises(InvalidCredentialsError) as wrong_password_exc:
+        await service.disable_mfa(
+            user.id, wrong_password_payload, ip=_IP, user_agent=None, request_id=_REQUEST_ID
+        )
+    with pytest.raises(InvalidCredentialsError) as wrong_code_exc:
+        await service.disable_mfa(
+            user.id, wrong_code_payload, ip=_IP, user_agent=None, request_id=_REQUEST_ID
+        )
+
+    # Assert: identical exception type, identical (empty) constructor args -
+    # nothing distinguishes the two failure reasons.
+    assert type(wrong_password_exc.value) is type(wrong_code_exc.value)
+    assert wrong_password_exc.value.args == wrong_code_exc.value.args
+
+
+# --- Default-deny enrolment-scoping mechanism (get_authenticated_user) -----
+
+
+async def test_get_authenticated_user_rejects_enrollment_scoped_token_by_default() -> None:
+    # Arrange
+    user_id = uuid.uuid4()
+    repository = FakeUserRepository()
+    jti = uuid.uuid4()
+    session = UserSession(
+        jti=jti, user_id=user_id, expires_at=datetime.now(UTC) + timedelta(hours=1)
+    )
+    session.issued_at = datetime.now(UTC)
+    repository.sessions_by_jti[jti] = session
+    token = encode_access_token(user_id=user_id, jti=jti, scopes=[], mfa_enrollment_required=True)
+    service, _, _ = _make_service(repository)
+
+    # Act & Assert
+    with pytest.raises(MfaEnrollmentRequiredError):
+        await service.get_authenticated_user(token)
+
+
+async def test_get_authenticated_user_allow_enrollment_scoped_accepts_scoped_token() -> None:
+    # Arrange
+    user_id = uuid.uuid4()
+    repository = FakeUserRepository()
+    jti = uuid.uuid4()
+    session = UserSession(
+        jti=jti, user_id=user_id, expires_at=datetime.now(UTC) + timedelta(hours=1)
+    )
+    session.issued_at = datetime.now(UTC)
+    repository.sessions_by_jti[jti] = session
+    token = encode_access_token(user_id=user_id, jti=jti, scopes=[], mfa_enrollment_required=True)
+    service, _, _ = _make_service(repository)
+
+    # Act
+    result = await service.get_authenticated_user(token, allow_enrollment_scoped=True)
+
+    # Assert
+    assert result is not None
+    assert result.mfa_enrollment_required is True

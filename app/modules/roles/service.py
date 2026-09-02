@@ -1,6 +1,7 @@
 import logging
 import uuid
-from typing import Protocol
+from datetime import datetime
+from typing import NamedTuple, Protocol
 
 from app.core.config import get_settings
 from app.core.exceptions import FieldError
@@ -28,8 +29,21 @@ class RoleRepositoryProtocol(Protocol):
     async def get_by_names(self, names: list[str]) -> list[Role]: ...
 
 
+class RoleGrant(NamedTuple):
+    """US-009 FR-6: a role name plus the moment it was granted, used to
+    compute the 14-day MFA-enrolment grace period. A superset of what
+    `resolve_scopes_for_user` needs (names only), so it's a separate
+    method/return type rather than changing that one's signature.
+    """
+
+    name: str
+    granted_at: datetime
+
+
 class UserRoleRepositoryProtocol(Protocol):
     async def list_role_names_for_user(self, user_id: uuid.UUID) -> list[str]: ...
+
+    async def list_role_grants_for_user(self, user_id: uuid.UUID) -> list[tuple[str, datetime]]: ...
 
     async def count_active_admins_excluding(
         self, *, admin_role_id: uuid.UUID, excluding_user_id: uuid.UUID
@@ -89,6 +103,15 @@ class RoleService:
             return []
         roles = await self._role_repository.get_by_names(role_names)
         return sorted({permission.scope for role in roles for permission in role.permissions})
+
+    async def get_role_grants_for_user(self, user_id: uuid.UUID) -> list[RoleGrant]:
+        """US-009 FR-6: the cross-module read `users.service` calls at
+        login/refresh to check privileged-role membership and the 14-day
+        grace-period clock. Same `users` -> `roles` direction
+        `resolve_scopes_for_user` already established.
+        """
+        grants = await self._user_role_repository.list_role_grants_for_user(user_id)
+        return [RoleGrant(name=name, granted_at=granted_at) for name, granted_at in grants]
 
     async def replace_user_roles(
         self,

@@ -30,6 +30,12 @@ class Settings(BaseSettings):
     password_reset_ip_hourly_limit: int = 10
     breached_password_list_path: str = "app/core/data/common_passwords.txt"  # noqa: S105
     perm_epoch_ttl_seconds: int = 900
+    # Dev-only default (base64-encoded 32 raw bytes); every real deployment
+    # MUST override this via env, same discipline as jwt_secret_key (OD-2).
+    mfa_secret_encryption_key: SecretStr = SecretStr("ZGV2LW9ubHktaW5zZWN1cmUtbWZhLWtleS0zMmJ5dGU=")
+    mfa_token_ttl_seconds: int = 300
+    mfa_verify_lockout_threshold: int = 5
+    mfa_grace_period_days: int = 14
 
 
 @lru_cache

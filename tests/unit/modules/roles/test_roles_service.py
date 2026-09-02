@@ -1,4 +1,5 @@
 import uuid
+from datetime import UTC, datetime
 
 import pytest
 
@@ -52,15 +53,20 @@ class FakeUserRoleRepository:
         *,
         current_roles: dict[uuid.UUID, list[str]] | None = None,
         active_admin_ids: set[uuid.UUID] | None = None,
+        grants: dict[uuid.UUID, list[tuple[str, datetime]]] | None = None,
     ) -> None:
         self.current_roles = current_roles or {}
         self.active_admin_ids = active_admin_ids or set()
+        self.grants = grants or {}
         self.replaced: list[tuple[uuid.UUID, list[uuid.UUID]]] = []
         self.audit_entries: list[dict[str, object]] = []
         self.committed = False
 
     async def list_role_names_for_user(self, user_id: uuid.UUID) -> list[str]:
         return self.current_roles.get(user_id, [])
+
+    async def list_role_grants_for_user(self, user_id: uuid.UUID) -> list[tuple[str, datetime]]:
+        return self.grants.get(user_id, [])
 
     async def count_active_admins_excluding(
         self, *, admin_role_id: uuid.UUID, excluding_user_id: uuid.UUID
@@ -324,3 +330,33 @@ async def test_replace_user_roles_allows_removing_admin_when_another_admin_remai
     # Assert
     assert result.roles == ["support_agent"]
     assert len(user_role_repository.replaced) == 1
+
+
+# --- US-009 FR-6: get_role_grants_for_user --------------------------------
+
+
+async def test_get_role_grants_for_user_returns_names_and_timestamps() -> None:
+    # Arrange
+    user_id = uuid.uuid4()
+    granted_at = datetime(2026, 1, 1, tzinfo=UTC)
+    user_role_repository = FakeUserRoleRepository(grants={user_id: [("admin", granted_at)]})
+    service, _, _, _ = _make_service(user_role_repository=user_role_repository)
+
+    # Act
+    result = await service.get_role_grants_for_user(user_id)
+
+    # Assert
+    assert len(result) == 1
+    assert result[0].name == "admin"
+    assert result[0].granted_at == granted_at
+
+
+async def test_get_role_grants_for_user_no_roles_returns_empty_list() -> None:
+    # Arrange
+    service, _, _, _ = _make_service()
+
+    # Act
+    result = await service.get_role_grants_for_user(uuid.uuid4())
+
+    # Assert
+    assert result == []

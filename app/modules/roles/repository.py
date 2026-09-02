@@ -1,6 +1,7 @@
 import uuid
+from datetime import datetime
 
-from sqlalchemy import delete, select
+from sqlalchemy import delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -75,8 +76,25 @@ class UserRoleRepository:
     async def replace_for_user(self, *, user_id: uuid.UUID, role_ids: list[uuid.UUID]) -> None:
         await self._session.execute(delete(UserRole).where(UserRole.user_id == user_id))
         for role_id in role_ids:
-            self._session.add(UserRole(user_id=user_id, role_id=role_id))
+            # granted_at set explicitly (US-2.5 spec-review resolution),
+            # not left to the column's server_default: a full-replacement
+            # write always reflects "granted now" for every surviving
+            # role, including one that was already held and is being
+            # re-granted in this same call.
+            self._session.add(UserRole(user_id=user_id, role_id=role_id, granted_at=func.now()))
         await self._session.flush()
+
+    async def list_role_grants_for_user(self, user_id: uuid.UUID) -> list[tuple[str, datetime]]:
+        """US-009 FR-6: role name + granted_at pairs, a superset of
+        list_role_names_for_user (which resolve_scopes_for_user still uses
+        and doesn't need timestamps for).
+        """
+        result = await self._session.execute(
+            select(Role.name, UserRole.granted_at)
+            .join(UserRole, UserRole.role_id == Role.id)
+            .where(UserRole.user_id == user_id)
+        )
+        return [(name, granted_at) for name, granted_at in result.all()]
 
     async def create_admin_audit_log_entry(
         self,

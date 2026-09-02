@@ -4,6 +4,7 @@ from fastapi import APIRouter, Cookie, Depends, Request, Response, status
 
 from app.core.dependencies import get_request_id
 from app.modules.users.dependencies import (
+    CurrentUserAllowEnrollmentScopedDep,
     CurrentUserAllowRevokedDep,
     CurrentUserDep,
     UserServiceDep,
@@ -11,6 +12,14 @@ from app.modules.users.dependencies import (
 from app.modules.users.schemas import (
     LoginRequest,
     LoginResponse,
+    MfaActivateRequest,
+    MfaActivateResponse,
+    MfaDisableRequest,
+    MfaEnrollRequest,
+    MfaEnrollResponse,
+    MfaRequiredResponse,
+    MfaVerifyRequest,
+    MfaVerifyResponse,
     PasswordResetConfirmRequest,
     PasswordResetRequestRequest,
     PasswordResetRequestResponse,
@@ -35,31 +44,38 @@ async def register_user(
     return user
 
 
-@router.post("/login", response_model=LoginResponse, status_code=status.HTTP_200_OK)
+@router.post(
+    "/login", response_model=LoginResponse | MfaRequiredResponse, status_code=status.HTTP_200_OK
+)
 async def login(
     payload: LoginRequest,
     service: UserServiceDep,
     response: Response,
     request: Request,
     request_id: Annotated[str, Depends(get_request_id)],
-) -> LoginResponse:
+) -> LoginResponse | MfaRequiredResponse:
     login_response, raw_refresh_token = await service.authenticate_user(
         payload,
         ip=_get_client_ip(request),
         user_agent=request.headers.get("User-Agent"),
         request_id=request_id,
     )
-    # Path matches this app's actual deployed route prefix (/api/v1/auth/...,
-    # per app/api/v1/router.py), not the source story's documented /v1/auth
-    # — the cookie must scope to where the browser will actually send it.
-    response.set_cookie(
-        key="refresh_token",
-        value=raw_refresh_token,
-        path="/api/v1/auth",
-        httponly=True,
-        secure=True,
-        samesite="strict",
-    )
+    # US-009 MF-AC3: no refresh token is issued on the MFA-challenge branch
+    # (raw_refresh_token is None), so no cookie is set - the client must
+    # call /mfa/verify to actually complete the login.
+    if raw_refresh_token is not None:
+        # Path matches this app's actual deployed route prefix
+        # (/api/v1/auth/..., per app/api/v1/router.py), not the source
+        # story's documented /v1/auth — the cookie must scope to where the
+        # browser will actually send it.
+        response.set_cookie(
+            key="refresh_token",
+            value=raw_refresh_token,
+            path="/api/v1/auth",
+            httponly=True,
+            secure=True,
+            samesite="strict",
+        )
     return login_response
 
 
@@ -147,6 +163,79 @@ async def request_password_reset(
     request_id: Annotated[str, Depends(get_request_id)],
 ) -> PasswordResetRequestResponse:
     return await service.request_password_reset(
+        payload,
+        ip=_get_client_ip(request),
+        user_agent=request.headers.get("User-Agent"),
+        request_id=request_id,
+    )
+
+
+@router.post("/mfa/enroll", response_model=MfaEnrollResponse, status_code=status.HTTP_200_OK)
+async def enroll_mfa(
+    payload: MfaEnrollRequest,
+    current_user: CurrentUserAllowEnrollmentScopedDep,
+    service: UserServiceDep,
+) -> MfaEnrollResponse:
+    return await service.enroll_mfa(current_user.user_id, payload)
+
+
+@router.post("/mfa/activate", response_model=MfaActivateResponse, status_code=status.HTTP_200_OK)
+async def activate_mfa(
+    payload: MfaActivateRequest,
+    current_user: CurrentUserAllowEnrollmentScopedDep,
+    service: UserServiceDep,
+    request: Request,
+    request_id: Annotated[str, Depends(get_request_id)],
+) -> MfaActivateResponse:
+    return await service.activate_mfa(
+        current_user.user_id,
+        payload,
+        ip=_get_client_ip(request),
+        user_agent=request.headers.get("User-Agent"),
+        request_id=request_id,
+    )
+
+
+@router.post("/mfa/verify", response_model=MfaVerifyResponse, status_code=status.HTTP_200_OK)
+async def verify_mfa(
+    payload: MfaVerifyRequest,
+    service: UserServiceDep,
+    response: Response,
+    request: Request,
+    request_id: Annotated[str, Depends(get_request_id)],
+) -> MfaVerifyResponse:
+    # No CurrentUserDep: the credential for this endpoint is the mfa_token
+    # in the request body (FR-3), not a bearer access token — same shape as
+    # password-reset/confirm's body-carried token, not a security scheme.
+    verify_response, raw_refresh_token = await service.verify_mfa(
+        payload,
+        ip=_get_client_ip(request),
+        user_agent=request.headers.get("User-Agent"),
+        request_id=request_id,
+    )
+    # Same cookie attributes /login and /refresh already use (MF-AC3:
+    # "completes the login exactly as LI-AC1").
+    response.set_cookie(
+        key="refresh_token",
+        value=raw_refresh_token,
+        path="/api/v1/auth",
+        httponly=True,
+        secure=True,
+        samesite="strict",
+    )
+    return verify_response
+
+
+@router.delete("/mfa", response_model=None, status_code=status.HTTP_204_NO_CONTENT)
+async def disable_mfa(
+    payload: MfaDisableRequest,
+    current_user: CurrentUserDep,
+    service: UserServiceDep,
+    request: Request,
+    request_id: Annotated[str, Depends(get_request_id)],
+) -> None:
+    await service.disable_mfa(
+        current_user.user_id,
         payload,
         ip=_get_client_ip(request),
         user_agent=request.headers.get("User-Agent"),

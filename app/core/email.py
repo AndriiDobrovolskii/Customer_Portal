@@ -17,6 +17,8 @@ class EmailSender(Protocol):
 
     async def send_password_reset_notice(self, *, to: str) -> None: ...
 
+    async def send_mfa_recovery_used_notice(self, *, to: str) -> None: ...
+
 
 class LoggingEmailSender:
     """No-op sender that logs dispatch without a real mail provider.
@@ -42,6 +44,9 @@ class LoggingEmailSender:
 
     async def send_password_reset_notice(self, *, to: str) -> None:
         logger.info("password reset notice dispatched")
+
+    async def send_mfa_recovery_used_notice(self, *, to: str) -> None:
+        logger.info("mfa recovery-code-used notice dispatched")
 
 
 def get_email_sender() -> EmailSender:

@@ -192,6 +192,9 @@ class RecordingEmailSender:
     async def send_password_reset_notice(self, *, to: str) -> None:
         raise NotImplementedError
 
+    async def send_mfa_recovery_used_notice(self, *, to: str) -> None:
+        raise NotImplementedError
+
 
 def _make_service(
     repository: FakeProfileRepository,

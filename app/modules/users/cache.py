@@ -5,6 +5,9 @@ from redis.asyncio import Redis
 from app.core.cache_keys import (
     login_fail_account_key,
     login_fail_ip_key,
+    mfa_token_key,
+    mfa_used_step_key,
+    mfa_verify_attempts_key,
     password_reset_account_hourly_key,
     password_reset_cooldown_key,
     password_reset_ip_hourly_key,
@@ -150,3 +153,79 @@ class PasswordResetRateLimitCache:
     async def _get_ttl(self, key: str) -> int:
         ttl = await self._client.ttl(key)
         return max(int(ttl), 0)
+
+
+class MfaTokenCache:
+    """Valkey-backed opaque `mfa_token` (FR-3) - single-use via `GETDEL`,
+    not a JWT (see docs/plans/US-009-implementation-plan.md Architectural
+    Change #3). Not fail-closed like RevocationCache: an unreachable
+    Valkey means the token can't be found, which is the same outward
+    behavior as an already-invalid token (401), not a security bypass.
+
+    `get_user_id` is the non-destructive read used on every `/verify`
+    call to resolve which account is being challenged (survives repeated
+    wrong-code attempts up to the lockout threshold). `consume` is the
+    atomic destructive read used only once a code has been confirmed
+    correct, so two concurrent successful requests against the same
+    token can never both complete the login.
+    """
+
+    def __init__(self, client: Redis) -> None:
+        self._client = client
+
+    async def issue(self, token_hash: str, *, user_id: uuid.UUID, ttl_seconds: int) -> None:
+        await self._client.set(mfa_token_key(token_hash), str(user_id), ex=ttl_seconds)
+
+    async def get_user_id(self, token_hash: str) -> uuid.UUID | None:
+        raw = await self._client.get(mfa_token_key(token_hash))
+        return self._parse_user_id(raw)
+
+    async def consume(self, token_hash: str) -> uuid.UUID | None:
+        raw = await self._client.getdel(mfa_token_key(token_hash))
+        return self._parse_user_id(raw)
+
+    @staticmethod
+    def _parse_user_id(raw: bytes | str | None) -> uuid.UUID | None:
+        if raw is None:
+            return None
+        # decode_responses=True on the client guarantees str at runtime;
+        # the installed stub still types redis.get()'s return as bytes|str.
+        if isinstance(raw, bytes):
+            raw = raw.decode()
+        return uuid.UUID(raw)
+
+    async def record_failed_attempt(self, token_hash: str, *, window_seconds: int) -> int:
+        return await self._incr_with_ttl(mfa_verify_attempts_key(token_hash), window_seconds)
+
+    async def invalidate(self, token_hash: str) -> None:
+        """FR-5: the 5th failed attempt deletes both the token and its own
+        attempt counter - full re-authentication is required afterward,
+        so nothing is left for a stale counter to apply to.
+        """
+        await self._client.delete(mfa_token_key(token_hash), mfa_verify_attempts_key(token_hash))
+
+    async def _incr_with_ttl(self, key: str, window_seconds: int) -> int:
+        async with self._client.pipeline(transaction=True) as pipe:
+            pipe.incr(key)
+            pipe.expire(key, window_seconds)
+            count, _ = await pipe.execute()
+        return int(count)
+
+
+class MfaReplayCache:
+    """FR-4 replay protection: `mfa_used_step:{user_id}:{step}`, TTL one
+    time step (30s). `SET NX` makes marking a step used atomic, so two
+    concurrent verify calls at the same step can't both succeed.
+    """
+
+    def __init__(self, client: Redis) -> None:
+        self._client = client
+
+    async def mark_step_used(self, user_id: uuid.UUID, *, step: int, ttl_seconds: int) -> bool:
+        """Returns True if this step was not already used (and is now
+        marked used); False if it was already used (a replay, MF-AC4).
+        """
+        result = await self._client.set(
+            mfa_used_step_key(user_id, step), "1", nx=True, ex=ttl_seconds
+        )
+        return bool(result)

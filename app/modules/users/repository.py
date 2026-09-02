@@ -1,12 +1,13 @@
 import uuid
 from datetime import datetime
 
-from sqlalchemy import func, select, update
+from sqlalchemy import delete, func, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.modules.users.models import (
     AuthAuditLog,
+    MfaRecoveryCode,
     PasswordResetToken,
     RefreshToken,
     User,
@@ -208,6 +209,100 @@ class UserRepository:
             .returning(PasswordResetToken)
         )
         return result.scalar_one_or_none()
+
+    async def update_mfa_pending_secret(
+        self, *, user_id: uuid.UUID, secret_encrypted: bytes
+    ) -> None:
+        """FR-1/OD-11: always overwrites - re-enrolling while a PENDING
+        secret already exists replaces it. `mfa_enabled` is untouched
+        (stays false), so an unfinished enrolment can never lock a user
+        out (MF-AC1).
+        """
+        await self._session.execute(
+            update(User).where(User.id == user_id).values(mfa_secret_encrypted=secret_encrypted)
+        )
+
+    async def activate_mfa(self, *, user_id: uuid.UUID) -> None:
+        """FR-2: also clears mfa_reenrollment_required unconditionally -
+        the shared exit condition for both enrolment-scoped-token triggers
+        (FR-6's privileged-role grant, FR-7's recovery-code use). Harmless
+        to clear when it was already false.
+        """
+        await self._session.execute(
+            update(User)
+            .where(User.id == user_id)
+            .values(mfa_enabled=True, mfa_activated_at=func.now(), mfa_reenrollment_required=False)
+        )
+
+    async def set_mfa_reenrollment_required(self, *, user_id: uuid.UUID) -> None:
+        """FR-7/OD-5: does not touch mfa_enabled or the existing secret/
+        remaining recovery codes - a degraded state, not a disable.
+        """
+        await self._session.execute(
+            update(User).where(User.id == user_id).values(mfa_reenrollment_required=True)
+        )
+
+    async def disable_mfa(self, *, user_id: uuid.UUID) -> None:
+        """FR-8: full purge of enrolment state. Recovery codes themselves
+        are deleted separately (delete_recovery_codes_for_user) since
+        they're a different table.
+        """
+        await self._session.execute(
+            update(User)
+            .where(User.id == user_id)
+            .values(
+                mfa_enabled=False,
+                mfa_secret_encrypted=None,
+                mfa_activated_at=None,
+                mfa_reenrollment_required=False,
+            )
+        )
+
+    async def create_recovery_codes(self, *, user_id: uuid.UUID, code_hashes: list[str]) -> None:
+        """FR-2: issues all 10 in one call. Argon2id-hashed by the caller
+        (service layer) - this method only persists already-hashed values.
+        """
+        self._session.add_all(
+            [MfaRecoveryCode(user_id=user_id, code_hash=code_hash) for code_hash in code_hashes]
+        )
+        await self._session.flush()
+
+    async def list_unconsumed_recovery_codes(self, *, user_id: uuid.UUID) -> list[MfaRecoveryCode]:
+        """FR-7: each stored hash is independently salted, so a submitted
+        recovery code can't be looked up by hash equality - the caller
+        must verify it against every unconsumed row (per US-009-db-
+        design.md's documented one-of-N pattern).
+        """
+        result = await self._session.execute(
+            select(MfaRecoveryCode).where(
+                MfaRecoveryCode.user_id == user_id, MfaRecoveryCode.consumed_at.is_(None)
+            )
+        )
+        return list(result.scalars().all())
+
+    async def consume_recovery_code(self, *, code_id: uuid.UUID) -> MfaRecoveryCode | None:
+        """Atomic check-and-consume, same pattern as consume_refresh_token/
+        consume_password_reset_token: a conditional UPDATE guarded by
+        `consumed_at IS NULL` so two concurrent verify calls presenting the
+        same recovery code can never both succeed.
+        """
+        result = await self._session.execute(
+            update(MfaRecoveryCode)
+            .where(MfaRecoveryCode.id == code_id, MfaRecoveryCode.consumed_at.is_(None))
+            .values(consumed_at=func.now())
+            .returning(MfaRecoveryCode)
+        )
+        return result.scalar_one_or_none()
+
+    async def delete_recovery_codes_for_user(self, *, user_id: uuid.UUID) -> None:
+        """FR-8/OD-8: hard-delete, not mark-consumed - disable purges every
+        recovery code, since a code is worthless without a secret and
+        keeping it is pure liability. Deliberately diverges from
+        PasswordResetToken's keep-but-mark-consumed precedent.
+        """
+        await self._session.execute(
+            delete(MfaRecoveryCode).where(MfaRecoveryCode.user_id == user_id)
+        )
 
     async def commit(self) -> None:
         await self._session.commit()
