@@ -9,6 +9,13 @@ from app.db.base import Base
 
 class User(Base):
     __tablename__ = "users"
+    __table_args__ = (
+        # US-3.1 FR-1: GET /v1/admin/users' status filter + list ordering.
+        # Missed during PLANNING (impact-analysis incorrectly said no file
+        # in app/modules/users/ needed to change) and caught here during
+        # T3 autogenerate, since it never showed up in the diff.
+        Index("ix_users_status_created_at", "status", "created_at"),
+    )
 
     id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=uuid.uuid4)
     email: Mapped[str] = mapped_column(String(320), unique=True, nullable=False)

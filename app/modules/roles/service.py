@@ -205,3 +205,79 @@ class RoleService:
         )
 
         return ReplaceUserRolesResponse(roles=sorted(matched_names))
+
+    async def resolve_role_ids_for_grant(
+        self,
+        *,
+        actor_id: uuid.UUID,
+        actor_scopes: set[str],
+        role_names: list[str],
+        request_id: str,
+    ) -> list[uuid.UUID]:
+        """US-3.1 FR-8: the same privilege-escalation check
+        `replace_user_roles` performs inline, exposed as an independent
+        method for `admin_users.service`'s create-user flow (a target
+        user's *initial* role grant, not a replacement of an existing
+        set) to call.
+
+        Deliberately a fresh implementation rather than an extraction from
+        `replace_user_roles` — that method's checks are entangled with
+        replacement-specific concerns (self-target, last-admin-on-removal)
+        this call site has no equivalent for, and touching an already-
+        shipped, already-tested method for a same-day feature carries
+        needless regression risk (see US-011-plan-review.md's finding on
+        the sibling `raise_if_last_admin` method below).
+
+        Any name in `role_names` that doesn't match a real role is
+        silently excluded from the returned id list, not rejected — this
+        story's spec has no FR/AC for an unknown-role-name case at
+        creation (unlike US-3.2's FR-4 for role replacement). Documented
+        limitation, not a fabricated requirement — flagged in
+        US-011-implementation-plan.md's follow-ups.
+        """
+        matched_roles = await self._role_repository.get_by_names(role_names)
+        requested_permissions = {
+            permission.scope for role in matched_roles for permission in role.permissions
+        }
+        if not requested_permissions.issubset(actor_scopes):
+            await self._user_role_repository.create_admin_audit_log_entry(
+                event="authz_denied",
+                actor_id=actor_id,
+                target_id=None,
+                old_roles=None,
+                new_roles=sorted(role.name for role in matched_roles),
+                severity="high",
+                request_id=request_id,
+            )
+            await self._user_role_repository.commit()
+            raise PrivilegeEscalationError()
+
+        return [role.id for role in matched_roles]
+
+    async def raise_if_last_admin(self, target_user_id: uuid.UUID) -> None:
+        """US-3.1 FR-16: raises `LastAdminError` if `target_user_id` holds
+        the `admin` role and is the only active account holding it.
+
+        Additive only — deliberately **not** called from
+        `replace_user_roles`. That method's own inline last-admin check
+        (above) is conditioned on "the *new* role set excludes admin";
+        this method's condition is broader ("does the target hold admin
+        at all"), and wiring it into `replace_user_roles` unconditionally
+        would incorrectly reject a replacement that keeps `admin` in the
+        set (e.g. `{admin}` -> `{admin, auditor}` for the sole admin) —
+        caught during `plan-reviewer`'s advisor cross-check 2026-09-01,
+        see US-011-plan-review.md's Risk Realism finding.
+        """
+        old_role_names = await self._user_role_repository.list_role_names_for_user(target_user_id)
+        if _ADMIN_ROLE_NAME not in old_role_names:
+            return
+
+        admin_rows = await self._role_repository.get_by_names([_ADMIN_ROLE_NAME])
+        if not admin_rows:
+            return
+
+        remaining_admins = await self._user_role_repository.count_active_admins_excluding(
+            admin_role_id=admin_rows[0].id, excluding_user_id=target_user_id
+        )
+        if remaining_admins == 0:
+            raise LastAdminError()

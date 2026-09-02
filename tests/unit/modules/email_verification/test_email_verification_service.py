@@ -136,6 +136,9 @@ class RecordingEmailSender:
     async def send_mfa_recovery_used_notice(self, *, to: str) -> None:
         pass
 
+    async def send_invitation_email(self, *, to: str, raw_token: str) -> None:
+        pass
+
 
 def _make_service(
     repository: FakeEmailVerificationRepository, email_sender: RecordingEmailSender | None = None

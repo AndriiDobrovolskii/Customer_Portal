@@ -44,6 +44,8 @@ class Settings(BaseSettings):
     # app/core/geoip.py degrades to returning no location rather than
     # failing.
     geoip_database_path: str = "app/core/data/GeoLite2-City.mmdb"
+    invitation_token_ttl_hours: int = 24
+    invitation_resend_hourly_limit: int = 5
 
 
 @lru_cache

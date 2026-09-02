@@ -195,6 +195,9 @@ class RecordingEmailSender:
     async def send_mfa_recovery_used_notice(self, *, to: str) -> None:
         raise NotImplementedError
 
+    async def send_invitation_email(self, *, to: str, raw_token: str) -> None:
+        raise NotImplementedError
+
 
 def _make_service(
     repository: FakeProfileRepository,

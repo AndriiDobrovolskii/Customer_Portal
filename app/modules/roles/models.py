@@ -1,7 +1,7 @@
 import uuid
 from datetime import datetime
 
-from sqlalchemy import DateTime, ForeignKey, String, func
+from sqlalchemy import DateTime, ForeignKey, String, Text, func
 from sqlalchemy.dialects.postgresql import ARRAY
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -84,3 +84,12 @@ class AdminAuditLog(Base):
     occurred_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now()
     )
+    # US-3.1 OD-1: this table's second write path (per-field profile
+    # updates, app/modules/admin_users/repository.py) populates these four
+    # and leaves old_roles/new_roles/severity null; the role-replacement
+    # path above does the reverse. Nullable, no default — either write
+    # path's unused columns simply stay null on its own rows.
+    field: Mapped[str | None] = mapped_column(String(64))
+    old_value: Mapped[str | None] = mapped_column(Text())
+    new_value: Mapped[str | None] = mapped_column(Text())
+    reason: Mapped[str | None] = mapped_column(Text())

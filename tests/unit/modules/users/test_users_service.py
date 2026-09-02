@@ -499,6 +499,9 @@ class FakeEmailSender:
             raise RuntimeError("mfa recovery-used notice dispatch failed")
         self.mfa_recovery_used_notices_sent.append(to)
 
+    async def send_invitation_email(self, *, to: str, raw_token: str) -> None:
+        pass
+
 
 class FakeRefreshRateLimitCache:
     def __init__(
