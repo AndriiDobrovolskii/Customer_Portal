@@ -219,9 +219,11 @@ Raised by `planner`/advisor (PLANNING, 2026-09-02): with no `DEFAULT` partition,
 
 ---
 
-## OD-10 — Carried forward, unresolved: single missing `from`/`to` bound
+## OD-10 — Resolved at IMPLEMENTATION: single missing `from`/`to` bound
 
-AU-AC5/FR-5 only specifies behavior when the range exceeds 90 days or omits *both* bounds. Behavior when exactly one bound is supplied (reject, default, or treat as open-ended) is unstated in both story and spec. Flagged Low/question by the pre-existing spec review; nothing in the current codebase resolves it by precedent (no comparable single-bound-optional filter exists elsewhere in this project — `admin_users`'s filters are independent, not a paired range). Still open.
+AU-AC5/FR-5 only specifies behavior when the range exceeds 90 days or omits *both* bounds. Behavior when exactly one bound is supplied (reject, default, or treat as open-ended) is unstated in both story and spec. Flagged Low/question by the pre-existing spec review; nothing in the current codebase resolves it by precedent (no comparable single-bound-optional filter exists elsewhere in this project — `admin_users`'s filters are independent, not a paired range). Carried forward unresolved through DESIGN/PLANNING/TESTS.
+
+**Resolved 2026-09-02, at IMPLEMENTATION (T4, `app/modules/audit/service.py::list_audit_logs`):** a single missing bound is rejected with the same `422 range-too-wide` as both-bounds-omitted, not defaulted or treated as open-ended. Grounded in the story's own Assumption #6 ("Maximum 90 days per query, **bounds required**") — "bounds," plural, reads as both `from` and `to` being mandatory, not "at least one." This is a stronger textual basis than inventing a default-window fallback would have been. Test row added to the traceability matrix (`test_list_audit_logs_single_missing_bound_returns_422`).
 
 ---
 

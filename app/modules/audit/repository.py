@@ -167,13 +167,19 @@ class AuditRepository:
     async def record_access_denied(
         self,
         *,
-        actor_id: uuid.UUID | None,
+        actor_id: uuid.UUID,
         actor_role: str | None,
         request_id: str,
         ip: str | None,
         user_agent: str | None,
     ) -> None:
-        """AU-AC3/FR-3 — `audit:read`-denial event."""
+        """AU-AC3/FR-3 — `audit:read`-denial event. `actor_id` is never
+        `None` here: `require_audit_read` (audit/dependencies.py) only
+        raises the underlying `InsufficientPermissionError` after
+        `CurrentUserDep` has already resolved an authenticated caller — an
+        unauthenticated request is rejected with `401` upstream, before
+        this ever runs.
+        """
         self._session.add(
             AuditLog(
                 category="audit",

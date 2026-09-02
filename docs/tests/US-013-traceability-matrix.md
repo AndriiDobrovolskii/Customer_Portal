@@ -21,6 +21,7 @@
 | AU-AC4 / FR-4 | `DELETE /v1/admin/audit-logs` → `405` | Integration | `test_delete_audit_logs_returns_405` | `tests/integration/modules/audit/test_audit_router.py` |
 | AU-AC5 / FR-5 | `from`/`to` range exceeds 90 days → `422 range-too-wide`, message states the max window and suggests export | Integration | `test_list_audit_logs_window_over_90_days_returns_422_range_too_wide` | `tests/integration/modules/audit/test_audit_router.py` |
 | AU-AC5 / FR-5 | Both bounds omitted → `422 range-too-wide` | Integration | `test_list_audit_logs_both_bounds_omitted_returns_422_range_too_wide` | `tests/integration/modules/audit/test_audit_router.py` |
+| AU-AC5 / FR-5 (OD-10 resolution) | Exactly one bound omitted (`from` only, then `to` only) → `422 range-too-wide`, same as both-omitted — resolved 2026-09-02 at IMPLEMENTATION per the story's own Assumption #6 ("bounds required"), not defaulted/open-ended | Integration | `test_list_audit_logs_single_missing_bound_returns_422` | `tests/integration/modules/audit/test_audit_router.py` |
 | AU-AC5 / FR-5 | Window-validation logic in isolation | Unit | `test_validate_window_rejects_over_90_days_and_both_omitted` | `tests/unit/modules/audit/test_audit_service.py` |
 | AU-AC6 / FR-6 | No password/hash/raw-token/session-cookie/full-payment-identifier appears in any returned entry — checked against this story's own two event types only; both carry no such fields today, so this integration test would pass trivially and is included for regression-guard value, not as AU-AC6's primary proof | Integration | `test_list_audit_logs_response_contains_no_named_secrets` | `tests/integration/modules/audit/test_audit_router.py` |
 | AU-AC6 / FR-6 | **The story's own Enforcement Matrix names the real mechanism** ("fields marked sensitive are stored redacted... additionally by a CI grep over audit-write call sites") — a standalone CI check scanning every call site that writes `audit_log`/(under OD-14 staged) the four existing audit tables for the five named secret-shaped values, matching the OD-1 precedent set by `roles`' own `[gate]`-marked CI completeness check | CI/standalone, not `pytest` | `test_no_secret_shaped_literals_in_audit_write_call_sites` | `tests/unit/test_audit_write_call_site_scan.py` (or equivalent standalone check location — this story's real AU-AC6 coverage; the row above is supplementary) |
@@ -48,7 +49,7 @@
 
 Per this project's convention of disclosing rather than inventing scope, the following spec Open Questions have **no** test row above because no behavior is yet decided to test against:
 
-- Single missing `from`/`to` bound (reject/default/open-ended) — spec's own carried-forward Open Question.
+- ~~Single missing `from`/`to` bound~~ — resolved as OD-10 (2026-09-02); see the new row above, not a gap any longer.
 - ~~Hash-chain concurrency~~ — resolved as OD-6 (2026-09-02); see the new row above, not a gap any longer.
 - "Fields marked sensitive" (AU-AC6) beyond the four named exclusions — no enumerated list to test against.
 - Identifiers embedded in `payload` JSONB (AU-AC8) — OD-13 resolved `profile_audit_log`'s dedicated `old_value`/`new_value` case only; the `payload` JSONB question remains open.
