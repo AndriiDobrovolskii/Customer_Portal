@@ -1,0 +1,56 @@
+# Traceability Matrix: View Audit Information (US-3.3 / spec US-013)
+
+**Spec:** docs/specifications/US-013-view-audit-information-spec.md
+**Task breakdown:** docs/plans/US-013-task-breakdown.md (T7 unit, T7b unit/verifier, T8 integration)
+**Status:** Matrix only — test code deferred to IMPLEMENTATION (T7/T7b/T8), per this project's established TESTS-stage pattern.
+
+| AC / FR | Case | Level | Planned test function | File |
+|---|---|---|---|---|
+| AU-AC1 / FR-1 | Happy path: filtered query, `200`, cursor-paginated, newest-first, correct field list for `audit_log`'s own rows | Integration | `test_list_audit_logs_filtered_query_returns_200_newest_first` | `tests/integration/modules/audit/test_audit_router.py` |
+| AU-AC1 / FR-1 | Historical rows from the four existing tables return with `NULL` for fields they don't store (`actor_role`, `outcome`, `category` mapped as a literal — not synthesized, per db-design's resolved Ambiguity) | Integration | `test_list_audit_logs_historical_rows_null_pad_unavailable_fields` | `tests/integration/modules/audit/test_audit_router.py` |
+| AU-AC1 / FR-1 | Zero matching results → `200` with an empty `items` list, not an error | Integration | `test_list_audit_logs_no_matches_returns_empty_list` | `tests/integration/modules/audit/test_audit_router.py` |
+| AU-AC1 / FR-1 | `limit` exceeds 100 → `422 validation-failed` (OD-5 `admin_users` precedent) | Integration | `test_list_audit_logs_limit_over_max_returns_422` | `tests/integration/modules/audit/test_audit_router.py` |
+| AU-AC1 / FR-1 | Invalid/expired `cursor` → `422 validation-failed` (OD-5 precedent) | Integration | `test_list_audit_logs_invalid_cursor_returns_422` | `tests/integration/modules/audit/test_audit_router.py` |
+| AU-AC1 / FR-1 | Filter/window/pagination parameter handling in isolation | Unit | `test_list_audit_logs_applies_filters_and_pagination` | `tests/unit/modules/audit/test_audit_service.py` |
+| AU-AC2 / FR-2 | Successful query call writes an `audit_log` entry (`event=audit_log_viewed`) recording the actor and exact filter parameters | Integration | `test_list_audit_logs_success_writes_self_audit_entry` | `tests/integration/modules/audit/test_audit_router.py` |
+| AU-AC2 / FR-2 | Self-audit write logic in isolation, fake repository | Unit | `test_record_self_audit_writes_actor_and_filters` | `tests/unit/modules/audit/test_audit_service.py` |
+| AU-AC3 / FR-3 | Support agent (no `audit:read`) → `403 insufficient-permission`, denial recorded via `require_audit_read` | Integration | `test_list_audit_logs_missing_scope_returns_403_and_audits_denial` | `tests/integration/modules/audit/test_audit_router.py` |
+| AU-AC3 / FR-3 | Denial-write logic in isolation | Unit | `test_record_access_denied_writes_entry` | `tests/unit/modules/audit/test_audit_service.py` |
+| AU-AC4 / FR-4 | `PATCH /v1/admin/audit-logs` → `405`, no custom handler body | Integration | `test_patch_audit_logs_returns_405` | `tests/integration/modules/audit/test_audit_router.py` |
+| AU-AC4 / FR-4 | `PUT /v1/admin/audit-logs` → `405` | Integration | `test_put_audit_logs_returns_405` | `tests/integration/modules/audit/test_audit_router.py` |
+| AU-AC4 / FR-4 | `DELETE /v1/admin/audit-logs` → `405` | Integration | `test_delete_audit_logs_returns_405` | `tests/integration/modules/audit/test_audit_router.py` |
+| AU-AC5 / FR-5 | `from`/`to` range exceeds 90 days → `422 range-too-wide`, message states the max window and suggests export | Integration | `test_list_audit_logs_window_over_90_days_returns_422_range_too_wide` | `tests/integration/modules/audit/test_audit_router.py` |
+| AU-AC5 / FR-5 | Both bounds omitted → `422 range-too-wide` | Integration | `test_list_audit_logs_both_bounds_omitted_returns_422_range_too_wide` | `tests/integration/modules/audit/test_audit_router.py` |
+| AU-AC5 / FR-5 | Window-validation logic in isolation | Unit | `test_validate_window_rejects_over_90_days_and_both_omitted` | `tests/unit/modules/audit/test_audit_service.py` |
+| AU-AC6 / FR-6 | No password/hash/raw-token/session-cookie/full-payment-identifier appears in any returned entry — checked against this story's own two event types only; both carry no such fields today, so this integration test would pass trivially and is included for regression-guard value, not as AU-AC6's primary proof | Integration | `test_list_audit_logs_response_contains_no_named_secrets` | `tests/integration/modules/audit/test_audit_router.py` |
+| AU-AC6 / FR-6 | **The story's own Enforcement Matrix names the real mechanism** ("fields marked sensitive are stored redacted... additionally by a CI grep over audit-write call sites") — a standalone CI check scanning every call site that writes `audit_log`/(under OD-14 staged) the four existing audit tables for the five named secret-shaped values, matching the OD-1 precedent set by `roles`' own `[gate]`-marked CI completeness check | CI/standalone, not `pytest` | `test_no_secret_shaped_literals_in_audit_write_call_sites` | `tests/unit/test_audit_write_call_site_scan.py` (or equivalent standalone check location — this story's real AU-AC6 coverage; the row above is supplementary) |
+| AU-AC7 / FR-7 | Untouched daily partition → verifier reports "intact" | Integration | `test_verify_audit_chain_untouched_partition_reports_intact` | `tests/integration/modules/audit/test_audit_router.py` (or a dedicated `tests/integration/scripts/test_verify_audit_chain.py`, per T6's owner's final file layout) |
+| AU-AC7 / FR-7 | A row mutated via the ordinary application session (no separate privileged connection exists, per OD-12) → verifier names that exact row as the break | Integration | `test_verify_audit_chain_mutated_row_reports_exact_break` | Same file as above |
+| AU-AC7 / FR-7 | `previous_hash`/`row_hash` are never accepted from application input — schema-level proof (no such field on `AuditLogEntry`/any inbound schema) | Unit | `test_audit_log_schema_has_no_hash_input_fields` | `tests/unit/modules/audit/test_audit_schemas.py` |
+| AU-AC7 / FR-7 | Verifier's break-detection logic in isolation, fake DB read | Unit | `test_verify_audit_chain_detects_break_in_hash_sequence` | `tests/unit/scripts/test_verify_audit_chain.py` |
+| AU-AC8 / FR-8 | Provisional erasure script (OD-2) anonymizes the `users` row and redacts direct identifiers (`ip`, `actor_id`-adjacent columns) on that user's `audit_log` rows | Integration | `test_erasure_script_redacts_audit_log_direct_identifiers` | `tests/integration/modules/audit/test_audit_router.py` (or the erasure script's own test file, per its eventual owner) |
+| AU-AC8 / FR-8 | Field-aware redaction (OD-13): `profile_audit_log.old_value`/`new_value` for a `field="display_name"` row is redacted on erasure | Integration | `test_erasure_script_redacts_profile_display_name_field` | Same as above |
+| AU-AC8 / FR-8 | Entries remain queryable post-erasure, `actor_id` retained as an opaque UUID | Integration | `test_erasure_does_not_remove_audit_entries` | Same as above |
+| AU-AC9 / FR-9 | **Out of scope for this story (OD-18, resolved 2026-09-02).** The retention job's cold-storage target is blocked on OD-9 (legal/DPO sign-off, still pending) — no code, task, or test is delivered against AU-AC9 in US-3.3. Remains `[manual]` per the story's own Enforcement Matrix. | Deferred | — | — |
+| — (cross-cutting, `AGENTS.md` §5) | `GET /v1/admin/audit-logs` with no token → `401` | Integration | `test_list_audit_logs_no_token_returns_401` | `tests/integration/modules/audit/test_audit_router.py` |
+| — (cross-cutting) | `GET /v1/admin/audit-logs` with an expired access token → `401` | Integration | `test_list_audit_logs_expired_token_returns_401` | `tests/integration/modules/audit/test_audit_router.py` |
+| — (cross-cutting) | `GET /v1/admin/audit-logs` with a malformed token → `401` | Integration | `test_list_audit_logs_malformed_token_returns_401` | `tests/integration/modules/audit/test_audit_router.py` |
+| — (cross-cutting) | `GET /v1/admin/audit-logs` with insufficient permission (no `audit:read`) → `403` | Integration | `test_list_audit_logs_missing_scope_returns_403_and_audits_denial` | (same row as AU-AC3, above — both AC- and §5-derived) |
+| — (cross-cutting) | `GET /v1/admin/audit-logs` with a revoked session → `401` | Integration | `test_list_audit_logs_revoked_session_returns_401` | `tests/integration/modules/audit/test_audit_router.py` |
+| OD-1 resolution (table rename) | `email_verification`'s purge job still writes/reads correctly against `unverified_account_purge_log` post-rename | Integration | Existing `test_purge_service.py` cases updated in place for the new table name, not a new test | `tests/integration/modules/email_verification/test_purge_service.py` |
+| OD-16 resolution (`DEFAULT` partition) | An `INSERT` with `occurred_at` outside every named daily partition's range succeeds by landing in `DEFAULT`, not by raising | Integration | `test_audit_log_insert_outside_named_partitions_lands_in_default` | `tests/integration/modules/audit/test_audit_router.py` (or a migration-level test, per T3b's verification step) |
+| OD-17 resolution (genesis rule) | The very first row ever inserted into `audit_log` seeds `previous_hash` from the fixed sentinel (hash of empty string), not `NULL`/an error | Integration | `test_audit_log_first_ever_row_seeds_from_sentinel` | `tests/integration/modules/audit/test_audit_router.py` (or a migration-level test, per T3b's verification step) |
+| OD-17 resolution (genesis rule) | The first row of a day following one or more empty days seeds `previous_hash` from the most recent non-empty prior partition's final `row_hash`, not the immediately-prior (empty) day | Unit | `test_verify_audit_chain_skips_empty_days_when_seeding` | `tests/unit/scripts/test_verify_audit_chain.py` |
+| T3c (new indexes) | `audit_log_history`'s `occurred_at DESC` keyset pagination produces a merge-append, not a full sort, across all five branches | Integration, statement-count/plan assertion per `AGENTS.md` §5's "list endpoints... SHOULD assert a statement-count ceiling" | `test_list_audit_logs_pagination_uses_indexed_scan_not_full_sort` | `tests/integration/modules/audit/test_audit_router.py` |
+
+## Gaps Not Covered (carried forward, not invented here)
+
+Per this project's convention of disclosing rather than inventing scope, the following spec Open Questions have **no** test row above because no behavior is yet decided to test against:
+
+- Single missing `from`/`to` bound (reject/default/open-ended) — spec's own carried-forward Open Question.
+- Hash-chain concurrency under simultaneous `INSERT`s into the same daily partition — spec's own carried-forward Open Question (Medium, pre-existing spec review).
+- "Fields marked sensitive" (AU-AC6) beyond the four named exclusions — no enumerated list to test against.
+- Identifiers embedded in `payload` JSONB (AU-AC8) — OD-13 resolved `profile_audit_log`'s dedicated `old_value`/`new_value` case only; the `payload` JSONB question remains open.
+- Cold-storage target/access procedure (AU-AC9) — legal/DPO sign-off pending (OD-9); AU-AC9's retention job is explicitly deferred out of this story (OD-18), not built, tested, or tasked here.
+
+If any of these gain a decision in a future story or before IMPLEMENTATION, add the corresponding test row then.

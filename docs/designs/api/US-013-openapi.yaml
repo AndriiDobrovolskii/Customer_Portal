@@ -1,0 +1,253 @@
+openapi: 3.0.3
+info:
+  title: View Audit Information (US-3.3 / spec US-013) — fragment
+  version: "1.0"
+paths:
+  /v1/admin/audit-logs:
+    get:
+      operationId: listAuditLogs
+      summary: Filtered, cursor-paginated, newest-first query over the audit trail
+      tags: [admin, audit]
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: actor_id
+          in: query
+          required: false
+          schema:
+            type: string
+            format: uuid
+        - name: event
+          in: query
+          required: false
+          schema:
+            type: string
+        - name: target_id
+          in: query
+          required: false
+          schema:
+            type: string
+            format: uuid
+        - name: from
+          in: query
+          required: false
+          schema:
+            type: string
+            format: date-time
+          description: >
+            Inclusive lower bound. Together with `to`, bounds the query to
+            at most 90 days (FR-5); a single missing bound's behavior is
+            an unresolved Open Question in the spec — see US-013-api-
+            design.md, not decided here.
+        - name: to
+          in: query
+          required: false
+          schema:
+            type: string
+            format: date-time
+          description: Inclusive upper bound. See `from`.
+        - name: cursor
+          in: query
+          required: false
+          schema:
+            type: string
+          description: >
+            Opaque keyset cursor (Data Model Notes: keyset, not `OFFSET`,
+            pagination). Invalid/expired cursor behavior follows the
+            `admin_users` precedent (422 `validation-failed`, field
+            `cursor`) per the spec's OD-5 resolution.
+        - name: limit
+          in: query
+          required: false
+          schema:
+            type: integer
+            default: 50
+            maximum: 100
+          description: >
+            Capped at 100 (422 `validation-failed`, field `limit`, code
+            `max`), matching the shipped `app/modules/admin_users`
+            precedent per the spec's OD-5 resolution. 50 is the example
+            value from the source story's AC, not a stated default —
+            flagged as an Open Question in US-013-api-design.md.
+      responses:
+        "200":
+          description: >
+            Cursor-paginated, newest-first list (FR-1). Each entry's field
+            list is per the source story's AC text; whether `actor_role`/
+            `outcome`/`category` are populated for rows written before
+            this story's migrations is an unresolved Open Question — see
+            US-013-api-design.md, not decided here. This call also writes
+            a self-audit entry (FR-2, `event=audit_log_viewed`) — a side
+            effect, not part of this response's shape.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AuditLogListResponse"
+        "401":
+          description: No valid access token — cross-cutting, not new to this story.
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/UnauthorizedProblem"
+        "403":
+          description: >
+            Caller's access token lacks `audit:read` (FR-3). The denied
+            attempt is itself recorded in the audit log — a side effect,
+            not part of this response's shape.
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/InsufficientPermissionProblem"
+        "422":
+          description: >
+            Either the `from`/`to` window exceeds 90 days or omits both
+            bounds (FR-5, `range-too-wide`, new this story), or `limit`
+            exceeds 100 / `cursor` is invalid (`validation-failed`, reused
+            per OD-5).
+          content:
+            application/problem+json:
+              schema:
+                oneOf:
+                  - $ref: "#/components/schemas/RangeTooWideProblem"
+                  - $ref: "#/components/schemas/ValidationFailedProblem"
+    patch:
+      operationId: rejectPatchAuditLogs
+      summary: Always rejected — the audit log is immutable at the API layer (FR-4)
+      tags: [admin, audit]
+      security:
+        - bearerAuth: []
+      responses:
+        "405":
+          description: >
+            Method Not Allowed for every actor, including an administrator
+            (FR-4). No request body is read; no `problem+json` type slug
+            is specified by the source story for this response (unlike
+            FR-3/FR-5), so this is FastAPI's default 405 with no custom
+            body — see US-013-api-design.md.
+    put:
+      operationId: rejectPutAuditLogs
+      summary: Always rejected — the audit log is immutable at the API layer (FR-4)
+      tags: [admin, audit]
+      security:
+        - bearerAuth: []
+      responses:
+        "405":
+          description: Same as `PATCH` above.
+    delete:
+      operationId: rejectDeleteAuditLogs
+      summary: Always rejected — the audit log is immutable at the API layer (FR-4)
+      tags: [admin, audit]
+      security:
+        - bearerAuth: []
+      responses:
+        "405":
+          description: Same as `PATCH` above.
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+  schemas:
+    AuditLogEntry:
+      type: object
+      required: [occurred_at, actor_id, actor_role, event, request_id, ip, user_agent, outcome]
+      properties:
+        occurred_at:
+          type: string
+          format: date-time
+        actor_id:
+          type: string
+          format: uuid
+        actor_role:
+          type: string
+        event:
+          type: string
+        target_id:
+          type: string
+          format: uuid
+          nullable: true
+        request_id:
+          type: string
+        ip:
+          type: string
+        user_agent:
+          type: string
+        outcome:
+          type: string
+      description: >
+        Per the source story's AC1 field list verbatim. Whether every
+        field is populated for rows predating this story's migrations is
+        unresolved — see US-013-api-design.md.
+    AuditLogListResponse:
+      type: object
+      required: [items]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/AuditLogEntry"
+        next_cursor:
+          type: string
+          nullable: true
+      description: Shape mirrors the shipped `admin_users` list response precedent (`items` + `next_cursor`).
+    UnauthorizedProblem:
+      allOf:
+        - $ref: "#/components/schemas/ProblemBase"
+      properties:
+        type:
+          type: string
+          example: ".../errors/unauthorized"
+        status:
+          type: integer
+          example: 401
+      description: Cross-cutting slug shared by every authenticated endpoint in this project — not new here.
+    InsufficientPermissionProblem:
+      allOf:
+        - $ref: "#/components/schemas/ProblemBase"
+      properties:
+        type:
+          type: string
+          example: ".../errors/insufficient-permission"
+        status:
+          type: integer
+          example: 403
+      description: Reused cross-project slug (FR-3) — not new here.
+    RangeTooWideProblem:
+      allOf:
+        - $ref: "#/components/schemas/ProblemBase"
+      properties:
+        type:
+          type: string
+          example: "https://portal.internal/errors/range-too-wide"
+        status:
+          type: integer
+          example: 422
+      description: Introduced by this story (FR-5), matches the source story's Error Envelope example verbatim.
+    ValidationFailedProblem:
+      allOf:
+        - $ref: "#/components/schemas/ProblemBase"
+      properties:
+        type:
+          type: string
+          example: ".../errors/validation-failed"
+        status:
+          type: integer
+          example: 422
+      description: Reused cross-project slug (`limit`/`cursor` bounds, OD-5) — not new here.
+    ProblemBase:
+      type: object
+      description: RFC 7807 problem body. `type` is an absolute/relative URI ending in the slug named per response.
+      required: [type, title, status, detail, instance]
+      properties:
+        type:
+          type: string
+        title:
+          type: string
+        status:
+          type: integer
+        detail:
+          type: string
+        instance:
+          type: string
+          example: /v1/admin/audit-logs

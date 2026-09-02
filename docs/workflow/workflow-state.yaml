@@ -1,8 +1,272 @@
-story: US-3.1
+story: US-3.3
 
-current_stage: PR
+current_stage: IMPLEMENTATION
 
-status: DONE
+status: IN_PROGRESS
+# TESTS done 2026-09-02: docs/tests/US-013-traceability-matrix.md (matrix
+# only, test code deferred to IMPLEMENTATION T7/T7b/T8 per the T1-T9
+# breakdown). All 9 ACs + cross-cutting AGENTS.md SS5 security cases
+# mapped to planned test function names. advisor caught 2 real gaps in
+# the first draft, both resolved same-day: (1) AU-AC6's original test
+# row would have passed trivially (this story's own 2 event types carry
+# none of the 5 named secret classes) - added the story's own actual
+# AU-AC6 mechanism, a CI grep over audit-write call sites, as a second
+# row, and reframed the integration test as a regression guard, not
+# AU-AC6's primary proof; (2) AU-AC9's retention job had no file, task,
+# or test anywhere in the plan/task-breakdown despite being a named AC -
+# same class of gap as T6/scripts/verify_audit_chain.py at PLANNING.
+# Also surfaced: the hash-chain genesis rule (FR-7) was still an
+# unresolved carried-forward Open Question blocking T3b's trigger SQL,
+# which blocks T4/T8/T9 downstream - the same shape as OD-14/15/16 and
+# should not have been left as a footnote. Both raised to the user:
+# OD-17 (genesis rule) resolved - fixed sentinel for the very first
+# partition, subsequent days seed from the most recent non-empty prior
+# partition's final row_hash (skipping empty days); OD-18 (AU-AC9 scope)
+# resolved - explicitly deferred out of this story's build scope,
+# blocked on OD-9's still-open legal/DPO cold-storage decision, no code/
+# task/test delivered against it. docs/decisions/US-3.3-open-decisions.md,
+# docs/designs/database/US-013-db-design.md, docs/plans/US-013-
+# {implementation-plan,task-breakdown}.md, and the traceability matrix
+# all updated to match. Advancing to IMPLEMENTATION per T1-T9.
+#
+# PLANNING fully closed 2026-09-02: OD-15 (script ownership) resolved -
+# service-and-router-builder builds scripts/verify_audit_chain.py (T6).
+# OD-16 (partition safety net) resolved - T3b's migration also creates
+# a DEFAULT partition, preventing the hard-INSERT-failure risk planner
+# flagged. docs/plans/US-013-{implementation-plan,task-breakdown}.md and
+# docs/designs/database/US-013-db-design.md updated to match. Advancing
+# to TESTS.
+#
+# PLANNING (plan-reviewer) done 2026-09-02: docs/reviews/plans/US-013-
+# plan-review.md - Pass with Issues. Full impact-analysis coverage, no
+# layering-order violations, realistic risk/test strategy. 1 process
+# finding (non-blocking, fixed same-day): scripts/verify_audit_chain.py
+# was never listed in impact-analysis.md despite being derivable from
+# the spec at that stage - impact-analysis.md amended in place to add
+# it. 2 genuinely open decisions correctly disclosed rather than
+# guessed, both need the user before TESTS/IMPLEMENTATION can start:
+# T6's script ownership (no execution skill in this project's roster
+# covers scripts/) and planner's partition-maintenance mechanism choice
+# (DEFAULT partition vs. a maintenance-job task added to this story).
+# Awaiting user resolution.
+#
+# PLANNING (implementation-planner) done 2026-09-02: docs/plans/US-013-
+# task-breakdown.md. T1-T9 (+T2b/T3b/T3c/T7b). advisor caught 2 real
+# dependency-graph defects, both fixed: (1) T7 originally depended on
+# T6, which has no assigned owner - a test task depending on an unowned
+# task breaks the whole sequence at T9; split into T7 (audit unit tests,
+# depends T4) and T7b (verifier unit test, depends T6, explicitly noted
+# as blocked pending T6's ownership decision); (2) T8 (integration
+# tests updating the renamed email_verification tests) was missing T2b/
+# T3 in its dependency list despite needing the rename actually applied
+# to test against - added. Also added the sa.inspect(op.get_bind())
+# guard note to T3c (CONCURRENTLY indexes are hand-written, outside the
+# Rewriter's reach, per AGENTS.md SS4). T6's ownership (no execution
+# skill in this project covers scripts/) and planner's partition-
+# maintenance decision are flagged as one bundled open question for the
+# user, not invented here. Advancing to plan-reviewer.
+#
+# PLANNING (planner) done 2026-09-02: docs/plans/US-013-implementation-
+# plan.md. New app/modules/audit/ module; audit_log table + trigger +
+# audit_log_history view; OD-1 rename migration must precede audit_log
+# creation; 4 CONCURRENTLY indexes; FR-3 denial-write resolved as an
+# endpoint-local require_audit_read wrapper (not a shared require_scope
+# change); migrations/env.py §7.9-protected touch flagged with precedent
+# citation (US-3.1/US-3.2). advisor caught 3 gaps, all fixed: (1)
+# AU-AC7's [gate] test as originally described needed a "privileged
+# connection" that OD-12 already established doesn't exist (app is
+# superuser) - reworded to mutate-via-ordinary-session; (2) the chain-
+# verification job itself (scripts/verify_audit_chain.py) was completely
+# missing from Files To Create despite being [gate]-marked and called by
+# the Testing Strategy - added, plus its unit test; (3) partition-
+# maintenance risk sharpened from generic "hard failure eventually" to
+# precise mechanism (no DEFAULT partition -> first post-window INSERT,
+# including this story's own FR-2 write, 500s immediately) with 2
+# concrete resolution options for plan-reviewer to pick between rather
+# than leaving it open. Advancing to plan-reviewer.
+#
+# PLANNING (impact-analysis) done 2026-09-02: docs/impact-analysis/
+# US-013-impact-analysis.md. New app/modules/audit/ module (7 files).
+# Rename app/modules/email_verification/models.py::AuditLog table (OD-1).
+# 4 new occurred_at indexes on existing audit tables (CONCURRENTLY).
+# advisor caught 2 issues, both fixed: (1) verified the implicit-405
+# claim against app/main.py's actual registered exception handlers
+# (none intercept it) instead of leaving it as an open question for
+# implementation; (2) db-design/entity-model still described the 4
+# existing tables as "frozen"/"historical" - stale language from the
+# earlier (superseded) broad-cutover draft; corrected throughout both
+# files to reflect staged OD-14 (they stay live, ongoing writes,
+# primary query surface for audit_log_history, not a compatibility
+# shim). Real architectural tension flagged, not resolved: FR-3's
+# denial-write is not free (require_scope writes nothing on 403 today)
+# - narrow endpoint-specific wrapper vs. widening require_scope itself,
+# left for planner. Advancing to planner.
+#
+# OD-14 resolved 2026-09-02 (user): staged (option 3). audit_log + hash
+# chain + this story's own 2 new events ship now; repointing the 4
+# existing modules' audit writes is a future follow-up, one module at a
+# time. docs/designs/database/US-013-db-design.md and entity-model.md
+# updated to reflect this as confirmed, not a working assumption.
+# Advancing to PLANNING.
+#
+# DESIGN done 2026-09-02: docs/designs/api/US-013-{openapi.yaml,api-
+# design.md} (1 GET endpoint + 405 on PATCH/PUT/DELETE; limit/cursor
+# reuse admin_users precedent per OD-5; per-entry {id} 405 path flagged
+# as unmodeled routing question). docs/designs/database/US-013-{db-
+# design,entity-model}.md - central finding: audit_log MUST be a real,
+# daily-partitioned physical table, not a pure view (a view can't be
+# partitioned, and AU-AC7's BEFORE INSERT trigger needs a physical
+# table) - this is a technical conclusion, not a judgment call, and
+# resolves the spec's FR-2/FR-3 write-target Open Question and moots the
+# earlier assumption that the 4 existing per-domain tables need new
+# columns. advisor caught 2 real issues in the first draft, both fixed:
+# (1) the design had silently decided to repoint all 4 existing modules'
+# audit-write call sites to the new table - genuinely undecided scope,
+# not a technical requirement (AU-AC7 is satisfied either way); logged
+# as OD-14 (High) with 3 priced options, design now proceeds on the
+# staged/narrowest option as a non-binding working assumption pending
+# the user's answer; (2) db-design claimed the 4 existing tables'
+# current indexes already support audit_log_history's occurred_at-DESC
+# keyset pagination - false, verified against the live models (none
+# indexes occurred_at) - fixed by adding one new index per table,
+# needed regardless of OD-14's outcome. Awaiting user resolution of
+# OD-14 before PLANNING (impact-analyzer needs to know the real blast
+# radius to survey).
+#
+# SPEC_REVIEW third run done 2026-09-02: docs/reviews/specifications/
+# US-013-spec-review.md - Pass with Issues, clean this time, no override
+# needed. 9/9 ACs Covered, zero Contradictions - both prior Fail triggers
+# resolved by amending the story itself rather than accepting a
+# disclosed gap. 6 non-blocking ambiguities/edge-case findings remain
+# (mostly carried forward from the pre-existing 2026-08-22 review),
+# flagged for DESIGN to address, most notably the audit_log table-vs-
+# view write-target question (FR-2/FR-3) and the hash-chain genesis rule
+# (FR-7). Advancing to DESIGN cleanly - openapi-designer/db-designer's
+# own "never Fail" precondition is now satisfied without needing the
+# orchestrator override recorded in the (now superseded) SPEC_REVIEW
+# re-run entry below.
+#
+# STORY AMENDED 2026-09-02: user chose to amend the scope source of
+# truth rather than override openapi-designer/db-designer's own stated
+# "never Fail" precondition. docs/stories/US-3.3-view-audit-information.md
+# edited: AU-AC4 split into this story's API-level 405-only scope plus a
+# documented note tracking DB-grant enforcement as a separate, project-
+# wide infrastructure follow-up (OD-12); Data Model Notes' "monthly"
+# partition line corrected to "daily" (OD-11), removing the story's own
+# self-contradiction. No other AC changed. docs/specifications/US-013-
+# view-audit-information-spec.md updated to match (AU-AC4/FR-4 now
+# honestly fully Covered, no divergence to disclose). Re-running
+# story-spec-reviewer once more to confirm an honest Pass before DESIGN.
+#
+# SPEC_REVIEW re-run done 2026-09-02: docs/reviews/specifications/
+# US-013-spec-review.md re-run after OD-13 (field-aware redaction for
+# AU-AC8, raised by the first SPEC_REVIEW run and resolved same-day) -
+# verdict still Fail, mechanically unchanged, because AU-AC4's Partial
+# Coverage and the daily/monthly Contradiction cannot resolve to Pass
+# without amending docs/stories/US-3.3-view-audit-information.md itself,
+# which the user explicitly chose not to do (selected "Accept and
+# advance" over "Amend the story text" when asked). The AU-AC8 High
+# finding from the first run is fully resolved and no longer appears.
+# EXPLICIT ORCHESTRATOR OVERRIDE, recorded per this project's "report
+# conflicts, don't silently relax a rule" norm: story-orchestrator's
+# default rule is to stop on any Fail. Here the user was shown the
+# review's findings via AskUserQuestion and explicitly chose to accept
+# AU-AC4/the partition-contradiction as known, already-decided AC-
+# coverage gaps (matching OD-12/OD-11's own resolutions) rather than
+# amend the story - an informed, explicit risk acceptance, not a silent
+# skip. Advancing to DESIGN on that basis. Both gaps are disclosed in
+# docs/specifications/US-013-view-audit-information-spec.md's Open
+# Decision Resolutions section and Out of Scope; anyone reading the spec
+# sees them without needing this pipeline history.
+#
+# SPEC_REVIEW done 2026-09-02: docs/reviews/specifications/US-013-spec-
+# review.md - Fail. 8/9 ACs Covered on independent literal-text
+# comparison. AU-AC4 Partially Covered (its Gherkin has a 405 clause AND
+# a DB-grant clause; FR-4 delivers only the 405 - the DB-grant half was
+# already deferred via OD-12). 1 Contradiction: spec's Data Model Notes
+# say daily partitions, source's own Data Model Notes line says monthly
+# (source was self-contradictory; OD-11 already resolved "daily" as
+# authoritative). Both Fail triggers are bookkeeping - already-resolved,
+# user-approved ODs recorded at the correct pipeline stage, not new
+# defects. One genuine NEW finding independent of the Fail mechanics:
+# [High] no mechanism stated for locating/redacting a user's identifiers
+# embedded in structurally inconsistent fields across the 4 unioned
+# tables for AU-AC8/FR-8 - concretely, profile_audit_log.old_value/
+# new_value for a field="display_name" row literally contains the
+# changed display_name (one of AU-AC8's 3 named identifiers), and
+# nothing states how the erasure script finds it. advisor confirmed the
+# Fail verdict and flagged this as the item actually needing a decision
+# (the other two are already decided). Awaiting user disposition: (a)
+# accept AU-AC4/monthly-contradiction as known/approved AC-coverage gaps
+# and advance to DESIGN, plus decide how to handle the new AU-AC8
+# redaction-mechanism gap; or (b) amend docs/stories/US-3.3-view-audit-
+# information.md's AU-AC4 text to move the DB-grant clause to the
+# follow-up story (makes AU-AC4 honestly Covered, spec review Pass) -
+# user's call since it edits the scope source of truth.
+#
+# SPECIFICATION done 2026-09-02: docs/specifications/US-013-view-audit-
+# information-spec.md revised in place (pre-existing 2026-08-22 draft).
+# Incorporates OD-1/OD-2/OD-11/OD-12 resolutions as an "Open Decision
+# Resolutions" section; adds a Data Model Notes section and the RFC 7807
+# error envelope, both previously omitted (flagged by the pre-existing
+# spec review). advisor cross-check caught 3 real gaps the first draft
+# glossed over, fixed same-day: (1) AU-AC1/FR-1's actor_role/outcome/
+# category fields aren't stored on any of the 4 existing per-domain
+# tables - noted in FR-1 and the traceability matrix (matching AU-AC4's
+# honest annotation) rather than silently assumed; (2) FR-2/FR-3's own
+# audit-write target is undecided while OD-1 only settled audit_log's
+# *name*, not whether it's a writable table or a read-only view - logged
+# as a new Open Question; (3) FR-7's hash chain had no genesis rule for
+# the first partition or an empty-day gap - logged as a new Open
+# Question. 9/9 source ACs traced. docs/stories/README.md's backlog
+# table left unchanged (git history confirms it was never updated by
+# any prior story - single-commit precedent). Advancing to SPEC_REVIEW.
+#
+# CLARIFICATION done 2026-09-02, then resolved same day: user accepted
+# the recommended option on all 4 blocking Open Decisions - OD-1 rename
+# email_verification.AuditLog/audit_log to unverified_account_purge_log
+# (frees `audit_log` for this story); OD-2 build a minimal provisional
+# DA-AC9 script (anonymize users row + redact identifiers on that user's
+# audit rows), legal/DPO anonymize-vs-delete question stays open
+# separately; OD-11 daily partitions (Data Model Notes' "monthly" line
+# superseded); OD-12 ship only the API-level 405 for this story, DB-role/
+# GRANT-REVOKE infrastructure deferred to a separate project-wide follow-
+# up. See docs/decisions/US-3.3-open-decisions.md (Resolved notes under
+# OD-1/OD-2/OD-11/OD-12) and docs/evidence/US-3.3-clarification-report.md
+# (verdict now Ready for Specification). Advancing to SPECIFICATION.
+#
+# CLARIFICATION started 2026-09-02: us-clarifier verdict Not Ready. 12 Open
+# Decisions logged (docs/decisions/US-3.3-open-decisions.md), 4 BLOCKING:
+# OD-1 the story's own Assumptions table and Data Model Notes disagree on
+# whether `audit_log` is a new central table or a read-only view, and
+# either reading collides with a real, already-shipped, unrelated table
+# of that name (app/modules/email_verification/models.py::AuditLog,
+# BR-002's purge job); OD-2 AU-AC8 cites "the US-1.4 DA-AC9 retention
+# job" as already built - it isn't (DA-AC9 is [manual]/deferred pending
+# DPO sign-off in its own story and BR-007); OD-11 the story contradicts
+# itself on partition granularity (Assumption #4 + AU-AC7 say daily,
+# Data Model Notes says monthly); OD-12 AU-AC4's [gate]-tested DB-grant
+# immutability requirement has no infrastructure behind it anywhere in
+# this codebase (zero GRANT/REVOKE in any migration) and the app's
+# configured DB connection is the Postgres superuser role, which cannot
+# be restricted by grants at all. OD-3/OD-4 are Medium scope-sizing notes
+# (existing audit tables missing required columns; ticket_audit_log
+# doesn't exist since Epic 4 is unbuilt), non-blocking, recommendations
+# stated. OD-5 (limit/cursor bounds) resolved by admin_users precedent.
+# OD-6-OD-10 carried forward unresolved from the pre-existing 2026-08-22
+# draft spec/review (docs/specifications/US-013-view-audit-information-
+# spec.md, docs/reviews/specifications/US-013-spec-review.md), which
+# predate US-3.1/US-3.2 landing on main and could not check the story
+# against the real codebase or against itself as closely as this run.
+# audit:read permission dependency (US-3.2) independently confirmed
+# live and satisfied. See docs/evidence/US-3.3-clarification-report.md.
+# Awaiting user resolution of OD-1/OD-2/OD-11/OD-12 before advancing to
+# SPECIFICATION.
+
+# --- prior story: US-3.1 (DONE, reached PR, merged) ---
+# story: US-3.1
+# current_stage: PR
+# status: DONE
 # PR done 2026-09-02: docs/pr/US-011-pr-description.md drafted by
 # pr-preparer. All 4 gates confirmed Pass from their actual reports
 # (gate-enforcer 7/7 + 509/509 tests/96.64% coverage; implementation-
