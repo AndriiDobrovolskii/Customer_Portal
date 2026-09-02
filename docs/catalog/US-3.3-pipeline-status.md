@@ -2,7 +2,12 @@
 
 **Active story confirmed:** Yes — `docs/workflow/active-story.yaml` and `docs/workflow/workflow-state.yaml` agree; US-3.1 reached PR #12 (merged) immediately prior.
 **Last updated:** 2026-09-02
-**IMPLEMENTATION in progress:** branch `feat/us-3.3-view-audit-information` created off `main` (US-3.1's PR #12 already merged). T1/T2/T2b/T3/T3b/T3c done and committed (`15fcc3b`); T4 (service) next.
+**IMPLEMENTATION in progress:** branch `feat/us-3.3-view-audit-information` created off `main` (US-3.1's PR #12 already merged). T1-T6 done and committed (`15fcc3b`, `d15081d`, `ba9c639`); T7/T7b/T8 (actual test code) and T9 (gate-enforcer) remain.
+
+| Stage | Sub-step | Skill | Status | Verdict | Notes |
+|---|---|---|---|---|---|
+| IMPLEMENTATION | T6 (`scripts/verify_audit_chain.py`) | service-and-router-builder | Done | — | Pure `verify_chain()` forward-walks the chain, recomputing `row_hash` via the same SQL function the trigger uses. Verified against real Postgres 16: "intact" on an untouched chain, exact-row break report after mutating one via the ordinary session. advisor caught 2 gaps, both disclosed: tail-row deletion is undetectable as scoped (new schema needed, out of scope — documented, not silently absent); the matrix's planned "skips empty days" test was mis-scoped as a verifier unit test when that behavior actually belongs to the trigger — corrected to an integration test. |
+| IMPLEMENTATION | T4 (service), T5 (router/dependencies/exceptions) | service-and-router-builder | Done | — | `GET /v1/admin/audit-logs`; `require_audit_read` wraps `require_scope("audit:read")` to add the AU-AC3/FR-3 denial write, endpoint-local per the plan. **OD-10 resolved** (single missing `from`/`to` bound → same `422 range-too-wide` as both-omitted, grounded in the story's own "bounds required" wording). Verified end-to-end against real Postgres + Valkey (a fresh `customer_portal_valkey` container this session created — not part of the pre-existing dev setup, flagged to the user): 401/405/422/200/403 all correct, hash chain links the self-audit and denial writes correctly, `AuditLogEntry.model_validate()` on a real `NamedTuple` row confirmed (advisor flagged this as unverified after the first smoke test only exercised an empty result set). |
 
 | Stage | Sub-step | Skill | Status | Verdict | Notes |
 |---|---|---|---|---|---|
