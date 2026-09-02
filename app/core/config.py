@@ -36,6 +36,14 @@ class Settings(BaseSettings):
     mfa_token_ttl_seconds: int = 300
     mfa_verify_lockout_threshold: int = 5
     mfa_grace_period_days: int = 14
+    max_live_sessions_per_user: int = 20
+    # US-2.6/OD-4: the .mmdb file is fetched at build/deploy time (via a
+    # MaxMind license key held by the deploy pipeline, never by this app's
+    # own runtime config - the app only needs to know where to find the
+    # already-fetched file). Absent in local dev/CI is expected;
+    # app/core/geoip.py degrades to returning no location rather than
+    # failing.
+    geoip_database_path: str = "app/core/data/GeoLite2-City.mmdb"
 
 
 @lru_cache

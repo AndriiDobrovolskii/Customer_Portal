@@ -14,8 +14,10 @@ from pydantic import SecretStr
 from app.core.breached_passwords import is_breached_password
 from app.core.config import get_settings
 from app.core.crypto import decrypt_mfa_secret, encrypt_mfa_secret
+from app.core.device import resolve_device_label
 from app.core.email import EmailSender
 from app.core.exceptions import FieldError
+from app.core.geoip import GeoLocation, resolve_location
 from app.core.security import (
     InvalidTokenError,
     build_otpauth_uri,
@@ -34,6 +36,7 @@ from app.core.security import (
 )
 from app.modules.users.exceptions import (
     AccountDeactivatedError,
+    CurrentSessionError,
     DuplicateEmailError,
     EmailNotVerifiedError,
     InvalidCredentialsError,
@@ -44,6 +47,7 @@ from app.modules.users.exceptions import (
     PasswordResetTokenExpiredError,
     PasswordResetTokenInvalidError,
     RegistrationValidationError,
+    SessionNotFoundError,
     TokenInvalidError,
     TokenStaleError,
     TooManyAttemptsError,
@@ -70,6 +74,9 @@ from app.modules.users.schemas import (
     PasswordResetRequestRequest,
     PasswordResetRequestResponse,
     RefreshResponse,
+    SessionEntry,
+    SessionListResponse,
+    SessionLocation,
     UserCreate,
     UserRead,
     UserStatus,
@@ -94,6 +101,12 @@ logger = logging.getLogger(__name__)
 
 _SPECIAL_CHARACTERS = set(string.punctuation)
 _MIN_PASSWORD_LENGTH = 8
+
+
+def _to_session_location(geo: GeoLocation | None) -> SessionLocation | None:
+    if geo is None:
+        return None
+    return SessionLocation(city=geo.city, country=geo.country)
 
 
 def _hash_password_reset_token(raw_token: str) -> str:
@@ -154,6 +167,7 @@ class UserRepositoryProtocol(Protocol):
         user_agent: str | None,
         request_id: str,
         severity: str | None = None,
+        target_family: uuid.UUID | None = None,
     ) -> None: ...
 
     async def create_refresh_token(
@@ -205,6 +219,18 @@ class UserRepositoryProtocol(Protocol):
     async def consume_recovery_code(self, *, code_id: uuid.UUID) -> MfaRecoveryCode | None: ...
 
     async def delete_recovery_codes_for_user(self, *, user_id: uuid.UUID) -> None: ...
+
+    async def get_any_refresh_token_for_family(
+        self, *, family_id: uuid.UUID, user_id: uuid.UUID
+    ) -> RefreshToken | None: ...
+
+    async def lock_live_refresh_tokens_for_user(self, *, user_id: uuid.UUID) -> None: ...
+
+    async def list_live_families_for_user(self, *, user_id: uuid.UUID) -> list[RefreshToken]: ...
+
+    async def get_family_created_at_map_for_user(
+        self, *, user_id: uuid.UUID
+    ) -> dict[uuid.UUID, datetime]: ...
 
     async def commit(self) -> None: ...
 
@@ -445,6 +471,40 @@ class UserService:
             return True, None
         return False, earliest_deadline
 
+    async def _evict_oldest_family_if_at_cap(
+        self, user_id: uuid.UUID, *, ip: str, user_agent: str | None, request_id: str
+    ) -> None:
+        """US-2.6 FR-7 (spec-review resolution): called from both family-
+        creation sites (`authenticate_user`'s ordinary login, and
+        `_complete_mfa_login`'s post-MFA login completion - the same
+        duplication precedent this file already applies to session/
+        refresh-token minting). Locks the acting user's own live rows
+        before counting, so two logins racing concurrently for the SAME
+        user serialize on this lock rather than both observing a stale
+        count - scoped to `user_id` only, never a table-wide lock. Must be
+        called, and its effects committed, in the same transaction as the
+        new family's own row for the lock to be meaningful.
+        """
+        settings = get_settings()
+        await self._repository.lock_live_refresh_tokens_for_user(user_id=user_id)
+        family_created_at = await self._repository.get_family_created_at_map_for_user(
+            user_id=user_id
+        )
+        if len(family_created_at) >= settings.max_live_sessions_per_user:
+            oldest_family_id = min(family_created_at, key=lambda fid: family_created_at[fid])
+            await self._repository.revoke_refresh_token_family(family_id=oldest_family_id)
+            await self._repository.create_auth_audit_log_entry(
+                event="session_evicted",
+                reason=None,
+                scope=None,
+                actor_id=user_id,
+                ip=ip,
+                user_agent=user_agent,
+                request_id=request_id,
+                severity=None,
+                target_family=oldest_family_id,
+            )
+
     async def _encode_access_token_for_user(
         self, user: User, *, jti: uuid.UUID
     ) -> tuple[str, datetime | None]:
@@ -578,6 +638,10 @@ class UserService:
         )
         await self._repository.create_session(
             user_id=user.id, jti=jti, expires_at=session_expires_at
+        )
+
+        await self._evict_oldest_family_if_at_cap(
+            user.id, ip=ip, user_agent=user_agent, request_id=request_id
         )
 
         raw_refresh_token, token_hash = generate_refresh_token()
@@ -774,6 +838,93 @@ class UserService:
         register_user's token-issuance composition.
         """
         await self._repository.revoke_sessions_except(user_id=user_id, except_jti=except_jti)
+        await self._repository.commit()
+
+    async def _resolve_current_family_id(
+        self, *, user_id: uuid.UUID, refresh_cookie: str | None
+    ) -> uuid.UUID | None:
+        """US-2.6 spec-review resolution: the caller's "current" family is
+        identified by hashing the optional `refresh_token` cookie and
+        matching it to a live token - the same lookup `logout` already
+        performs (US-2.2). Returns `None` (never raises) when the cookie
+        is absent, or matches no token, or matches a *different* user's
+        token (same IDOR-safe treatment `logout` applies) - callers then
+        treat "no current family known" as the safe default rather than
+        erroring.
+        """
+        if refresh_cookie is None:
+            return None
+        token_hash = hash_refresh_token(refresh_cookie)
+        existing = await self._repository.get_refresh_token_by_hash(token_hash)
+        if existing is None or existing.user_id != user_id:
+            return None
+        return existing.family_id
+
+    async def list_sessions(
+        self, *, user_id: uuid.UUID, refresh_cookie: str | None
+    ) -> SessionListResponse:
+        """FR-1: one entry per live refresh-token family."""
+        current_family_id = await self._resolve_current_family_id(
+            user_id=user_id, refresh_cookie=refresh_cookie
+        )
+        live_rows = await self._repository.list_live_families_for_user(user_id=user_id)
+        family_created_at = await self._repository.get_family_created_at_map_for_user(
+            user_id=user_id
+        )
+        entries = [
+            SessionEntry(
+                family_id=row.family_id,
+                created_at=family_created_at[row.family_id],
+                last_used_at=row.last_used_at,
+                location=_to_session_location(resolve_location(row.ip)) if row.ip else None,
+                device_label=resolve_device_label(row.user_agent),
+                is_current=row.family_id == current_family_id,
+            )
+            for row in live_rows
+        ]
+        return SessionListResponse(sessions=entries)
+
+    async def revoke_session(
+        self,
+        *,
+        user_id: uuid.UUID,
+        family_id: uuid.UUID,
+        refresh_cookie: str | None,
+        ip: str,
+        user_agent: str | None,
+        request_id: str,
+    ) -> None:
+        """FR-2/FR-3/FR-4/FR-6."""
+        current_family_id = await self._resolve_current_family_id(
+            user_id=user_id, refresh_cookie=refresh_cookie
+        )
+        if current_family_id is not None and current_family_id == family_id:
+            raise CurrentSessionError
+
+        owned = await self._repository.get_any_refresh_token_for_family(
+            family_id=family_id, user_id=user_id
+        )
+        if owned is None:
+            raise SessionNotFoundError
+
+        # FR-2 writes the audit entry only when a live token was actually
+        # revoked; FR-4's already-revoked/expired path is a silent no-op
+        # (per US-010-api-design.md) - `revoke_refresh_token_family` itself
+        # is unconditionally idempotent either way.
+        was_live = owned.revoked_at is None and owned.expires_at > datetime.now(UTC)
+        await self._repository.revoke_refresh_token_family(family_id=family_id)
+        if was_live:
+            await self._repository.create_auth_audit_log_entry(
+                event="session_revoked",
+                reason=None,
+                scope=None,
+                actor_id=user_id,
+                ip=ip,
+                user_agent=user_agent,
+                request_id=request_id,
+                severity=None,
+                target_family=family_id,
+            )
         await self._repository.commit()
 
     async def rotate_refresh_token(
@@ -1216,6 +1367,10 @@ class UserService:
         )
         await self._repository.create_session(
             user_id=user.id, jti=jti, expires_at=session_expires_at
+        )
+
+        await self._evict_oldest_family_if_at_cap(
+            user.id, ip=ip, user_agent=user_agent, request_id=request_id
         )
 
         raw_refresh_token, token_hash = generate_refresh_token()

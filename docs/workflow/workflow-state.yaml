@@ -1,8 +1,59 @@
-story: US-2.5
+story: US-2.6
 
 current_stage: PR
 
 status: DONE
+# PR done 2026-09-02: docs/pr/US-010-pr-description.md drafted by
+# pr-preparer. All 4 gates confirmed Pass from their actual reports
+# (gate-enforcer 7/7 + 409/409 tests/97.42% coverage; implementation-
+# verifier Pass; security-reviewer Pass; reconciliation-reviewer Pass).
+# .env.example alignment confirmed (2 new settings, 1:1 with config.py).
+# Commit hygiene confirmed via git status - every changed/new file traces
+# to this story's scope. User explicitly authorized commit+push+PR.
+# Committed as 2a749fd, pushed to origin, opened as GitHub PR #11
+# (https://github.com/AndriiDobrovolskii/Customer_Portal/pull/11).
+# Started 2026-09-02. US-2.5 reached PR #10, confirmed MERGED to main.
+# US-2.6 (Active Sessions) has no dependency on US-2.5's MFA work - only
+# on US-2.3's refresh-token family_id (on main) and US-2.2's revocation
+# path (on main), both already merged - no blocking platform dependency.
+# us-clarifier ran 2026-09-02: initially Not Ready, 4 Open Decisions
+# logged (docs/decisions/US-2.6-open-decisions.md) - own-current-session
+# revocation behavior, 20-family cap eviction mechanics, device/browser
+# label derivation, geo-IP location mechanism. 3 of the pre-existing
+# US-010 spec's 6 Open Questions resolved outright by reading US-2.3's
+# actual shipped implementation (metadata capture + last_used_at write
+# strategy already built; malformed family_id resolved by precedent).
+# All 4 ODs resolved by the user 2026-09-02, recommended option accepted
+# throughout: OD-1 409 on self-revoke; OD-2 evict oldest + audit
+# (event=session_evicted), no email; OD-3 `user-agents` library,
+# "{browser} on {OS}" format, "Unknown device" fallback; OD-4 local
+# MaxMind GeoLite2-City DB, no live network call. See
+# docs/evidence/US-2.6-clarification-report.md. Advances to
+# SPECIFICATION.
+# SPECIFICATION done 2026-09-02: docs/specifications/US-010-active-
+# session-management-spec.md revised in place (pre-existing 2026-08-22
+# draft). Incorporates OD-1-OD-4 plus 2 new FRs (FR-6 self-revoke 409,
+# FR-7 cap eviction) with no source AC. 5/5 source ACs traced.
+# SPEC_REVIEW done 2026-09-02: docs/reviews/specifications/US-010-spec-
+# review.md - Pass with Issues (2 Medium findings found+fixed same-day).
+# 5/5 ACs Covered, no contradictions. Current-session identification
+# mechanism (undefined for FR-1/FR-6) and concurrent-login cap-eviction
+# race (same class of bug already hit in US-3.2) both resolved by user:
+# read refresh_token cookie; row-lock the count-and-evict check. 4
+# disclosed Low scope-creep findings noted, non-blocking.
+# DESIGN done 2026-09-02: docs/designs/api/US-010-{openapi.yaml,api-
+# design.md} (2 endpoints, 1 new error slug current-session/409).
+# docs/designs/database/US-010-{db-design,entity-model}.md (no new
+# refresh_tokens columns - all already exist from US-2.1/2.2/2.3; 1 new
+# composite index for per-family aggregate queries; 1 new column
+# auth_audit_log.target_family since reason/scope were wrong size/
+# semantics; rejected a first-class refresh_token_families table as
+# scope beyond the story).
+
+# --- prior story: US-2.5 (DONE, reached PR, merged) ---
+# story: US-2.5
+# current_stage: PR
+# status: DONE
 # PR done 2026-09-02: docs/pr/US-009-pr-description.md drafted by
 # pr-preparer. All 4 gates confirmed Pass from their actual reports
 # (gate-enforcer 7/7 + 367/367 tests/97.35% coverage; implementation-
