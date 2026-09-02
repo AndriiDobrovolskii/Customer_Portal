@@ -127,6 +127,49 @@ class TokenStaleError(ProblemError):
     detail = "Your permissions changed. Refresh the session to continue."
 
 
+class MfaInvalidCodeError(ProblemError):
+    """FR-4: incorrect code, replayed code, or an invalid/expired/already-
+    consumed mfa_token — all indistinguishable (US-009 MF-AC4). Also
+    reused by FR-2's activate (wrong code, or no PENDING enrolment at
+    all — an Open Question the API design left as one generic shape,
+    see docs/designs/api/US-009-api-design.md) and by FR-8's disable
+    (wrong TOTP code).
+    """
+
+    type_slug = "mfa-invalid-code"
+    title = "Invalid MFA Code"
+    status = 401
+    detail = "The code you entered is incorrect or has expired."
+
+
+class MfaRequiredForRoleError(ProblemError):
+    """FR-6: caller holds admin/auditor/support_agent — MFA cannot be
+    disabled on a privileged account. Matches the source story's Error
+    Envelope example verbatim.
+    """
+
+    type_slug = "mfa-required-for-role"
+    title = "MFA Required For This Role"
+    status = 409
+    detail = "Accounts with administrative access must keep multi-factor authentication enabled."
+
+
+class MfaEnrollmentRequiredError(ProblemError):
+    """FR-6/FR-7: the caller's access token is enrolment-scoped (a
+    privileged-role grant without MFA past its grace period, or a prior
+    recovery-code use) and the endpoint being called is not one of the
+    two enrolment endpoints that accept such a token. This is the
+    default-deny check at the shared authenticated-request choke point
+    (get_authenticated_user) — see docs/plans/US-009-implementation-plan.md
+    Architectural Change #2.
+    """
+
+    type_slug = "mfa-enrollment-required"
+    title = "MFA Enrolment Required"
+    status = 403
+    detail = "Complete multi-factor authentication enrolment to continue."
+
+
 class UnauthenticatedError(ProblemError):
     type_slug = "unauthenticated"
     title = "Unauthenticated"

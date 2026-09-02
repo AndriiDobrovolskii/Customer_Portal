@@ -1,15 +1,22 @@
-active_story: US-3.2
+active_story: US-2.5
 
-# US-3.2 (Manage Roles, Epic 3) is now active. US-2.5 (MFA/TOTP)'s
-# us-clarifier run on 2026-09-01 found a BLOCKING dependency (OD-1 in
-# docs/decisions/US-2.5-open-decisions.md): US-2.5 needs a role/
-# permission-scope system that doesn't exist in the codebase yet, and
-# this project's own docs/stories/README.md documents US-3.2 as the
-# prerequisite ("US-3.2 first - everything else checks its scopes").
-# User chose 2026-09-01 to pause US-2.5 and build US-3.2 first. Pipeline
-# not yet started for US-3.2 - us-clarifier has not run. Once US-3.2
-# reaches PR/merge, resume US-2.5 and re-run its clarification against
-# the then-current codebase before trusting MF-AC6's assumptions.
+# US-2.5 (MFA/TOTP, Epic 2) resumed 2026-09-01: US-3.2 (Manage Roles)
+# reached PR (GitHub PR #9, open, mergeable_state clean, not yet merged)
+# with every pipeline stage Pass (see docs/catalog/US-012-pipeline-status.md
+# and workflow-state.yaml history). Per the resume condition recorded
+# below, US-2.5's CLARIFICATION is being re-run against the
+# now-current codebase (checked out on feat/us-3.2-manage-roles, which
+# has the role/scope system US-3.2 actually shipped) before trusting
+# MF-AC6's assumptions, since PR #9 is not yet merged to main.
+
+# --- prior story: US-3.2 (DONE, reached PR) ---
+# US-3.2 (Manage Roles, Epic 3) reached PR (see docs/pr/US-012-pr-description.md,
+# every stage Pass). US-2.5 (MFA/TOTP)'s us-clarifier run on 2026-09-01
+# found a BLOCKING dependency (OD-1 in docs/decisions/US-2.5-open-decisions.md):
+# US-2.5 needs a role/permission-scope system that didn't exist in the
+# codebase yet, and this project's own docs/stories/README.md documents
+# US-3.2 as the prerequisite ("US-3.2 first - everything else checks its
+# scopes"). User chose 2026-09-01 to pause US-2.5 and build US-3.2 first.
 
 # --- prior story history retained for context ---
 # US-2.5 (MFA/TOTP, Epic 2) - CLARIFICATION ran 2026-09-01, verdict Not

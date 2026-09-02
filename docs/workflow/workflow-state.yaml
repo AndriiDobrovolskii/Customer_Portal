@@ -1,8 +1,177 @@
-story: US-3.2
+story: US-2.5
 
 current_stage: PR
 
 status: DONE
+# PR done 2026-09-02: docs/pr/US-009-pr-description.md drafted by
+# pr-preparer. All 4 gates confirmed Pass from their actual reports
+# (gate-enforcer 7/7 + 367/367 tests/97.35% coverage; implementation-
+# verifier Pass; security-reviewer Pass; reconciliation-reviewer Pass).
+# .env.example alignment confirmed (4 new settings, 1:1 with config.py).
+# Commit hygiene confirmed via git status - every changed/new file traces
+# to this story's scope, no drive-by refactor. User explicitly authorized
+# push+PR ("gp"). One detect-secrets false positive fixed first (a
+# pre-existing "WrongPassword1!" literal shifted line numbers due to this
+# session's own edits, re-flagged; pragma: allowlist secret added).
+# Committed as ae8d2a2, pushed to origin, opened as GitHub PR #10.
+# RECONCILIATION done 2026-09-02: docs/reconciliation/US-009-reconciliation-report.md
+# - Pass (7 gaps found+fixed same-day). All 7 source ACs + FR-8 have full,
+# verified matrix coverage. Initial pass found 7 test functions the
+# pre-implementation traceability matrix names did not exist under any
+# name (a further ~dozen rows were renamed-but-equivalent, individually
+# verified, not counted as gaps). None corresponded to a live bug - the
+# two allow-list gaps were independently re-checked against router.py and
+# found correctly wired before their tests were written. Closed same-day,
+# 6 new tests (1 integration/roles, 3 integration/users, 2 unit/users):
+# (1) most consequential - test_replace_user_roles_sets_granted_at_to_
+# recent_value now proves replace_for_user's granted_at write against a
+# real DB (FR-6's grace-period-clock data source); (2) test_enroll_mfa_
+# accepts_enrollment_scoped_token; (3) test_mfa_disable_rejects_
+# enrollment_scoped_token (also closes gap 7's partial-coverage concern -
+# a second concrete allow-list data point); (4) test_verify_mfa_wrong_
+# recovery_code_counts_toward_totp_lockout (OD-10); (5) test_rotate_
+# refresh_token_both_scoping_triggers_true_issues_single_scoped_token;
+# (6) test_verify_mfa_replayed_code_rejected_against_real_valkey (replay
+# protection proven against real Valkey, not just a fake). No AC-level
+# spec drift found; the disable_mfa exception-type change from
+# SECURITY_REVIEW was checked against the OpenAPI design and confirmed to
+# match its already-generic "cross-cutting shape, reused" contract, not a
+# divergence. Gate re-confirmed green: 7/7 pre-commit, mypy clean, 367/367
+# tests (was 361), 97.35% coverage. Advances to PR.
+# SECURITY_REVIEW done 2026-09-02: docs/security/US-009-security-review.md -
+# Pass (1 finding found+fixed same-day). 5/6 AGENTS.md SS7 rows clean on
+# first read; rule 2 (no reversible encryption for credentials) required
+# explicit reasoning - mfa_secret_encrypted's AES-GCM envelope encryption
+# is correct, not a violation, because a TOTP secret must be recomputed-
+# from to verify a code (no one-way hash is possible), unlike recovery
+# codes (Argon2id-hashed, compare-only, correctly matching rule 1). Rule 6
+# (uniform auth-failure response) surfaced a genuine defect: disable_mfa
+# checked password then code sequentially, raising a different exception
+# per factor (InvalidCredentialsError vs MfaInvalidCodeError) - since the
+# code check only ran after the password check passed, the distinct
+# mfa-invalid-code response already confirmed the password was correct, an
+# oracle a stolen bearer session could use to brute-force each factor
+# independently (this endpoint's whole purpose is joint two-factor
+# defense against exactly that threat model). Fixed same-day:
+# app/modules/users/service.py's disable_mfa now evaluates both factors
+# unconditionally (no short-circuit, no timing signal) and raises one
+# exception type on either failure; regression-guarded by a new
+# indistinguishability test. Full gate re-run green: 7/7 pre-commit hooks,
+# mypy strict clean, 361/361 tests (was 360 - added 1), 97.35% coverage.
+# 3 Low advisory findings noted, none forcing a Fail.
+# VERIFICATION done 2026-09-02: docs/verification/US-009-verification-report.md
+# - Pass. 1 real gap found+fixed same-day: 13 missing AGENTS.md SS5
+# security-case tests across enroll/activate/disable (activate/disable
+# had none at all) plus verify's scheme-specific equivalents. All added,
+# full suite now 360/360, gate re-confirmed green. ORM containment,
+# cross-module discipline, cache TTLs, response_model/extra=forbid all
+# confirmed Pass; eager-loading N/A (no relationship introduced).
+# IMPLEMENTATION done 2026-09-01 (T1-T9 complete). gate-enforcer PASS:
+# 7/7 pre-commit hooks (ruff lint+format, mypy strict, import-linter 6/6,
+# unit tests, no-mock-in-integration, detect-secrets), 347/347 tests
+# (211 unit + 136 integration), 97.35% coverage (floor 85%; service.py
+# 98%, router.py 100%). Migration cef55228a927 upgrade/downgrade/upgrade
+# proven (T3). ORM containment, cross-module discipline, cache TTLs,
+# banned-idiom grep, response_model/status_code on every route all
+# confirmed clean. Added `cryptography` as a new pyproject.toml
+# dependency (AES-GCM for OD-2's secret-at-rest encryption).
+# IMPLEMENTATION in progress 2026-09-01, T1-T6 done per
+# docs/plans/US-009-task-breakdown.md:
+# T1 schemas (users/schemas.py: 8 new MFA schemas, LoginResponse/
+#   RefreshResponse gain mfa_enrollment_deadline).
+# T2 users data layer (models.py: 4 new User columns + MfaRecoveryCode;
+#   repository.py: 8 new methods; cache.py: MfaTokenCache/MfaReplayCache;
+#   cache_keys.py: 3 new keys - moved here from planned T5 per US-008's
+#   actual precedent, since cache.py is their first consumer).
+# T2b roles data layer (models.py: UserRole.granted_at; repository.py:
+#   list_role_grants_for_user, replace_for_user explicit granted_at write).
+# T3 migration cef55228a927 - upgrade/downgrade/upgrade proven against
+#   real Postgres, schema confirmed via psql.
+# T4 roles service (get_role_grants_for_user + RoleGrant NamedTuple).
+# T5 users service + core primitives - new app/core/crypto.py (AES-GCM,
+#   added `cryptography` as a new pyproject.toml dependency via uv),
+#   TOTP primitives added to security.py, 4 new config settings, 4 new
+#   MFA service methods (enroll/activate/verify/disable), default-deny
+#   enrolment-scoping check added to get_authenticated_user, login/
+#   refresh both re-evaluate scoping via new _resolve_enrollment_scoping/
+#   _encode_access_token_for_user helpers. 3 new exceptions. New
+#   EmailSender.send_mfa_recovery_used_notice.
+# T6 users router + dependencies - 4 new routes, login route's response
+#   became LoginResponse | MfaRequiredResponse with conditional cookie,
+#   new CurrentUserAllowEnrollmentScopedDep mirroring
+#   get_current_user_allow_revoked. All routes confirmed live via
+#   app.openapi().
+# Remaining: T7 (unit tests), T8 (integration tests), T9 (gate-enforcer).
+# TESTS done 2026-09-01: docs/tests/US-009-traceability-matrix.md (matrix
+# only, test code deferred to IMPLEMENTATION T7/T8 per T1-T9 breakdown).
+# All 7 ACs + FR-8's no-AC disable path covered at unit+integration;
+# dedicated coverage for the default-deny enrolment-scoping mechanism
+# (plan's flagged highest-risk line) in both directions plus 2 full-flow
+# integration tests (one per trigger).
+# PLANNING done 2026-09-01: docs/impact-analysis/US-009-impact-analysis.md
+# (extends users module, no new module; 2 open architectural tensions
+# flagged - enrolment-scoped-token mechanism, mfa_token mechanism).
+# docs/plans/US-009-implementation-plan.md resolves both tensions (JWT
+# claim + default-deny at get_authenticated_user mirroring
+# get_current_user_allow_revoked; Valkey-backed opaque mfa_token via
+# GETDEL). docs/plans/US-009-task-breakdown.md (T1-T9, roles-module data/
+# service work split into T2b/T4 per US-012's app/core/* placement
+# precedent). docs/reviews/plans/US-009-plan-review.md - Pass with
+# Issues (1 Low traceability nit, 1 Medium concurrency-risk gap), both
+# resolved same-day and folded into the plan.
+# DESIGN done 2026-09-01: docs/designs/api/US-009-{openapi.yaml,api-design.md}
+# (5 endpoints: enroll/activate/verify/disable new, login/refresh extended
+# per FR-6; 4 Open Questions deferred to PLANNING - activate's error
+# distinction, disable's recovery-code acceptance, disable's check-order,
+# grace-period field naming). docs/designs/database/US-009-{db-design,
+# entity-model}.md (4 new users columns, new mfa_recovery_codes table,
+# 1 new column - granted_at - on the already-merged US-3.2 user_roles
+# table; enrolment state derived, not a new enum; FR-8's hard-delete
+# deliberately diverges from PasswordResetToken's keep-but-mark pattern).
+# SPEC_REVIEW done 2026-09-01: docs/reviews/specifications/US-009-spec-review.md
+# - Pass with Issues. 7/7 ACs Covered, no contradictions. 1 High finding
+# (no data source for the 14-day grace-period clock - user_roles had no
+# timestamp column) + 2 Medium ambiguities (recovery-trigger grace scope,
+# refresh-while-scoped behavior), all resolved by the user 2026-09-01
+# (recommended options accepted throughout: add user_roles.granted_at
+# column; no grace period for the recovery-code trigger; refresh
+# re-evaluates and re-scopes). Folded into the spec (FR-2/FR-6) plus a
+# new Open Decision Resolutions bullet. 3 Low scope-creep findings
+# (mfa_reenrollment_required flag, perm_epoch/token-stale reuse, FR-8's
+# no-AC disable-success path) noted as disclosed/user-approved, non-
+# blocking.
+# SPECIFICATION done 2026-09-01: docs/specifications/US-009-mfa-totp-spec.md
+# revised in place (pre-existing 2026-08-22 draft) to incorporate all 11
+# resolved Open Decisions as an "Open Decision Resolutions" section, plus
+# 2 new FRs not derivable from any single AC (FR-6 folds in the
+# enrolment-scoped-token mechanism per OD-4/OD-7, now with two triggers
+# per OD-5; FR-8 is wholly new, covering the previously-uncovered
+# DELETE /v1/auth/mfa success path per OD-6/OD-8). All 7 source ACs
+# traced (MF-AC1-7 -> FR-1..FR-7); FR-8 has no AC (Open-Decision-derived,
+# per template rules). Open Questions section: none remaining.
+# CLARIFICATION done 2026-09-01 (re-run): OD-1 (blocking) resolved - US-3.2
+# reached PR #9 (open/unmerged, every stage Pass), role/scope system
+# confirmed live matching BR-010/011/013. A pre-existing draft spec
+# (US-009) and review already existed (2026-08-22) - did not resolve
+# OD-2/3/4/5/6/7 by precedent (unlike US-008 for US-2.4) but corroborated
+# them, and surfaced OD-8 (disable-success path, "[High]" in the review),
+# OD-9 (recovery exhaustion), OD-10 (recovery-vs-lockout counter), OD-11
+# (re-enroll-while-pending). New OD-7: MF-AC6's "US-3.2 MR-AC1" citation
+# is fictional; resolved with a perm_epoch exit condition, coupled to
+# OD-4. All 11 ODs resolved by the user 2026-09-01 (see
+# docs/decisions/US-2.5-open-decisions.md Resolutions Summary) -
+# recommended options accepted throughout except OD-5, where the user
+# chose the non-default "degraded re-enrolment-required state"
+# (mfa_reenrollment_required flag), generalizing OD-7's enrolment-scoped-
+# token mechanism into a two-trigger primitive. Process decision: merge
+# US-3.2 PR #9 first, then branch feat/us-2.5-mfa-totp from main (not
+# stacked) - avoids the US-2.4 PR #7 auto-close trap. Merging PR #9 not
+# yet done - awaiting explicit user instruction.
+
+# --- prior story: US-3.2 (DONE, reached PR) ---
+# story: US-3.2
+# current_stage: PR
+# status: DONE
 # Every stage Pass through PR draft (see docs/pr/US-012-pr-description.md).
 # gate-enforcer PASS: 7/7 hooks, mypy strict clean (94 files), lint-imports
 # 6/6, 281/281 tests, 97.27% coverage. VERIFICATION: Pass, 1 SS5 gap

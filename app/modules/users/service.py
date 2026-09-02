@@ -3,6 +3,7 @@ import logging
 import secrets
 import string
 import uuid
+from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from typing import Protocol
@@ -12,23 +13,33 @@ from pydantic import SecretStr
 
 from app.core.breached_passwords import is_breached_password
 from app.core.config import get_settings
+from app.core.crypto import decrypt_mfa_secret, encrypt_mfa_secret
 from app.core.email import EmailSender
 from app.core.exceptions import FieldError
 from app.core.security import (
     InvalidTokenError,
+    build_otpauth_uri,
     decode_access_token,
     encode_access_token,
+    encode_totp_secret,
+    generate_mfa_token,
     generate_refresh_token,
+    generate_totp_secret,
+    hash_mfa_token,
     hash_password,
     hash_refresh_token,
     verify_password,
     verify_password_dummy,
+    verify_totp_code,
 )
 from app.modules.users.exceptions import (
     AccountDeactivatedError,
     DuplicateEmailError,
     EmailNotVerifiedError,
     InvalidCredentialsError,
+    MfaEnrollmentRequiredError,
+    MfaInvalidCodeError,
+    MfaRequiredForRoleError,
     PasswordPolicyError,
     PasswordResetTokenExpiredError,
     PasswordResetTokenInvalidError,
@@ -37,10 +48,24 @@ from app.modules.users.exceptions import (
     TokenStaleError,
     TooManyAttemptsError,
 )
-from app.modules.users.models import PasswordResetToken, RefreshToken, User, UserSession
+from app.modules.users.models import (
+    MfaRecoveryCode,
+    PasswordResetToken,
+    RefreshToken,
+    User,
+    UserSession,
+)
 from app.modules.users.schemas import (
     LoginRequest,
     LoginResponse,
+    MfaActivateRequest,
+    MfaActivateResponse,
+    MfaDisableRequest,
+    MfaEnrollRequest,
+    MfaEnrollResponse,
+    MfaRequiredResponse,
+    MfaVerifyRequest,
+    MfaVerifyResponse,
     PasswordResetConfirmRequest,
     PasswordResetRequestRequest,
     PasswordResetRequestResponse,
@@ -57,6 +82,13 @@ _REFRESH_RATE_LIMIT_WINDOW_SECONDS = 3600
 _PASSWORD_RESET_TOKEN_BYTES = 32
 _PASSWORD_RESET_HOURLY_WINDOW_SECONDS = 3600
 _MIN_RESET_PASSWORD_LENGTH = 12
+# US-009 FR-6/FR-8: the fixed role catalogue names (US-3.2) MFA is
+# mandatory for. Duplicated here rather than imported from roles.models
+# (a models-layer import a service must never make cross-module, per
+# AGENTS.md §3) - these three names are also the spec's own literal text.
+_PRIVILEGED_ROLE_NAMES = {"admin", "auditor", "support_agent"}
+_RECOVERY_CODE_COUNT = 10
+_RECOVERY_CODE_BYTES = 5
 
 logger = logging.getLogger(__name__)
 
@@ -81,6 +113,7 @@ class AuthenticatedUser:
     user_id: uuid.UUID
     jti: uuid.UUID
     scopes: list[str]
+    mfa_enrollment_required: bool = False
 
 
 class UserRepositoryProtocol(Protocol):
@@ -151,6 +184,28 @@ class UserRepositoryProtocol(Protocol):
         self, *, token_hash: str
     ) -> PasswordResetToken | None: ...
 
+    async def update_mfa_pending_secret(
+        self, *, user_id: uuid.UUID, secret_encrypted: bytes
+    ) -> None: ...
+
+    async def activate_mfa(self, *, user_id: uuid.UUID) -> None: ...
+
+    async def set_mfa_reenrollment_required(self, *, user_id: uuid.UUID) -> None: ...
+
+    async def disable_mfa(self, *, user_id: uuid.UUID) -> None: ...
+
+    async def create_recovery_codes(
+        self, *, user_id: uuid.UUID, code_hashes: list[str]
+    ) -> None: ...
+
+    async def list_unconsumed_recovery_codes(
+        self, *, user_id: uuid.UUID
+    ) -> list[MfaRecoveryCode]: ...
+
+    async def consume_recovery_code(self, *, code_id: uuid.UUID) -> MfaRecoveryCode | None: ...
+
+    async def delete_recovery_codes_for_user(self, *, user_id: uuid.UUID) -> None: ...
+
     async def commit(self) -> None: ...
 
 
@@ -167,6 +222,8 @@ class RevocationCacheProtocol(Protocol):
 class PermissionEpochCacheProtocol(Protocol):
     async def get_perm_epoch(self, user_id: uuid.UUID) -> datetime | None: ...
 
+    async def set_perm_epoch(self, user_id: uuid.UUID, *, ttl_seconds: int) -> None: ...
+
 
 class RoleServiceProtocol(Protocol):
     """Cross-module collaborator (US-3.2/spec US-012): resolves the
@@ -176,6 +233,10 @@ class RoleServiceProtocol(Protocol):
     """
 
     async def resolve_scopes_for_user(self, user_id: uuid.UUID) -> list[str]: ...
+
+    async def get_role_grants_for_user(
+        self, user_id: uuid.UUID
+    ) -> Sequence[tuple[str, datetime]]: ...
 
 
 class LoginThrottleCacheProtocol(Protocol):
@@ -212,6 +273,22 @@ class PasswordResetRateLimitCacheProtocol(Protocol):
     async def record_ip_attempt(self, ip: str, *, window_seconds: int) -> int: ...
 
     async def get_ip_retry_after_seconds(self, ip: str) -> int: ...
+
+
+class MfaTokenCacheProtocol(Protocol):
+    async def issue(self, token_hash: str, *, user_id: uuid.UUID, ttl_seconds: int) -> None: ...
+
+    async def get_user_id(self, token_hash: str) -> uuid.UUID | None: ...
+
+    async def consume(self, token_hash: str) -> uuid.UUID | None: ...
+
+    async def record_failed_attempt(self, token_hash: str, *, window_seconds: int) -> int: ...
+
+    async def invalidate(self, token_hash: str) -> None: ...
+
+
+class MfaReplayCacheProtocol(Protocol):
+    async def mark_step_used(self, user_id: uuid.UUID, *, step: int, ttl_seconds: int) -> bool: ...
 
 
 class AccountServiceProtocol(Protocol):
@@ -288,6 +365,8 @@ class UserService:
         password_reset_rate_limit_cache: PasswordResetRateLimitCacheProtocol,
         permission_epoch_cache: PermissionEpochCacheProtocol,
         role_service: RoleServiceProtocol,
+        mfa_token_cache: MfaTokenCacheProtocol,
+        mfa_replay_cache: MfaReplayCacheProtocol,
     ) -> None:
         self._repository = repository
         self._issuer = issuer
@@ -299,6 +378,8 @@ class UserService:
         self._password_reset_rate_limit_cache = password_reset_rate_limit_cache
         self._permission_epoch_cache = permission_epoch_cache
         self._role_service = role_service
+        self._mfa_token_cache = mfa_token_cache
+        self._mfa_replay_cache = mfa_replay_cache
 
     async def register_user(self, payload: UserCreate) -> UserRead:
         errors: list[FieldError] = []
@@ -331,14 +412,60 @@ class UserService:
 
         return UserRead.model_validate(user)
 
+    async def _resolve_enrollment_scoping(self, user: User) -> tuple[bool, datetime | None]:
+        """US-009 FR-6/FR-7: whether the next-issued access token should be
+        enrolment-scoped, and (only for the FR-6 grace-period case) the
+        deadline to surface in the login response (OD-4).
+
+        Two independent triggers, checked in this order:
+        1. `mfa_reenrollment_required` (FR-7/OD-5, recovery-code use) -
+           scopes immediately, no grace period, regardless of `mfa_enabled`
+           (which OD-5 deliberately leaves `true`).
+        2. A privileged role (`admin`/`auditor`/`support_agent`) held while
+           `mfa_enabled` is still `false` (FR-6) - scoped once the 14-day
+           grace period (from the earliest such role's `granted_at`) has
+           passed; within it, returns the deadline instead.
+        """
+        if user.mfa_reenrollment_required:
+            return True, None
+
+        if user.mfa_enabled:
+            return False, None
+
+        grants = await self._role_service.get_role_grants_for_user(user.id)
+        privileged_grants = [g for g in grants if g[0] in _PRIVILEGED_ROLE_NAMES]
+        if not privileged_grants:
+            return False, None
+
+        settings = get_settings()
+        grace_period = timedelta(days=settings.mfa_grace_period_days)
+        deadlines = [granted_at + grace_period for _, granted_at in privileged_grants]
+        earliest_deadline = min(deadlines)
+        if datetime.now(UTC) >= earliest_deadline:
+            return True, None
+        return False, earliest_deadline
+
+    async def _encode_access_token_for_user(
+        self, user: User, *, jti: uuid.UUID
+    ) -> tuple[str, datetime | None]:
+        scopes = await self._role_service.resolve_scopes_for_user(user.id)
+        scoped, deadline = await self._resolve_enrollment_scoping(user)
+        access_token = encode_access_token(
+            user_id=user.id, jti=jti, scopes=scopes, mfa_enrollment_required=scoped
+        )
+        return access_token, deadline
+
     async def authenticate_user(
         self, payload: LoginRequest, *, ip: str, user_agent: str | None, request_id: str
-    ) -> tuple[LoginResponse, str]:
+    ) -> tuple[LoginResponse | MfaRequiredResponse, str | None]:
         """Returns (response, raw_refresh_token) — the raw refresh token is
         never part of the LoginResponse body (FR-1: it's a Set-Cookie value,
         not a JSON field), so the router receives it separately to build the
         cookie, mirroring profile/service.py's own tuple-return pattern for
-        a value the router needs beyond the response schema.
+        a value the router needs beyond the response schema. When
+        `mfa_enabled` is true (US-009 MF-AC3), returns an MfaRequiredResponse
+        and `None` instead — no session/refresh token is issued at this
+        point, so there is nothing for the router to set a cookie with.
         """
         settings = get_settings()
 
@@ -435,6 +562,16 @@ class UserService:
             await self._repository.commit()
             raise EmailNotVerifiedError
 
+        if user.mfa_enabled:
+            # MF-AC3: no access/refresh token issued at this point. The
+            # mfa_token is single-use (Valkey GETDEL on consumption) and
+            # scoped only to MFA verification.
+            raw_mfa_token, token_hash = generate_mfa_token()
+            await self._mfa_token_cache.issue(
+                token_hash, user_id=user.id, ttl_seconds=settings.mfa_token_ttl_seconds
+            )
+            return MfaRequiredResponse(mfa_token=raw_mfa_token), None
+
         jti = uuid.uuid4()
         session_expires_at = datetime.now(UTC) + timedelta(
             seconds=settings.access_token_ttl_seconds
@@ -473,15 +610,20 @@ class UserService:
         # per-IP counter is deliberately left alone.
         await self._throttle_cache.reset_account_failures(user.id)
 
-        scopes = await self._role_service.resolve_scopes_for_user(user.id)
+        access_token, deadline = await self._encode_access_token_for_user(user, jti=jti)
         response = LoginResponse(
-            access_token=encode_access_token(user_id=user.id, jti=jti, scopes=scopes),
+            access_token=access_token,
             expires_in=settings.access_token_ttl_seconds,
+            mfa_enrollment_deadline=deadline,
         )
         return response, raw_refresh_token
 
     async def get_authenticated_user(
-        self, token: str, *, allow_revoked: bool = False
+        self,
+        token: str,
+        *,
+        allow_revoked: bool = False,
+        allow_enrollment_scoped: bool = False,
     ) -> AuthenticatedUser | None:
         """`allow_revoked` (resolved OD-2, US-2.2) lets `POST /v1/auth/logout`
         alone resolve a caller whose session is already revoked, so a repeat
@@ -490,6 +632,14 @@ class UserService:
         its default `False` and gets today's strict behavior unchanged. A
         jti with no session row at all is never resolved, regardless of this
         flag: "revoked" and "never existed" are different failure modes.
+
+        `allow_enrollment_scoped` (US-009 FR-6/FR-7) is the single
+        default-deny choke point for the enrolment-scoped-token mechanism:
+        every route rejects such a token with `403 mfa-enrollment-required`
+        by default, and only `POST /v1/auth/mfa/enroll`/`activate` pass
+        `True` (via `get_current_user_allow_enrollment_scoped`, mirroring
+        `allow_revoked`'s exact same narrow-opt-in shape) — see
+        docs/plans/US-009-implementation-plan.md Architectural Change #2.
         """
         try:
             claims = decode_access_token(token)
@@ -531,7 +681,15 @@ class UserService:
             # knows to call /auth/refresh rather than re-authenticate.
             raise TokenStaleError
 
-        return AuthenticatedUser(user_id=claims.user_id, jti=claims.jti, scopes=claims.scopes)
+        if claims.mfa_enrollment_required and not allow_enrollment_scoped:
+            raise MfaEnrollmentRequiredError
+
+        return AuthenticatedUser(
+            user_id=claims.user_id,
+            jti=claims.jti,
+            scopes=claims.scopes,
+            mfa_enrollment_required=claims.mfa_enrollment_required,
+        )
 
     async def logout(
         self,
@@ -721,10 +879,16 @@ class UserService:
         )
         await self._repository.commit()
 
-        scopes = await self._role_service.resolve_scopes_for_user(consumed.user_id)
+        # Re-evaluates the enrolment-scoping condition on every refresh, not
+        # only at login (spec-review resolution, US-009 FR-6): an
+        # enrolment-scoped account stays scoped across a refresh, and an
+        # account that has since completed enrolment gets an unscoped token
+        # back without needing to log in again.
+        access_token, deadline = await self._encode_access_token_for_user(user, jti=jti)
         response = RefreshResponse(
-            access_token=encode_access_token(user_id=consumed.user_id, jti=jti, scopes=scopes),
+            access_token=access_token,
             expires_in=settings.access_token_ttl_seconds,
+            mfa_enrollment_deadline=deadline,
         )
         return response, new_raw_token
 
@@ -950,3 +1114,286 @@ class UserService:
             await self._email_sender.send_password_reset_notice(to=user.email)
         except Exception:
             logger.exception("failed to send password reset notice email")
+
+    async def enroll_mfa(self, user_id: uuid.UUID, payload: MfaEnrollRequest) -> MfaEnrollResponse:
+        """FR-1. Re-enrolling while a PENDING enrolment already exists
+        overwrites the secret (OD-11) - mfa_enabled/mfa_activated_at are
+        untouched either way, so an unfinished enrolment can never lock
+        the user out.
+        """
+        user = await self._repository.get_by_id(user_id)
+        if user is None or not await verify_password(
+            payload.current_password.get_secret_value(), user.hashed_password
+        ):
+            raise InvalidCredentialsError
+
+        secret = generate_totp_secret()
+        await self._repository.update_mfa_pending_secret(
+            user_id=user_id, secret_encrypted=encrypt_mfa_secret(secret)
+        )
+        await self._repository.commit()
+
+        return MfaEnrollResponse(
+            secret=encode_totp_secret(secret),
+            otpauth_uri=build_otpauth_uri(secret=secret, account_email=user.email),
+        )
+
+    async def activate_mfa(
+        self,
+        user_id: uuid.UUID,
+        payload: MfaActivateRequest,
+        *,
+        ip: str,
+        user_agent: str | None,
+        request_id: str,
+    ) -> MfaActivateResponse:
+        """FR-2. Also the shared exit condition for both enrolment-scoped-
+        token triggers (FR-6/FR-7): if the account was scoped, this clears
+        it via perm_epoch, matching US-3.2's existing token-stale mechanism.
+        """
+        user = await self._repository.get_by_id(user_id)
+        if user is None or user.mfa_secret_encrypted is None:
+            # No PENDING enrolment to activate - folded into the same
+            # generic MfaInvalidCodeError as a wrong code (API design Open
+            # Question #1, not resolved by the spec).
+            raise MfaInvalidCodeError
+
+        secret = decrypt_mfa_secret(user.mfa_secret_encrypted)
+        if verify_totp_code(secret, payload.code) is None:
+            raise MfaInvalidCodeError
+
+        was_scoped, _ = await self._resolve_enrollment_scoping(user)
+
+        raw_codes = [secrets.token_hex(_RECOVERY_CODE_BYTES) for _ in range(_RECOVERY_CODE_COUNT)]
+        hashed_codes = [await hash_password(code) for code in raw_codes]
+        await self._repository.create_recovery_codes(user_id=user_id, code_hashes=hashed_codes)
+        await self._repository.activate_mfa(user_id=user_id)
+        await self._repository.create_auth_audit_log_entry(
+            event="mfa_enabled",
+            reason=None,
+            scope=None,
+            actor_id=user_id,
+            ip=ip,
+            user_agent=user_agent,
+            request_id=request_id,
+            severity=None,
+        )
+        await self._repository.commit()
+
+        if was_scoped:
+            settings = get_settings()
+            await self._permission_epoch_cache.set_perm_epoch(
+                user_id, ttl_seconds=settings.perm_epoch_ttl_seconds
+            )
+
+        return MfaActivateResponse(recovery_codes=raw_codes)
+
+    async def _try_consume_recovery_code(self, user_id: uuid.UUID, code: str) -> bool:
+        """FR-7: each stored hash is independently salted (Argon2id), so a
+        submitted code can't be looked up by hash equality - verify against
+        every unconsumed row, then atomically consume the matching one.
+        """
+        candidates = await self._repository.list_unconsumed_recovery_codes(user_id=user_id)
+        for candidate in candidates:
+            if await verify_password(code, candidate.code_hash):
+                consumed = await self._repository.consume_recovery_code(code_id=candidate.id)
+                return consumed is not None
+        return False
+
+    async def _complete_mfa_login(
+        self, user: User, *, ip: str, user_agent: str | None, request_id: str
+    ) -> tuple[MfaVerifyResponse, str]:
+        """Mints a session + refresh token the same way authenticate_user's
+        own success path does (no shared helper between the two - this
+        codebase already keeps that block independently duplicated between
+        login and refresh, so this follows the same precedent rather than
+        introducing a new abstraction).
+        """
+        settings = get_settings()
+        jti = uuid.uuid4()
+        session_expires_at = datetime.now(UTC) + timedelta(
+            seconds=settings.access_token_ttl_seconds
+        )
+        await self._repository.create_session(
+            user_id=user.id, jti=jti, expires_at=session_expires_at
+        )
+
+        raw_refresh_token, token_hash = generate_refresh_token()
+        refresh_expires_at = datetime.now(UTC) + timedelta(
+            seconds=settings.refresh_token_ttl_seconds
+        )
+        await self._repository.create_refresh_token(
+            token_hash=token_hash,
+            family_id=uuid.uuid4(),
+            user_id=user.id,
+            expires_at=refresh_expires_at,
+            ip=ip,
+            user_agent=user_agent,
+        )
+
+        await self._repository.update_last_login_at(user_id=user.id)
+        await self._repository.create_auth_audit_log_entry(
+            event="login_succeeded",
+            reason=None,
+            scope="mfa",
+            actor_id=user.id,
+            ip=ip,
+            user_agent=user_agent,
+            request_id=request_id,
+            severity=None,
+        )
+        await self._repository.commit()
+
+        access_token, _ = await self._encode_access_token_for_user(user, jti=jti)
+        response = MfaVerifyResponse(
+            access_token=access_token, expires_in=settings.access_token_ttl_seconds
+        )
+        return response, raw_refresh_token
+
+    async def verify_mfa(
+        self, payload: MfaVerifyRequest, *, ip: str, user_agent: str | None, request_id: str
+    ) -> tuple[MfaVerifyResponse, str]:
+        """FR-3/FR-4/FR-5/FR-7. Accepts either a TOTP code or a recovery
+        code in the same `code` field - a recovery-code match is tried
+        first since it's a direct per-user lookup, cheaper than decrypting
+        the TOTP secret first only to fail and fall back.
+        """
+        settings = get_settings()
+        token_hash = hash_mfa_token(payload.mfa_token)
+
+        user_id = await self._mfa_token_cache.get_user_id(token_hash)
+        if user_id is None:
+            raise MfaInvalidCodeError
+
+        user = await self._repository.get_by_id(user_id)
+        if user is None:
+            raise MfaInvalidCodeError
+
+        if await self._try_consume_recovery_code(user_id, payload.code):
+            await self._mfa_token_cache.consume(token_hash)
+            await self._repository.set_mfa_reenrollment_required(user_id=user_id)
+            await self._repository.create_auth_audit_log_entry(
+                event="mfa_recovery_used",
+                reason=None,
+                scope=None,
+                actor_id=user_id,
+                ip=ip,
+                user_agent=user_agent,
+                request_id=request_id,
+                severity=None,
+            )
+            await self._repository.commit()
+            try:
+                await self._email_sender.send_mfa_recovery_used_notice(to=user.email)
+            except Exception:
+                logger.exception("failed to send mfa recovery-used notice email")
+            return await self._complete_mfa_login(
+                user, ip=ip, user_agent=user_agent, request_id=request_id
+            )
+
+        totp_matched = False
+        if user.mfa_secret_encrypted is not None:
+            secret = decrypt_mfa_secret(user.mfa_secret_encrypted)
+            step = verify_totp_code(secret, payload.code)
+            if step is not None:
+                # MF-AC4 replay protection: a step already marked used
+                # (by this or an earlier request) counts as a failure,
+                # even though the code itself was correct.
+                totp_matched = await self._mfa_replay_cache.mark_step_used(
+                    user_id, step=step, ttl_seconds=settings.mfa_token_ttl_seconds
+                )
+
+        if not totp_matched:
+            attempt_count = await self._mfa_token_cache.record_failed_attempt(
+                token_hash, window_seconds=settings.mfa_token_ttl_seconds
+            )
+            await self._repository.create_auth_audit_log_entry(
+                event="mfa_verify_failed",
+                reason=None,
+                scope=None,
+                actor_id=user_id,
+                ip=ip,
+                user_agent=user_agent,
+                request_id=request_id,
+                severity=None,
+            )
+            await self._repository.commit()
+            if attempt_count >= settings.mfa_verify_lockout_threshold:
+                # FR-5: the mfa_token is invalidated - full re-authentication
+                # is required, so no Retry-After is meaningful here (unlike
+                # login's own lockout, there is nothing to retry).
+                await self._mfa_token_cache.invalidate(token_hash)
+                raise TooManyAttemptsError(retry_after_seconds=0)
+            raise MfaInvalidCodeError
+
+        await self._mfa_token_cache.consume(token_hash)
+        return await self._complete_mfa_login(
+            user, ip=ip, user_agent=user_agent, request_id=request_id
+        )
+
+    async def disable_mfa(
+        self,
+        user_id: uuid.UUID,
+        payload: MfaDisableRequest,
+        *,
+        ip: str,
+        user_agent: str | None,
+        request_id: str,
+    ) -> None:
+        """FR-6 (privileged block, 409) / FR-8 (non-privileged success -
+        OD-6/OD-8, not covered by any source AC).
+
+        Check order (undecided by the spec/API design - API design Open
+        Question #3, resolved here as a documented, conservative default):
+        password and code are evaluated jointly and raise the same
+        `InvalidCredentialsError` on either failure - a caller who has the
+        password but not the code (or vice versa) cannot distinguish which
+        factor was wrong from the response. This matters specifically for
+        this endpoint's threat model (a hijacked bearer session must not be
+        able to strip the second factor by brute-forcing one factor at a
+        time): a distinct "wrong code" response would already confirm the
+        password was correct, halving the attacker's search space. Both
+        checks run unconditionally (never short-circuited) so the response
+        also carries no timing signal. Only after both succeed does the
+        privileged-role check run, so a wrong password/code never reveals
+        whether the account is privileged (409) either.
+        """
+        user = await self._repository.get_by_id(user_id)
+        if user is None:
+            raise InvalidCredentialsError
+
+        password_ok = await verify_password(
+            payload.current_password.get_secret_value(), user.hashed_password
+        )
+        code_ok = user.mfa_secret_encrypted is not None and (
+            verify_totp_code(decrypt_mfa_secret(user.mfa_secret_encrypted), payload.code)
+            is not None
+        )
+        if not (password_ok and code_ok):
+            raise InvalidCredentialsError
+
+        grants = await self._role_service.get_role_grants_for_user(user_id)
+        if any(name in _PRIVILEGED_ROLE_NAMES for name, _ in grants):
+            raise MfaRequiredForRoleError
+
+        await self._repository.disable_mfa(user_id=user_id)
+        await self._repository.delete_recovery_codes_for_user(user_id=user_id)
+        await self._repository.create_auth_audit_log_entry(
+            event="mfa_disabled",
+            reason=None,
+            scope=None,
+            actor_id=user_id,
+            ip=ip,
+            user_agent=user_agent,
+            request_id=request_id,
+            severity=None,
+        )
+        await self._repository.commit()
+
+        # revoke_before set after the commit above (OD-6/OD-8): every other
+        # active session ends, matching the precedent password reset and
+        # deactivation already establish for this exact cache.
+        settings = get_settings()
+        await self._revocation_cache.set_revoke_before(
+            user_id, ttl_seconds=settings.refresh_token_ttl_seconds
+        )

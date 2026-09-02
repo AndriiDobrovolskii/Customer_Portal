@@ -5,7 +5,7 @@ from datetime import UTC, datetime, timedelta
 import jwt
 import pytest
 from httpx import AsyncClient
-from sqlalchemy import insert, select
+from sqlalchemy import insert, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.cache_keys import perm_epoch_key
@@ -214,6 +214,45 @@ async def test_replace_user_roles_repeat_call_idempotent(
     assert first.status_code == 200
     assert second.status_code == 200
     assert second.json()["roles"] == ["auditor"]
+
+
+async def test_replace_user_roles_sets_granted_at_to_recent_value(
+    client: AsyncClient, db_session: AsyncSession
+) -> None:
+    # Arrange: US-2.5 reconciliation gap #1 - no test proved
+    # replace_for_user's explicit granted_at write (app/modules/roles/
+    # repository.py), which US-009 FR-6's 14-day grace-period clock reads
+    # from. Seed the target already holding the role with a stale
+    # granted_at; a full-replacement call deletes+reinserts every row on
+    # every call, so re-granting the same role must overwrite the stale
+    # value with a fresh one, never silently keep the original grant time.
+    admin = await _seed_active_user(db_session, email="admin.grantedat@example.com")
+    await _assign_role(db_session, user_id=admin.id, role_name="admin")
+    admin_token = await _seed_session_and_token(
+        db_session, user_id=admin.id, scopes=_ALL_ADMIN_SCOPES
+    )
+    target = await _seed_active_user(db_session, email="target.grantedat@example.com")
+    await _assign_role(db_session, user_id=target.id, role_name="support_agent")
+    stale_grant = datetime.now(UTC) - timedelta(days=30)
+    await db_session.execute(
+        update(UserRole).where(UserRole.user_id == target.id).values(granted_at=stale_grant)
+    )
+    await db_session.flush()
+
+    # Act: re-grant the same role via a full-replacement call.
+    response = await client.put(
+        f"/api/v1/admin/users/{target.id}/roles",
+        json={"roles": ["support_agent"]},
+        headers=_auth_headers(admin_token),
+    )
+
+    # Assert
+    assert response.status_code == 200
+    result = await db_session.execute(
+        select(UserRole.granted_at).where(UserRole.user_id == target.id)
+    )
+    granted_at = result.scalar_one()
+    assert granted_at > stale_grant + timedelta(days=1)
 
 
 async def test_replace_user_roles_no_token_returns_401(client: AsyncClient) -> None:

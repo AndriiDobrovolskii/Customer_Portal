@@ -1008,7 +1008,10 @@ async def test_refresh_returns_200_and_rotates_cookie(
     # Assert: status + body shape (no token_type, unlike login)
     assert response.status_code == 200
     body = response.json()
-    assert set(body.keys()) == {"access_token", "expires_in"}
+    # mfa_enrollment_deadline (US-2.5 FR-6/OD-4) is always present, null
+    # when the account isn't in a privileged-role grace period.
+    assert set(body.keys()) == {"access_token", "expires_in", "mfa_enrollment_deadline"}
+    assert body["mfa_enrollment_deadline"] is None
     assert body["expires_in"] == 900
     claims = decode_access_token(body["access_token"])
     assert claims.user_id == user.id

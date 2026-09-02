@@ -31,3 +31,15 @@ def password_reset_account_hourly_key(email_hash: str) -> str:
 
 def password_reset_ip_hourly_key(ip: str) -> str:
     return f"password_reset_ip_hourly:{ip}"
+
+
+def mfa_token_key(token_hash: str) -> str:
+    return f"mfa_token:{token_hash}"
+
+
+def mfa_verify_attempts_key(token_hash: str) -> str:
+    return f"mfa_verify_attempts:{token_hash}"
+
+
+def mfa_used_step_key(user_id: uuid.UUID, step: int) -> str:
+    return f"mfa_used_step:{user_id}:{step}"

@@ -1,7 +1,7 @@
 import uuid
 from datetime import datetime
 
-from sqlalchemy import Boolean, DateTime, ForeignKey, String, Text, false, func
+from sqlalchemy import Boolean, DateTime, ForeignKey, LargeBinary, String, Text, false, func
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db.base import Base
@@ -25,6 +25,16 @@ class User(Base):
     pending_email: Mapped[str | None] = mapped_column(String(320))
     deactivated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     last_login_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    mfa_enabled: Mapped[bool] = mapped_column(Boolean(), nullable=False, server_default=false())
+    # AES-GCM ciphertext (nonce+tag+ciphertext), never the raw secret (OD-2).
+    # NULL when never enrolled or after a disable (FR-8) purges it.
+    mfa_secret_encrypted: Mapped[bytes | None] = mapped_column(LargeBinary())
+    mfa_activated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    # Set on recovery-code consumption (FR-7/OD-5); cleared on the next
+    # successful activation (FR-2's exit condition, shared with FR-6).
+    mfa_reenrollment_required: Mapped[bool] = mapped_column(
+        Boolean(), nullable=False, server_default=false()
+    )
 
 
 class UserSession(Base):
@@ -94,3 +104,20 @@ class RefreshToken(Base):
     last_used_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     ip: Mapped[str | None] = mapped_column(String(45))
     user_agent: Mapped[str | None] = mapped_column(Text())
+
+
+class MfaRecoveryCode(Base):
+    __tablename__ = "mfa_recovery_codes"
+
+    id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=uuid.uuid4)
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    # Argon2id hash (BR-003), never plaintext. No uniqueness constraint:
+    # each hash is independently salted, so two codes never collide in
+    # storage even though the plaintext codes themselves are never reused.
+    code_hash: Mapped[str] = mapped_column(String(255), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+    consumed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))

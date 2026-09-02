@@ -14,6 +14,8 @@ from app.modules.roles.repository import RoleRepository, UserRoleRepository
 from app.modules.roles.service import RoleService
 from app.modules.users.cache import (
     LoginThrottleCache,
+    MfaReplayCache,
+    MfaTokenCache,
     PasswordResetRateLimitCache,
     RefreshRateLimitCache,
 )
@@ -45,6 +47,8 @@ def get_user_service(
     role_service = RoleService(
         RoleRepository(session), UserRoleRepository(session), permission_epoch_cache
     )
+    mfa_token_cache = MfaTokenCache(valkey_client)
+    mfa_replay_cache = MfaReplayCache(valkey_client)
     return UserService(
         repository,
         issuer,
@@ -56,6 +60,8 @@ def get_user_service(
         password_reset_rate_limit_cache,
         permission_epoch_cache,
         role_service,
+        mfa_token_cache,
+        mfa_replay_cache,
     )
 
 
@@ -93,3 +99,26 @@ async def get_current_user_allow_revoked(
 
 
 CurrentUserAllowRevokedDep = Annotated[AuthenticatedUser, Depends(get_current_user_allow_revoked)]
+
+
+async def get_current_user_allow_enrollment_scoped(
+    token: Annotated[str, Depends(_oauth2_scheme)], service: UserServiceDep
+) -> AuthenticatedUser:
+    """US-009 FR-6/FR-7: the narrow opt-in for the two MFA enrolment
+    endpoints (`POST /v1/auth/mfa/enroll`, `/activate`) - the only routes
+    that accept an enrolment-scoped access token. Mirrors
+    `get_current_user_allow_revoked`'s exact same shape (a separate
+    function, not a shared one with a query-param flag, so this leniency
+    can never leak into another route by an accidental call-site change).
+    Every other route keeps depending on `get_current_user`/`CurrentUserDep`
+    unchanged and gets the default-deny `403 mfa-enrollment-required`.
+    """
+    authenticated_user = await service.get_authenticated_user(token, allow_enrollment_scoped=True)
+    if authenticated_user is None:
+        raise UnauthenticatedError
+    return authenticated_user
+
+
+CurrentUserAllowEnrollmentScopedDep = Annotated[
+    AuthenticatedUser, Depends(get_current_user_allow_enrollment_scoped)
+]

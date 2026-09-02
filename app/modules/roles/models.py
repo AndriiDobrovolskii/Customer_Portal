@@ -49,6 +49,14 @@ class UserRole(Base):
     role_id: Mapped[uuid.UUID] = mapped_column(
         ForeignKey("roles.id", ondelete="CASCADE"), primary_key=True, index=True
     )
+    # US-2.5 spec-review resolution (not part of the original US-012
+    # design): the 14-day MFA-enrolment grace period (US-009 FR-6) needs a
+    # data source for "since the role was granted". Set explicitly by
+    # `replace_for_user` on every written row, not left to rely solely on
+    # the server default.
+    granted_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
 
 
 class AdminAuditLog(Base):
