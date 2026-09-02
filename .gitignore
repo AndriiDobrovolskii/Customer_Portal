@@ -36,3 +36,7 @@ dev-gui/
 
 # Hook logs (local dev artifacts, not part of the product)
 docs/hooks/
+
+# graphify knowledge graph (generated locally via `graphify update .`)
+graphify-out/
+.claude/settings.json.graphify-bak
