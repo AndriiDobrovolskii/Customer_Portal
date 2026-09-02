@@ -42,13 +42,14 @@
 | OD-17 resolution (genesis rule) | The very first row ever inserted into `audit_log` seeds `previous_hash` from the fixed sentinel (hash of empty string), not `NULL`/an error | Integration | `test_audit_log_first_ever_row_seeds_from_sentinel` | `tests/integration/modules/audit/test_audit_router.py` (or a migration-level test, per T3b's verification step) |
 | OD-17 resolution (genesis rule) | The first row of a day following one or more empty days seeds `previous_hash` from the most recent non-empty prior partition's final `row_hash`, not the immediately-prior (empty) day | Unit | `test_verify_audit_chain_skips_empty_days_when_seeding` | `tests/unit/scripts/test_verify_audit_chain.py` |
 | T3c (new indexes) | `audit_log_history`'s `occurred_at DESC` keyset pagination produces a merge-append, not a full sort, across all five branches | Integration, statement-count/plan assertion per `AGENTS.md` §5's "list endpoints... SHOULD assert a statement-count ceiling" | `test_list_audit_logs_pagination_uses_indexed_scan_not_full_sort` | `tests/integration/modules/audit/test_audit_router.py` |
+| OD-6 resolution (hash-chain concurrency) | Two genuinely overlapping concurrent `INSERT`s into `audit_log` never produce two rows sharing the same `previous_hash` — `pg_advisory_xact_lock` serializes the trigger's seed-and-write. Manually proven against real Postgres at IMPLEMENTATION review (2026-09-02, two overlapping raw-engine transactions, `COUNT(DISTINCT previous_hash) = COUNT(*)`); this row is the regression test making that proof durable. Matches this project's raw-engine/`real_client` concurrency-test pattern (US-3.1 `count_active_admins_excluding`, US-3.2 FR-7). | Integration | `test_audit_log_concurrent_inserts_never_share_previous_hash` | `tests/integration/modules/audit/test_audit_router.py` |
 
 ## Gaps Not Covered (carried forward, not invented here)
 
 Per this project's convention of disclosing rather than inventing scope, the following spec Open Questions have **no** test row above because no behavior is yet decided to test against:
 
 - Single missing `from`/`to` bound (reject/default/open-ended) — spec's own carried-forward Open Question.
-- Hash-chain concurrency under simultaneous `INSERT`s into the same daily partition — spec's own carried-forward Open Question (Medium, pre-existing spec review).
+- ~~Hash-chain concurrency~~ — resolved as OD-6 (2026-09-02); see the new row above, not a gap any longer.
 - "Fields marked sensitive" (AU-AC6) beyond the four named exclusions — no enumerated list to test against.
 - Identifiers embedded in `payload` JSONB (AU-AC8) — OD-13 resolved `profile_audit_log`'s dedicated `old_value`/`new_value` case only; the `payload` JSONB question remains open.
 - Cold-storage target/access procedure (AU-AC9) — legal/DPO sign-off pending (OD-9); AU-AC9's retention job is explicitly deferred out of this story (OD-18), not built, tested, or tasked here.

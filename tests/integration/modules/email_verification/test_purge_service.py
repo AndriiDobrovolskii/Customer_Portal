@@ -4,7 +4,7 @@ import pytest
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.modules.email_verification.models import AuditLog
+from app.modules.email_verification.models import UnverifiedAccountPurgeLog
 from app.modules.email_verification.repository import EmailVerificationRepository
 from app.modules.email_verification.service import EmailVerificationService
 from app.modules.users.models import User
@@ -62,7 +62,9 @@ async def test_purge_removes_only_stale_unverified_accounts(db_session: AsyncSes
     assert stale_verified.id in remaining_ids
 
     audit_result = await db_session.execute(
-        select(AuditLog).where(AuditLog.subject_user_id == stale_unverified.id)
+        select(UnverifiedAccountPurgeLog).where(
+            UnverifiedAccountPurgeLog.subject_user_id == stale_unverified.id
+        )
     )
     audit_rows = audit_result.scalars().all()
     assert len(audit_rows) == 1

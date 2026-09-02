@@ -50,7 +50,7 @@ SELECT id, occurred_at, 'admin' AS category, actor_id, NULL, event, target_id,
        NULL, request_id, NULL, NULL, NULL, NULL, NULL
 FROM admin_audit_log
 UNION ALL
-SELECT id, occurred_at, 'profile' AS category, actor_id, NULL, 'field_changed' AS event,
+SELECT id, "timestamp" AS occurred_at, 'profile' AS category, actor_id, NULL, 'field_changed' AS event,
        NULL, NULL, request_id, NULL, NULL, NULL, NULL, NULL
 FROM profile_audit_log
 UNION ALL
@@ -68,7 +68,7 @@ Illustrative — the exact SQL (and whether `event` needs a per-table literal li
 | `audit_log` | Composite PK (`id`, `occurred_at`) | Required by PostgreSQL for the partition key to be part of every unique constraint |
 | `audit_log` | Covering index on `(occurred_at DESC, actor_id, event)`, per-partition | FR-1's filtered, newest-first query (story's own Data Model Notes) |
 | `unverified_account_purge_log` | Unchanged from its pre-rename indexes | — |
-| The four existing, still-live tables | New `ix_<table>_occurred_at` on each | Required for `audit_log_history`'s `occurred_at DESC` keyset pagination (FR-1) to produce a merge-append instead of sorting the full union — none of their existing indexes lead with `occurred_at` (verified against the live models). Additive, no data-shape change; `CREATE INDEX CONCURRENTLY` since these tables are actively written. |
+| The four existing, still-live tables | New `ix_<table>_occurred_at` on each — **except `profile_audit_log`, whose timestamp column is actually named `timestamp`, not `occurred_at`** (found during T2/T3c, IMPLEMENTATION stage — this design's own column list at the top of this document was wrong for that one table); its index is `ix_profile_audit_log_timestamp` on `timestamp` | Required for `audit_log_history`'s `occurred_at DESC` keyset pagination (FR-1) to produce a merge-append instead of sorting the full union — none of their existing indexes lead with `occurred_at`/`timestamp` (verified against the live models). Additive, no data-shape change; `CREATE INDEX CONCURRENTLY` since these tables are actively written. |
 
 ## Traceability
 
@@ -80,6 +80,6 @@ Illustrative — the exact SQL (and whether `event` needs a per-table literal li
 
 ## Known Gaps (not decided at this stage)
 
-- Hash-chain genesis rule (first partition / empty prior day) — carried forward, spec's own Open Question.
+- ~~Hash-chain genesis rule~~ — resolved as OD-17 (2026-09-02); see db-design.md's `audit_log` section.
 - Exact `audit_log_history` view SQL, and per-source-table `event`/`category` literal mapping for tables lacking a real `event` column (`profile_audit_log`) — illustrative only above, left to `migration-manager`.
 - A future OD-14 follow-up story repointing any of the four modules would need to design the `payload` JSONB redaction mechanism OD-13 doesn't cover — not this story's concern, noted for that future design to find.

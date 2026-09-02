@@ -144,9 +144,15 @@ AU-AC1 shows `limit=50` as an example but states no maximum, and neither story n
 
 ---
 
-## OD-6 — Carried forward, unresolved: hash-chain trigger concurrency
+## OD-6 — Resolved by implementation: hash-chain trigger concurrency
 
-`docs/reviews/specifications/US-013-spec-review.md`'s own Medium finding: AU-AC7/FR-7 describe a `BEFORE INSERT` trigger computing `previous_hash` from "the previous row's hash," but neither the story nor spec states how correctness is preserved under concurrent `INSERT`s into the same day's partition. Nothing in the current codebase (no existing trigger-based hash chain anywhere in this project) resolves this by precedent. Still needs a DESIGN-stage decision (e.g., row-level locking on the partition's last row, or a `SERIALIZABLE`-adjacent guarantee) — carried forward unchanged, not resolved by this run.
+`docs/reviews/specifications/US-013-spec-review.md`'s own Medium finding: AU-AC7/FR-7 describe a `BEFORE INSERT` trigger computing `previous_hash` from "the previous row's hash," but neither the story nor spec states how correctness is preserved under concurrent `INSERT`s into the same day's partition. Carried forward unresolved through DESIGN and PLANNING (no existing trigger-based hash chain anywhere in this project to resolve it by precedent) — closed at IMPLEMENTATION (T3b, 2026-09-02), where the trigger's actual SQL had to make the call.
+
+**What was tried and rejected first:** a `SELECT ... ORDER BY occurred_at DESC, id DESC LIMIT 1 FOR UPDATE` on the presumed-latest row, locking it before seeding `previous_hash` from it. This does **not** serialize concurrent appends — the locked row is only read, never modified, by the inserting transaction. Under PostgreSQL MVCC, a second transaction's blocked `FOR UPDATE` request is granted immediately once the first transaction commits, with no `EvalPlanQual` re-check (the locked row's `xmin` never moved), so the second transaction still seeds from the same, now-stale row. Two rows would claim the same `previous_hash` — a false-positive chain break, exactly the failure mode AU-AC7's own gate test exists to catch.
+
+**Resolved:** `pg_advisory_xact_lock(hashtext('audit_log_hash_chain'))`, acquired at the start of the trigger function, before the seed `SELECT`. It serializes every `audit_log` insert on one constant key, auto-released on commit or rollback (no unlock path to get wrong), and requires no new schema (a per-day "chain state" side table was considered and rejected — it would duplicate state `audit_log` already holds and complicate OD-17's cross-partition, skip-empty-days lookback). Verified by direct SQL against real PostgreSQL (two sequential inserts correctly chain `previous_hash`→`row_hash`; see migration `57a978462b74_add_audit_log_and_history_view.py`'s `audit_log_hash_chain()` function).
+
+**Disclosed limitation:** one global lock serializes *all* `audit_log` inserts — acceptable under staged OD-14 (two low-frequency event types on one admin route), but a future OD-14 follow-up repointing a high-volume module (e.g. `auth`) into this same chain would need to revisit whether a single lock still scales.
 
 ---
 
