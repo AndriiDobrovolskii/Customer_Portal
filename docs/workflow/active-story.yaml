@@ -1,5 +1,15 @@
-active_story: US-2.6
+active_story: US-3.1
 
+# US-3.1 (Manage Users, Epic 3) started 2026-09-02: US-2.6 (Active
+# Sessions) reached PR #11, confirmed MERGED to main (`gh pr view 11`).
+# US-3.1 is split into 5 independently shippable slices (3.1.1 Read ...
+# 3.1.5 Resend invite) per its story file; it depends on US-1.4 (DA-AC10
+# invariant) and US-3.2's permission-scope system (users:read/
+# users:write), both already merged to main. A pre-existing draft spec
+# (US-011, drafted 2026-08-22) and review already exist, predating the
+# real US-1.4/US-3.2 codebase. Starting fresh CLARIFICATION.
+
+# --- prior story: US-2.6 (DONE, reached PR, merged) ---
 # US-2.6 (Active Sessions, Epic 2) started 2026-09-02: US-2.5 (MFA/TOTP)
 # reached PR #10, confirmed MERGED to main (`gh pr view 10`). US-2.6
 # depends only on US-2.3's refresh-token family_id concept (already on

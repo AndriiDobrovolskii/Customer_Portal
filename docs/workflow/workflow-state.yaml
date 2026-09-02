@@ -1,8 +1,87 @@
-story: US-2.6
+story: US-3.1
 
-current_stage: PR
+current_stage: IMPLEMENTATION
 
-status: DONE
+status: IN_PROGRESS
+# TESTS done 2026-09-02: docs/tests/US-011-traceability-matrix.md (matrix
+# only, test code deferred to IMPLEMENTATION T7/T8 per T1-T9 breakdown).
+# All 21 source ACs + FR-17b/FR-22/FR-23 (no-AC) covered at unit and/or
+# integration level; MU-AC16/BR-001 both have dedicated concurrency
+# tests; roles/service.py's 2 new methods get independent unit coverage
+# plus 2 regression-guard tests proving the plan-review-corrected wiring
+# (check_no_privilege_escalation extracted+called, raise_if_last_admin
+# additive-only+not called) holds. Advancing to IMPLEMENTATION.
+# PLANNING done 2026-09-02: docs/impact-analysis/US-011-impact-analysis.md
+# (new module app/modules/admin_users/, mirrors profile/roles precedent;
+# 2 new cross-module RoleService calls flagged). docs/plans/US-011-
+# implementation-plan.md (resolves PATCH's missing reason field, FR-18's
+# token-invalidation mechanism, adds 2 new RoleService methods).
+# docs/plans/US-011-task-breakdown.md (T1-T9). docs/reviews/plans/
+# US-011-plan-review.md - Pass with Issues, 4 findings found+fixed same-
+# day: T3's migration bundled a CONCURRENTLY index with transactional
+# DDL (split into T3/T3b per US-2.6 precedent); migrations/env.py touch
+# was assigned outside its declared skill scope (now unassigned/out-of-
+# band per US-3.2 precedent); advisor cross-check caught a genuine
+# behavior-change bug (raise_if_last_admin wrongly wired into
+# replace_user_roles, would have rejected a role change that succeeds
+# today - fixed to additive-only); 2 smaller design clarifications
+# closed (admin_audit_log.actor_id mapping; DELETE 401-vs-405 reading).
+# Branch corrected mid-session: work had started on stale
+# feat/us-2.6-active-sessions, re-based onto fresh feat/us-3.1-manage-
+# users off origin/main via git stash (clean, no conflicts). See
+# docs/catalog/US-3.1-pipeline-status.md for the full stage-by-stage
+# record. Advancing to TESTS.
+# DESIGN done 2026-09-02: docs/designs/api/US-011-{openapi.yaml,api-
+# design.md} (7 operations across 6 paths; ETag/If-Match mechanics reused
+# verbatim from app/core/etag.py + app/modules/profile's precedent,
+# previously unavailable to US-3.2; 9 Open Questions logged, none
+# blocking). docs/designs/database/US-011-{db-design,entity-model}.md
+# (users: no schema change, 2 new indexes incl. first-ever pg_trgm use in
+# this codebase; new invitation_tokens table matching existing token
+# precedent; admin_audit_log gains 4 nullable columns per OD-1;
+# account_lifecycle_audit_log gains 1 nullable column per OD-2; 3 Known
+# Gaps logged, incl. PATCH request body missing a reason field for FR-9's
+# new admin_audit_log.reason column). Advancing to PLANNING.
+# SPEC_REVIEW done 2026-09-02: docs/reviews/specifications/US-011-spec-
+# review.md - Pass with Issues. 21/21 ACs Covered, no contradictions. 3
+# Low findings, all disclosed/precedent-grounded (FR-6's BR-001
+# concurrency sentence; FR-17b/FR-22/FR-23 lacking a source AC, matching
+# US-2.6 FR-6/FR-7 precedent). User accepted as-is 2026-09-02.
+# SPECIFICATION done 2026-09-02: docs/specifications/US-011-manage-
+# users-spec.md revised in place (pre-existing 2026-08-22 draft).
+# Incorporates OD-1 (admin_audit_log gains nullable field/old_value/
+# new_value/reason columns for FR-9), OD-2 (account_lifecycle_audit_log
+# gains nullable reason column for FR-13), OD-3 (new FR-22/FR-23 for
+# GET /v1/admin/users/{id}, no source AC, mirrors US-2.6 FR-6/FR-7
+# precedent), plus a new FR-17b (Deactivate unknown-user 404, precedent
+# from FR-12/FR-21). 21/21 source ACs traced; FR-17b/FR-22/FR-23 have no
+# AC (Open-Decision-derived, per template rules). Out-of-Scope wording
+# ambiguity (spec-review Low finding) fixed. Advancing to SPEC_REVIEW.
+# Prior CLARIFICATION record below.
+# CLARIFICATION done 2026-09-02: us-clarifier verdict Not Ready. 3 Open
+# Decisions logged (docs/decisions/US-3.1-open-decisions.md) - OD-1
+# admin_audit_log's existing US-3.2-built shape (old_roles/new_roles
+# arrays) doesn't fit MU-AC9/FR-9's per-field Update audit requirement;
+# OD-2 account_lifecycle_audit_log (US-1.4-built) has no reason column
+# but MU-AC13/FR-13 requires persisting an admin-supplied reason; OD-3
+# GET /v1/admin/users/{id} is in-scope but has zero Acceptance Criteria.
+# 6 of the pre-existing US-011 spec's/review's open items resolved
+# outright by reading the real US-1.4 (account module)/US-3.2 (roles
+# module) codebase merged since the 2026-08-22 draft: concurrent
+# duplicate-email (BR-001 atomic constraint), role->permission mapping
+# for MU-AC8 (RoleService.replace_user_roles's existing privilege-
+# escalation check), Deactivate's missing unknown-user case (precedent
+# from FR-12/FR-21's 404), invitation-token shape (matches
+# EmailVerificationToken/PasswordResetToken precedent), resend rate-
+# limit mechanism (matches email_verification's cooldown pattern),
+# last-admin check (RoleService.count_active_admins_excluding). See
+# docs/evidence/US-3.1-clarification-report.md. Awaiting user resolution
+# of OD-1/OD-2/OD-3 before advancing to SPECIFICATION.
+
+# --- prior story: US-2.6 (DONE, reached PR, merged) ---
+# story: US-2.6
+# current_stage: PR
+# status: DONE
 # PR done 2026-09-02: docs/pr/US-010-pr-description.md drafted by
 # pr-preparer. All 4 gates confirmed Pass from their actual reports
 # (gate-enforcer 7/7 + 409/409 tests/97.42% coverage; implementation-
