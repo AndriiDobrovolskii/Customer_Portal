@@ -53,21 +53,33 @@ class UserRoleRepository:
         self, *, admin_role_id: uuid.UUID, excluding_user_id: uuid.UUID
     ) -> int:
         """FR-7 (MR-AC7's `[gate]` concurrency test): `FOR UPDATE` locks
-        every `user_roles` row holding `admin_role_id` for the duration of
-        this transaction. Two concurrent requests targeting *different*
-        admins both matching this WHERE clause would otherwise both read
-        "at least one other active admin remains" before either commits,
-        letting both succeed and leave zero admins — `FOR UPDATE` here
-        serializes the second request behind the first's commit, so it
-        re-reads the post-delete row set instead of a stale one. A plain
-        aggregate `count()` cannot carry `FOR UPDATE` in PostgreSQL, so the
-        matching rows are locked and counted in Python instead.
+        every `user_roles` row holding `admin_role_id` *and* every joined
+        `users` row for the duration of this transaction. Two concurrent
+        requests targeting *different* admins both matching this WHERE
+        clause would otherwise both read "at least one other active admin
+        remains" before either commits, letting both succeed.
+
+        Locking `User` too (not just `UserRole`) is required for US-3.1's
+        `raise_if_last_admin` caller (`admin_users.service.deactivate_user`):
+        that flow's mutation is `users.status`, not `user_roles` — a lock
+        scoped to `UserRole` alone serializes nothing against a concurrent
+        `UPDATE users SET status = 'deactivated'`, which is exactly the
+        gap a genuine two-admin concurrent-deactivation integration test
+        caught (both requests returned 200 instead of one 200/one 409,
+        2026-09-02). Locking both tables here keeps US-3.2's own
+        `replace_user_roles` caller correct too (its mutation is on
+        `UserRole`), since locking more rows is only ever more
+        conservative, never less correct.
+
+        A plain aggregate `count()` cannot carry `FOR UPDATE` in
+        PostgreSQL, so the matching rows are locked and counted in Python
+        instead.
         """
         result = await self._session.execute(
             select(UserRole.user_id)
             .join(User, User.id == UserRole.user_id)
             .where(UserRole.role_id == admin_role_id, User.status == "active")
-            .with_for_update(of=UserRole)
+            .with_for_update(of=[UserRole, User])
         )
         admin_user_ids = set(result.scalars().all())
         admin_user_ids.discard(excluding_user_id)

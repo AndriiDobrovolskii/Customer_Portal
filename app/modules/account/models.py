@@ -1,7 +1,7 @@
 import uuid
 from datetime import datetime
 
-from sqlalchemy import DateTime, String, func
+from sqlalchemy import DateTime, String, Text, func
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db.base import Base
@@ -20,3 +20,8 @@ class AccountLifecycleAuditLog(Base):
     occurred_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now()
     )
+    # US-3.1 OD-2: populated only by admin-initiated deactivation
+    # (app/modules/admin_users). Self-service deactivation (US-1.4)
+    # continues to leave this null — DA-AC10's "identical side effects"
+    # invariant holds for every pre-existing column.
+    reason: Mapped[str | None] = mapped_column(Text())

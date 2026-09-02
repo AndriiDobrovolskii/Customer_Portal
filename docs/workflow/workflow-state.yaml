@@ -1,8 +1,34 @@
 story: US-3.1
 
-current_stage: IMPLEMENTATION
+current_stage: VERIFICATION
 
 status: IN_PROGRESS
+# IMPLEMENTATION done 2026-09-02 (T1-T9 complete). gate-enforcer PASS:
+# 7/7 pre-commit hooks (ruff lint+format, mypy strict on 113 files,
+# import-linter 6/6, unit tests, no-mock-in-integration, detect-secrets),
+# 485/485 tests (281 unit, 204 integration - was 409 total before this
+# story), 96.64% coverage (floor 85%; admin_users/service.py 96%,
+# admin_users/router.py 100%). Migrations a5edc35c8e96 +
+# 1b2b1d52dd71 upgrade/downgrade/upgrade proven (T3/T3b). New module
+# app/modules/admin_users/ (7 endpoints). 2 real defects found+fixed
+# during T7/T8 (not caught by planning/plan-review):
+# (1) genuine concurrency bug - raise_if_last_admin's shared last-admin
+# count query locked only user_roles rows (FOR UPDATE OF UserRole),
+# providing no serialization against a concurrent users.status update;
+# two simultaneous deactivations of the last two admins both returned
+# 200 until fixed to lock both UserRole and User rows
+# (roles/repository.py count_active_admins_excluding) - this also
+# benefits US-3.2's existing replace_user_roles caller, still green;
+# (2) 2 of this story's own new concurrency-test helpers didn't clean up
+# users seeded via the raw-engine/real_client pattern, causing the
+# roles module's own pre-existing concurrency test to intermittently
+# fail when run afterward (leftover active admins inflated its count) -
+# fixed via cleanup_users. ORM containment, cross-module discipline,
+# response_model/status_code on every route, extra="forbid" on every
+# inbound schema all confirmed clean. Added 2 new app/core/config.py
+# settings + .env.example entries; EmailSender protocol gained
+# send_invitation_email (3 existing test fakes updated). Advancing to
+# VERIFICATION.
 # TESTS done 2026-09-02: docs/tests/US-011-traceability-matrix.md (matrix
 # only, test code deferred to IMPLEMENTATION T7/T8 per T1-T9 breakdown).
 # All 21 source ACs + FR-17b/FR-22/FR-23 (no-AC) covered at unit and/or

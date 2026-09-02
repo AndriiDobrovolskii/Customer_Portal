@@ -1,6 +1,7 @@
 from fastapi import APIRouter
 
 from app.modules.account.router import router as account_router
+from app.modules.admin_users.router import router as admin_users_router
 from app.modules.email_verification.router import router as email_verification_router
 from app.modules.profile.router import router as profile_router
 from app.modules.roles.router import router as roles_router
@@ -12,3 +13,4 @@ router.include_router(email_verification_router)
 router.include_router(profile_router)
 router.include_router(account_router)
 router.include_router(roles_router)
+router.include_router(admin_users_router)

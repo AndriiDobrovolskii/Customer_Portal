@@ -360,3 +360,138 @@ async def test_get_role_grants_for_user_no_roles_returns_empty_list() -> None:
 
     # Assert
     assert result == []
+
+
+# --- US-3.1 FR-8: resolve_role_ids_for_grant -------------------------------
+
+
+async def test_resolve_role_ids_for_grant_subset_returns_role_ids() -> None:
+    # Arrange
+    service, _, user_role_repository, _ = _make_service()
+
+    # Act
+    role_ids = await service.resolve_role_ids_for_grant(
+        actor_id=uuid.uuid4(),
+        actor_scopes={"tickets:read", "tickets:write"},
+        role_names=["support_agent"],
+        request_id="req-9",
+    )
+
+    # Assert
+    assert role_ids == [_SUPPORT_AGENT.id]
+    assert user_role_repository.audit_entries == []
+
+
+async def test_resolve_role_ids_for_grant_superset_raises_and_audits() -> None:
+    # Arrange
+    actor_id = uuid.uuid4()
+    service, _, user_role_repository, _ = _make_service()
+
+    # Act & Assert
+    with pytest.raises(PrivilegeEscalationError):
+        await service.resolve_role_ids_for_grant(
+            actor_id=actor_id,
+            actor_scopes={"tickets:read"},
+            role_names=["admin"],
+            request_id="req-10",
+        )
+    audit = user_role_repository.audit_entries[0]
+    assert audit["event"] == "authz_denied"
+    assert audit["actor_id"] == actor_id
+    assert audit["severity"] == "high"
+    assert user_role_repository.committed is True
+
+
+async def test_resolve_role_ids_for_grant_unknown_name_silently_excluded() -> None:
+    # Arrange: documented limitation - no FR/AC covers an unknown role name
+    # at creation (unlike US-3.2's FR-4 for role replacement).
+    service, _, _, _ = _make_service()
+
+    # Act
+    role_ids = await service.resolve_role_ids_for_grant(
+        actor_id=uuid.uuid4(),
+        actor_scopes=set(),
+        role_names=["not_a_real_role"],
+        request_id="req-11",
+    )
+
+    # Assert
+    assert role_ids == []
+
+
+# --- US-3.1 FR-16: raise_if_last_admin --------------------------------------
+
+
+async def test_raise_if_last_admin_sole_admin_raises() -> None:
+    # Arrange
+    target_id = uuid.uuid4()
+    user_role_repository = FakeUserRoleRepository(
+        current_roles={target_id: ["admin"]}, active_admin_ids=set()
+    )
+    service, _, _, _ = _make_service(user_role_repository=user_role_repository)
+
+    # Act & Assert
+    with pytest.raises(LastAdminError):
+        await service.raise_if_last_admin(target_id)
+
+
+async def test_raise_if_last_admin_not_sole_admin_passes() -> None:
+    # Arrange
+    target_id = uuid.uuid4()
+    other_admin_id = uuid.uuid4()
+    user_role_repository = FakeUserRoleRepository(
+        current_roles={target_id: ["admin"]}, active_admin_ids={other_admin_id}
+    )
+    service, _, _, _ = _make_service(user_role_repository=user_role_repository)
+
+    # Act & Assert (no raise)
+    await service.raise_if_last_admin(target_id)
+
+
+async def test_raise_if_last_admin_non_admin_target_skips_count_query() -> None:
+    # Arrange: target holds no roles at all
+    target_id = uuid.uuid4()
+    user_role_repository = FakeUserRoleRepository(current_roles={target_id: ["customer"]})
+    service, _, _, _ = _make_service(user_role_repository=user_role_repository)
+
+    # Act & Assert (no raise; count_active_admins_excluding never called
+    # since active_admin_ids is empty by default and would raise LastAdminError
+    # if the non-admin branch incorrectly fell through to the count check)
+    await service.raise_if_last_admin(target_id)
+
+
+# --- Plan-review regression guard: raise_if_last_admin is NOT wired into
+# replace_user_roles (US-011-plan-review.md Risk Realism finding) --------
+
+
+async def test_replace_user_roles_admin_to_admin_plus_auditor_still_succeeds() -> None:
+    # Arrange: sole admin, requested set KEEPS admin (adds auditor) - this
+    # must still succeed even though the target is the last admin, proving
+    # raise_if_last_admin (which would reject any last-admin target
+    # unconditionally) is not called from this method.
+    actor_id = uuid.uuid4()
+    target_id = uuid.uuid4()
+    user_role_repository = FakeUserRoleRepository(
+        current_roles={target_id: ["admin"]}, active_admin_ids=set()
+    )
+    service, _, _, _ = _make_service(user_role_repository=user_role_repository)
+
+    # Act
+    result = await service.replace_user_roles(
+        actor_id=actor_id,
+        actor_scopes={
+            "users:read",
+            "users:write",
+            "roles:write",
+            "audit:read",
+            "tickets:read",
+            "tickets:write",
+        },
+        target_id=target_id,
+        requested_role_names=["admin", "auditor"],
+        request_id="req-12",
+    )
+
+    # Assert
+    assert sorted(result.roles) == ["admin", "auditor"]
+    assert len(user_role_repository.replaced) == 1

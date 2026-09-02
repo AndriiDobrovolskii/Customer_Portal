@@ -19,6 +19,8 @@ class EmailSender(Protocol):
 
     async def send_mfa_recovery_used_notice(self, *, to: str) -> None: ...
 
+    async def send_invitation_email(self, *, to: str, raw_token: str) -> None: ...
+
 
 class LoggingEmailSender:
     """No-op sender that logs dispatch without a real mail provider.
@@ -47,6 +49,9 @@ class LoggingEmailSender:
 
     async def send_mfa_recovery_used_notice(self, *, to: str) -> None:
         logger.info("mfa recovery-code-used notice dispatched")
+
+    async def send_invitation_email(self, *, to: str, raw_token: str) -> None:
+        logger.info("invitation email dispatched")
 
 
 def get_email_sender() -> EmailSender:
