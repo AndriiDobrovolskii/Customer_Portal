@@ -2,12 +2,16 @@ story: US-2.6
 
 current_stage: PR
 
-status: DRAFTED
-# PR drafted 2026-09-02: docs/pr/US-010-pr-description.md. All 4 gates
-# (gate-enforcer, implementation-verifier, security-reviewer,
-# reconciliation-reviewer) confirmed Pass from their actual reports.
-# .env.example alignment and commit hygiene confirmed clean via git
-# status. Not pushed/opened - awaiting explicit user instruction.
+status: DONE
+# PR done 2026-09-02: docs/pr/US-010-pr-description.md drafted by
+# pr-preparer. All 4 gates confirmed Pass from their actual reports
+# (gate-enforcer 7/7 + 409/409 tests/97.42% coverage; implementation-
+# verifier Pass; security-reviewer Pass; reconciliation-reviewer Pass).
+# .env.example alignment confirmed (2 new settings, 1:1 with config.py).
+# Commit hygiene confirmed via git status - every changed/new file traces
+# to this story's scope. User explicitly authorized commit+push+PR.
+# Committed as 2a749fd, pushed to origin, opened as GitHub PR #11
+# (https://github.com/AndriiDobrovolskii/Customer_Portal/pull/11).
 # Started 2026-09-02. US-2.5 reached PR #10, confirmed MERGED to main.
 # US-2.6 (Active Sessions) has no dependency on US-2.5's MFA work - only
 # on US-2.3's refresh-token family_id (on main) and US-2.2's revocation
