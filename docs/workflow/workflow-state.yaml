@@ -1,8 +1,16 @@
 story: US-3.1
 
-current_stage: SECURITY_REVIEW
+current_stage: RECONCILIATION
 
 status: IN_PROGRESS
+# SECURITY_REVIEW done 2026-09-02: docs/security/US-011-security-
+# review.md - Pass. All 6 AGENTS.md SS7 rows clean (3 N/A - story has
+# no password/credential handling at all, creation is invitation-only
+# and structurally cannot accept a password field). 2 Low advisories
+# noted (invitation-completion flow not yet built anywhere, out of this
+# story's scope; resend's authz_denied audit lives in the shared
+# require_scope dependency, not admin_users itself - confirmed correct,
+# not a gap).
 # VERIFICATION done 2026-09-02: docs/verification/US-011-verification-
 # report.md - Pass. 1 real gap found+fixed same-day: 5 of 7 protected
 # routes had only a missing_token security case at the integration
