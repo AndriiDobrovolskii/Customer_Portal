@@ -32,6 +32,7 @@
 | VERIFICATION | — | implementation-verifier | Done | **Pass** (1 gap found+fixed same-day) | docs/verification/US-011-verification-report.md. 5/7 protected routes were missing the full §5 security-case set (expired/malformed/revoked/insufficient-permission) at the integration level - 24 tests added, 509/509 green. ORM containment, cache TTL, service→service discipline, §6.7 contract items all Pass. |
 | SECURITY_REVIEW | — | security-reviewer | Done | **Pass** | docs/security/US-011-security-review.md. All 6 AGENTS.md §7 rows Pass (3 N/A - no password/credential handling in this story). 2 Low advisories, neither forcing Fail. |
 | RECONCILIATION | — | reconciliation-reviewer | Done | **Pass** (initial Fail, 2 gaps found+fixed same-day) | docs/reconciliation/US-011-reconciliation-report.md. All 24 ACs/FRs fully covered and asserted after fixing MU-AC9/MU-AC18's unasserted `actor` audit field. 29 harmless test-name renames individually verified. No spec drift. 509/509 green. |
-| PR | — | pr-preparer | Not started | — | — |
+| PR | — | pr-preparer | Done | **Drafted, not opened** | docs/pr/US-011-pr-description.md. All 4 gates confirmed Pass from their actual reports. `.env.example` alignment and commit hygiene both confirmed clean via `git status`/`git log`. Awaiting explicit user instruction to push/open. |
 
-**Uncommitted:** all US-3.1 documentation (specs, designs, plans, reviews, workflow-state updates) exists only in the working tree on `feat/us-3.1-manage-users` — nothing committed yet, per this project's "only commit when the user explicitly asks" convention.
+**5 commits on this branch, not yet pushed:** `655dc60` (docs through PLANNING/TESTS), `172be21` (feat: implement), `a8d4c7f` (test: §5 security-case gap), `b32c752` (docs: VERIFICATION+SECURITY_REVIEW), `dbfeff4` (test: RECONCILIATION gap).
+
