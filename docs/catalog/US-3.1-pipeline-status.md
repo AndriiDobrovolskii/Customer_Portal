@@ -29,7 +29,7 @@
 | IMPLEMENTATION | T7 unit tests | test-writer | Done | 31 new admin_users + 7 new roles tests, all pass | tests/unit/modules/admin_users/test_admin_users_service.py (new); tests/unit/modules/roles/test_roles_service.py (extended, incl. 2 regression-guard tests). |
 | IMPLEMENTATION | T8 integration tests | test-writer | Done, **2 real defects found+fixed** | 38 new tests, all pass (+ full suite re-confirmed green after fixes) | tests/integration/modules/admin_users/test_admin_users_router.py (new). Found: (1) genuine concurrency bug in the shared last-admin check (fixed in roles/repository.py, benefits US-3.2 too); (2) test-isolation gap in this story's own new concurrency-test helpers (fixed via `cleanup_users`). |
 | IMPLEMENTATION | T9 gate | gate-enforcer | Done | **PASS** — 7/7 pre-commit hooks, mypy strict clean (113 files), import-linter 6/6, 485/485 tests (was 409), 96.64% coverage (floor 85%; admin_users/service.py 96%, admin_users/router.py 100%) | `.secrets.baseline` line-number drift only (accepted). |
-| VERIFICATION | — | implementation-verifier | Not started | — | — |
+| VERIFICATION | — | implementation-verifier | Done | **Pass** (1 gap found+fixed same-day) | docs/verification/US-011-verification-report.md. 5/7 protected routes were missing the full §5 security-case set (expired/malformed/revoked/insufficient-permission) at the integration level - 24 tests added, 509/509 green. ORM containment, cache TTL, service→service discipline, §6.7 contract items all Pass. |
 | SECURITY_REVIEW | — | security-reviewer | Not started | — | — |
 | RECONCILIATION | — | reconciliation-reviewer | Not started | — | — |
 | PR | — | pr-preparer | Not started | — | — |

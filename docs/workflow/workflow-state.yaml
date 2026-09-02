@@ -1,8 +1,17 @@
 story: US-3.1
 
-current_stage: VERIFICATION
+current_stage: SECURITY_REVIEW
 
 status: IN_PROGRESS
+# VERIFICATION done 2026-09-02: docs/verification/US-011-verification-
+# report.md - Pass. 1 real gap found+fixed same-day: 5 of 7 protected
+# routes had only a missing_token security case at the integration
+# level, not the full AGENTS.md SS5 five-case set (expired/malformed/
+# insufficient-permission/revoked). 24 new integration tests added, gate
+# re-confirmed green: 509/509 tests (was 485), 96.64% coverage. ORM
+# containment, cache TTL, service->service discipline, response_model/
+# extra=forbid/.env.example/no-sensitive-Read-field all confirmed Pass
+# on first read.
 # IMPLEMENTATION done 2026-09-02 (T1-T9 complete). gate-enforcer PASS:
 # 7/7 pre-commit hooks (ruff lint+format, mypy strict on 113 files,
 # import-linter 6/6, unit tests, no-mock-in-integration, detect-secrets),

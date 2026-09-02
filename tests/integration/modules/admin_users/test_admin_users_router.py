@@ -84,6 +84,22 @@ async def _expired_token(db_session: AsyncSession, *, user_id: uuid.UUID, scopes
     )
 
 
+async def _revoked_session_token(
+    db_session: AsyncSession, *, user_id: uuid.UUID, scopes: list[str]
+) -> str:
+    jti = uuid.uuid4()
+    db_session.add(
+        UserSession(
+            jti=jti,
+            user_id=user_id,
+            expires_at=datetime.now(UTC) + timedelta(hours=1),
+            revoked_at=datetime.now(UTC),
+        )
+    )
+    await db_session.flush()
+    return encode_access_token(user_id=user_id, jti=jti, scopes=scopes)
+
+
 # --- GET /v1/admin/users - FR-1/FR-2/FR-3/FR-4 ------------------------------
 
 
@@ -192,6 +208,20 @@ async def test_list_users_expired_token_returns_401(
     assert response.status_code == 401
 
 
+async def test_list_users_revoked_session_returns_401(
+    client: AsyncClient, db_session: AsyncSession
+) -> None:
+    # Arrange
+    user = await _seed_user(db_session, email="revokedlist@example.com")
+    token = await _revoked_session_token(db_session, user_id=user.id, scopes=_READ)
+
+    # Act
+    response = await client.get("/api/v1/admin/users", headers=_auth_headers(token))
+
+    # Assert
+    assert response.status_code == 401
+
+
 # --- GET /v1/admin/users/{id} - FR-22/FR-23 ---------------------------------
 
 
@@ -240,6 +270,59 @@ async def test_get_user_missing_token_returns_401(client: AsyncClient) -> None:
 
     # Assert
     assert response.status_code == 401
+
+
+async def test_get_user_invalid_token_returns_401(client: AsyncClient) -> None:
+    # Act
+    response = await client.get(
+        f"/api/v1/admin/users/{uuid.uuid4()}", headers=_auth_headers("not-a-real-jwt")
+    )
+
+    # Assert
+    assert response.status_code == 401
+
+
+async def test_get_user_expired_token_returns_401(
+    client: AsyncClient, db_session: AsyncSession
+) -> None:
+    # Arrange
+    user = await _seed_user(db_session, email="getexpired@example.com")
+    token = await _expired_token(db_session, user_id=user.id, scopes=_READ)
+
+    # Act
+    response = await client.get(f"/api/v1/admin/users/{uuid.uuid4()}", headers=_auth_headers(token))
+
+    # Assert
+    assert response.status_code == 401
+
+
+async def test_get_user_revoked_session_returns_401(
+    client: AsyncClient, db_session: AsyncSession
+) -> None:
+    # Arrange
+    user = await _seed_user(db_session, email="getrevoked@example.com")
+    token = await _revoked_session_token(db_session, user_id=user.id, scopes=_READ)
+
+    # Act
+    response = await client.get(f"/api/v1/admin/users/{uuid.uuid4()}", headers=_auth_headers(token))
+
+    # Assert
+    assert response.status_code == 401
+
+
+async def test_get_user_insufficient_permission_returns_403(
+    client: AsyncClient, db_session: AsyncSession
+) -> None:
+    # Arrange
+    user = await _seed_user(db_session, email="getnoscope@example.com")
+    token = await _seed_session_and_token(db_session, user_id=user.id, scopes=[])
+
+    # Act
+    response = await client.get(f"/api/v1/admin/users/{uuid.uuid4()}", headers=_auth_headers(token))
+
+    # Assert
+    assert response.status_code == 403
+    assert response.json()["type"].endswith("/insufficient-permission")
 
 
 # --- POST /v1/admin/users - FR-5/FR-6/FR-7/FR-8 -----------------------------
@@ -360,6 +443,73 @@ async def test_create_user_missing_token_returns_401(client: AsyncClient) -> Non
 
     # Assert
     assert response.status_code == 401
+
+
+async def test_create_user_invalid_token_returns_401(client: AsyncClient) -> None:
+    # Act
+    response = await client.post(
+        "/api/v1/admin/users",
+        json={"email": "x@example.com", "display_name": "X", "roles": []},
+        headers=_auth_headers("not-a-real-jwt"),
+    )
+
+    # Assert
+    assert response.status_code == 401
+
+
+async def test_create_user_expired_token_returns_401(
+    client: AsyncClient, db_session: AsyncSession
+) -> None:
+    # Arrange
+    user = await _seed_user(db_session, email="createexpired@example.com")
+    token = await _expired_token(db_session, user_id=user.id, scopes=_WRITE)
+
+    # Act
+    response = await client.post(
+        "/api/v1/admin/users",
+        json={"email": "x@example.com", "display_name": "X", "roles": []},
+        headers=_auth_headers(token),
+    )
+
+    # Assert
+    assert response.status_code == 401
+
+
+async def test_create_user_revoked_session_returns_401(
+    client: AsyncClient, db_session: AsyncSession
+) -> None:
+    # Arrange
+    user = await _seed_user(db_session, email="createrevoked@example.com")
+    token = await _revoked_session_token(db_session, user_id=user.id, scopes=_WRITE)
+
+    # Act
+    response = await client.post(
+        "/api/v1/admin/users",
+        json={"email": "x@example.com", "display_name": "X", "roles": []},
+        headers=_auth_headers(token),
+    )
+
+    # Assert
+    assert response.status_code == 401
+
+
+async def test_create_user_insufficient_permission_returns_403(
+    client: AsyncClient, db_session: AsyncSession
+) -> None:
+    # Arrange
+    user = await _seed_user(db_session, email="createnoscope@example.com")
+    token = await _seed_session_and_token(db_session, user_id=user.id, scopes=[])
+
+    # Act
+    response = await client.post(
+        "/api/v1/admin/users",
+        json={"email": "x@example.com", "display_name": "X", "roles": []},
+        headers=_auth_headers(token),
+    )
+
+    # Assert
+    assert response.status_code == 403
+    assert response.json()["type"].endswith("/insufficient-permission")
 
 
 async def test_concurrent_create_user_same_email_exactly_one_succeeds(
@@ -539,6 +689,73 @@ async def test_patch_user_missing_token_returns_401(client: AsyncClient) -> None
     assert response.status_code == 401
 
 
+async def test_patch_user_invalid_token_returns_401(client: AsyncClient) -> None:
+    # Act
+    response = await client.patch(
+        f"/api/v1/admin/users/{uuid.uuid4()}",
+        json={"display_name": "X", "reason": "r"},
+        headers=_auth_headers("not-a-real-jwt"),
+    )
+
+    # Assert
+    assert response.status_code == 401
+
+
+async def test_patch_user_expired_token_returns_401(
+    client: AsyncClient, db_session: AsyncSession
+) -> None:
+    # Arrange
+    user = await _seed_user(db_session, email="patchexpired@example.com")
+    token = await _expired_token(db_session, user_id=user.id, scopes=_READ_WRITE)
+
+    # Act
+    response = await client.patch(
+        f"/api/v1/admin/users/{uuid.uuid4()}",
+        json={"display_name": "X", "reason": "r"},
+        headers=_auth_headers(token),
+    )
+
+    # Assert
+    assert response.status_code == 401
+
+
+async def test_patch_user_revoked_session_returns_401(
+    client: AsyncClient, db_session: AsyncSession
+) -> None:
+    # Arrange
+    user = await _seed_user(db_session, email="patchrevoked@example.com")
+    token = await _revoked_session_token(db_session, user_id=user.id, scopes=_READ_WRITE)
+
+    # Act
+    response = await client.patch(
+        f"/api/v1/admin/users/{uuid.uuid4()}",
+        json={"display_name": "X", "reason": "r"},
+        headers=_auth_headers(token),
+    )
+
+    # Assert
+    assert response.status_code == 401
+
+
+async def test_patch_user_insufficient_permission_returns_403(
+    client: AsyncClient, db_session: AsyncSession
+) -> None:
+    # Arrange
+    user = await _seed_user(db_session, email="patchnoscope@example.com")
+    token = await _seed_session_and_token(db_session, user_id=user.id, scopes=[])
+
+    # Act
+    response = await client.patch(
+        f"/api/v1/admin/users/{uuid.uuid4()}",
+        json={"display_name": "X", "reason": "r"},
+        headers=_auth_headers(token),
+    )
+
+    # Assert
+    assert response.status_code == 403
+    assert response.json()["type"].endswith("/insufficient-permission")
+
+
 # --- POST /v1/admin/users/{id}/deactivate - FR-13..FR-16, FR-17b -----------
 
 
@@ -689,6 +906,73 @@ async def test_deactivate_user_missing_token_returns_401(client: AsyncClient) ->
     assert response.status_code == 401
 
 
+async def test_deactivate_user_invalid_token_returns_401(client: AsyncClient) -> None:
+    # Act
+    response = await client.post(
+        f"/api/v1/admin/users/{uuid.uuid4()}/deactivate",
+        json={"reason": "r"},
+        headers=_auth_headers("not-a-real-jwt"),
+    )
+
+    # Assert
+    assert response.status_code == 401
+
+
+async def test_deactivate_user_expired_token_returns_401(
+    client: AsyncClient, db_session: AsyncSession
+) -> None:
+    # Arrange
+    user = await _seed_user(db_session, email="deactexpired@example.com")
+    token = await _expired_token(db_session, user_id=user.id, scopes=_WRITE)
+
+    # Act
+    response = await client.post(
+        f"/api/v1/admin/users/{uuid.uuid4()}/deactivate",
+        json={"reason": "r"},
+        headers=_auth_headers(token),
+    )
+
+    # Assert
+    assert response.status_code == 401
+
+
+async def test_deactivate_user_revoked_session_returns_401(
+    client: AsyncClient, db_session: AsyncSession
+) -> None:
+    # Arrange
+    user = await _seed_user(db_session, email="deactrevoked@example.com")
+    token = await _revoked_session_token(db_session, user_id=user.id, scopes=_WRITE)
+
+    # Act
+    response = await client.post(
+        f"/api/v1/admin/users/{uuid.uuid4()}/deactivate",
+        json={"reason": "r"},
+        headers=_auth_headers(token),
+    )
+
+    # Assert
+    assert response.status_code == 401
+
+
+async def test_deactivate_user_insufficient_permission_returns_403(
+    client: AsyncClient, db_session: AsyncSession
+) -> None:
+    # Arrange
+    user = await _seed_user(db_session, email="deactnoscope@example.com")
+    token = await _seed_session_and_token(db_session, user_id=user.id, scopes=[])
+
+    # Act
+    response = await client.post(
+        f"/api/v1/admin/users/{uuid.uuid4()}/deactivate",
+        json={"reason": "r"},
+        headers=_auth_headers(token),
+    )
+
+    # Assert
+    assert response.status_code == 403
+    assert response.json()["type"].endswith("/insufficient-permission")
+
+
 async def test_concurrent_deactivate_last_two_admins_exactly_one_succeeds(
     real_client: AsyncClient, cleanup_users: list[str]
 ) -> None:
@@ -785,6 +1069,48 @@ async def test_delete_user_authenticated_returns_405(
 async def test_delete_user_missing_token_returns_401_not_405(client: AsyncClient) -> None:
     # Act
     response = await client.delete(f"/api/v1/admin/users/{uuid.uuid4()}")
+
+    # Assert
+    assert response.status_code == 401
+
+
+async def test_delete_user_invalid_token_returns_401_not_405(client: AsyncClient) -> None:
+    # Act
+    response = await client.delete(
+        f"/api/v1/admin/users/{uuid.uuid4()}", headers=_auth_headers("not-a-real-jwt")
+    )
+
+    # Assert
+    assert response.status_code == 401
+
+
+async def test_delete_user_expired_token_returns_401_not_405(
+    client: AsyncClient, db_session: AsyncSession
+) -> None:
+    # Arrange
+    user = await _seed_user(db_session, email="deleteexpired@example.com")
+    token = await _expired_token(db_session, user_id=user.id, scopes=[])
+
+    # Act
+    response = await client.delete(
+        f"/api/v1/admin/users/{uuid.uuid4()}", headers=_auth_headers(token)
+    )
+
+    # Assert
+    assert response.status_code == 401
+
+
+async def test_delete_user_revoked_session_returns_401_not_405(
+    client: AsyncClient, db_session: AsyncSession
+) -> None:
+    # Arrange
+    user = await _seed_user(db_session, email="deleterevoked@example.com")
+    token = await _revoked_session_token(db_session, user_id=user.id, scopes=[])
+
+    # Act
+    response = await client.delete(
+        f"/api/v1/admin/users/{uuid.uuid4()}", headers=_auth_headers(token)
+    )
 
     # Assert
     assert response.status_code == 401
@@ -934,3 +1260,64 @@ async def test_resend_invite_missing_token_returns_401(client: AsyncClient) -> N
 
     # Assert
     assert response.status_code == 401
+
+
+async def test_resend_invite_invalid_token_returns_401(client: AsyncClient) -> None:
+    # Act
+    response = await client.post(
+        f"/api/v1/admin/users/{uuid.uuid4()}/resend-invite",
+        headers=_auth_headers("not-a-real-jwt"),
+    )
+
+    # Assert
+    assert response.status_code == 401
+
+
+async def test_resend_invite_expired_token_returns_401(
+    client: AsyncClient, db_session: AsyncSession
+) -> None:
+    # Arrange
+    user = await _seed_user(db_session, email="resendexpired@example.com")
+    token = await _expired_token(db_session, user_id=user.id, scopes=_WRITE)
+
+    # Act
+    response = await client.post(
+        f"/api/v1/admin/users/{uuid.uuid4()}/resend-invite", headers=_auth_headers(token)
+    )
+
+    # Assert
+    assert response.status_code == 401
+
+
+async def test_resend_invite_revoked_session_returns_401(
+    client: AsyncClient, db_session: AsyncSession
+) -> None:
+    # Arrange
+    user = await _seed_user(db_session, email="resendrevoked@example.com")
+    token = await _revoked_session_token(db_session, user_id=user.id, scopes=_WRITE)
+
+    # Act
+    response = await client.post(
+        f"/api/v1/admin/users/{uuid.uuid4()}/resend-invite", headers=_auth_headers(token)
+    )
+
+    # Assert
+    assert response.status_code == 401
+
+
+async def test_resend_invite_insufficient_permission_returns_403_and_audits(
+    client: AsyncClient, db_session: AsyncSession
+) -> None:
+    # Arrange
+    user = await _seed_user(db_session, email="resendnoscope@example.com")
+    token = await _seed_session_and_token(db_session, user_id=user.id, scopes=[])
+    target = await _seed_user(db_session, email="resendnoscopetarget@example.com", status="invited")
+
+    # Act
+    response = await client.post(
+        f"/api/v1/admin/users/{target.id}/resend-invite", headers=_auth_headers(token)
+    )
+
+    # Assert
+    assert response.status_code == 403
+    assert response.json()["type"].endswith("/insufficient-permission")
