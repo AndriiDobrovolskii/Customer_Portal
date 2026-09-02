@@ -1,5 +1,12 @@
-active_story: US-2.5
+active_story: US-2.6
 
+# US-2.6 (Active Sessions, Epic 2) started 2026-09-02: US-2.5 (MFA/TOTP)
+# reached PR #10, confirmed MERGED to main (`gh pr view 10`). US-2.6
+# depends only on US-2.3's refresh-token family_id concept (already on
+# main) and US-2.2's revocation path - no dependency on US-2.5's MFA
+# work. Starting fresh CLARIFICATION.
+
+# --- prior story: US-2.5 (DONE, reached PR, merged) ---
 # US-2.5 (MFA/TOTP, Epic 2) resumed 2026-09-01: US-3.2 (Manage Roles)
 # reached PR (GitHub PR #9, open, mergeable_state clean, not yet merged)
 # with every pipeline stage Pass (see docs/catalog/US-012-pipeline-status.md

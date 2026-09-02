@@ -1,7 +1,7 @@
 import uuid
 from datetime import datetime
 
-from sqlalchemy import Boolean, DateTime, ForeignKey, LargeBinary, String, Text, false, func
+from sqlalchemy import Boolean, DateTime, ForeignKey, Index, LargeBinary, String, Text, false, func
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db.base import Base
@@ -59,6 +59,11 @@ class AuthAuditLog(Base):
     reason: Mapped[str | None] = mapped_column(String(32))
     scope: Mapped[str | None] = mapped_column(String(32))
     severity: Mapped[str | None] = mapped_column(String(16))
+    # US-2.6: set only on session_revoked/session_evicted rows. Neither
+    # `reason` nor `scope` fits - both are String(32), too short for a
+    # UUID, and each already carries an established, different meaning
+    # elsewhere in this table (see docs/designs/database/US-010-db-design.md).
+    target_family: Mapped[uuid.UUID | None] = mapped_column()
     # Deliberately no FK: the row must survive the eventual 30-day-grace-
     # period account deletion/anonymization (BR-007), matching every other
     # audit table in this project.
@@ -88,6 +93,18 @@ class PasswordResetToken(Base):
 
 class RefreshToken(Base):
     __tablename__ = "refresh_tokens"
+    __table_args__ = (
+        # US-2.6: supports the per-user "current-state row per family"
+        # (DISTINCT ON) and "family created_at" (MIN(issued_at) GROUP BY
+        # family_id) queries as an index-only scan - see
+        # docs/designs/database/US-010-db-design.md.
+        Index(
+            "ix_refresh_tokens_user_id_family_id_issued_at",
+            "user_id",
+            "family_id",
+            "issued_at",
+        ),
+    )
 
     id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=uuid.uuid4)
     token_hash: Mapped[str] = mapped_column(String(64), unique=True, nullable=False)

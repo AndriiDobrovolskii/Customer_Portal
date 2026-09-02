@@ -170,6 +170,32 @@ class MfaEnrollmentRequiredError(ProblemError):
     detail = "Complete multi-factor authentication enrolment to continue."
 
 
+class SessionNotFoundError(ProblemError):
+    """US-2.6 FR-3: `family_id` belongs to a different user, is malformed,
+    or matches no record at all - all fold into this one 404, never 403
+    (a 403 would confirm the family_id exists).
+    """
+
+    type_slug = "not-found"
+    title = "Session Not Found"
+    status = 404
+    detail = "No session was found with that identifier."
+
+
+class CurrentSessionError(ProblemError):
+    """US-2.6 FR-6/OD-1: rejects a DELETE against the caller's own current
+    session (identified via the `refresh_token` cookie) rather than
+    silently revoking it - ending your only active session through this
+    endpoint has no described use case; logout (US-2.2) already owns
+    that.
+    """
+
+    type_slug = "current-session"
+    title = "Cannot Revoke Current Session"
+    status = 409
+    detail = "Use logout to end your current session; this endpoint manages your other sessions."
+
+
 class UnauthenticatedError(ProblemError):
     type_slug = "unauthenticated"
     title = "Unauthenticated"

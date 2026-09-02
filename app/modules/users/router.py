@@ -1,3 +1,4 @@
+import uuid
 from typing import Annotated
 
 from fastapi import APIRouter, Cookie, Depends, Request, Response, status
@@ -24,6 +25,7 @@ from app.modules.users.schemas import (
     PasswordResetRequestRequest,
     PasswordResetRequestResponse,
     RefreshResponse,
+    SessionListResponse,
     UserCreate,
     UserRead,
 )
@@ -145,6 +147,34 @@ async def logout_all(
 ) -> None:
     await service.logout_all(
         user_id=current_user.user_id,
+        ip=_get_client_ip(request),
+        user_agent=request.headers.get("User-Agent"),
+        request_id=request_id,
+    )
+
+
+@router.get("/sessions", response_model=SessionListResponse, status_code=status.HTTP_200_OK)
+async def list_sessions(
+    current_user: CurrentUserDep,
+    service: UserServiceDep,
+    refresh_token: Annotated[str | None, Cookie()] = None,
+) -> SessionListResponse:
+    return await service.list_sessions(user_id=current_user.user_id, refresh_cookie=refresh_token)
+
+
+@router.delete("/sessions/{family_id}", response_model=None, status_code=status.HTTP_204_NO_CONTENT)
+async def revoke_session(
+    family_id: uuid.UUID,
+    current_user: CurrentUserDep,
+    service: UserServiceDep,
+    request: Request,
+    request_id: Annotated[str, Depends(get_request_id)],
+    refresh_token: Annotated[str | None, Cookie()] = None,
+) -> None:
+    await service.revoke_session(
+        user_id=current_user.user_id,
+        family_id=family_id,
+        refresh_cookie=refresh_token,
         ip=_get_client_ip(request),
         user_agent=request.headers.get("User-Agent"),
         request_id=request_id,

@@ -17,6 +17,7 @@ from app.core.security import (
 )
 from app.modules.users.exceptions import (
     AccountDeactivatedError,
+    CurrentSessionError,
     DuplicateEmailError,
     EmailNotVerifiedError,
     InvalidCredentialsError,
@@ -27,6 +28,7 @@ from app.modules.users.exceptions import (
     PasswordResetTokenExpiredError,
     PasswordResetTokenInvalidError,
     RegistrationValidationError,
+    SessionNotFoundError,
     TokenInvalidError,
     TokenStaleError,
     TooManyAttemptsError,
@@ -85,6 +87,7 @@ class FakeUserRepository:
         self.recovery_codes_by_user: dict[uuid.UUID, list[MfaRecoveryCode]] = {}
         self.disable_mfa_calls: list[uuid.UUID] = []
         self.set_reenrollment_required_calls: list[uuid.UUID] = []
+        self.lock_calls: list[uuid.UUID] = []
         # RT-AC6: simulates a concurrent winner consuming this token between
         # this fake's own initial read and its atomic-consume call — the
         # first consume_refresh_token call sets consumed_at (as if another
@@ -168,6 +171,7 @@ class FakeUserRepository:
         user_agent: str | None,
         request_id: str,
         severity: str | None = None,
+        target_family: uuid.UUID | None = None,
     ) -> None:
         self.audit_log_entries.append(
             {
@@ -179,6 +183,7 @@ class FakeUserRepository:
                 "ip": ip,
                 "user_agent": user_agent,
                 "request_id": request_id,
+                "target_family": target_family,
             }
         )
 
@@ -213,8 +218,54 @@ class FakeUserRepository:
             user_agent=user_agent,
             last_used_at=last_used_at,
         )
+        # US-2.6: a bare instance never flushed to a session has no
+        # server_default-computed `issued_at` - set it explicitly so the
+        # new family-listing/eviction queries (which order by it) have
+        # meaningful data to operate on in unit tests.
+        token.issued_at = datetime.now(UTC)
         self.refresh_tokens_by_hash[token_hash] = token
         return token
+
+    async def get_any_refresh_token_for_family(
+        self, *, family_id: uuid.UUID, user_id: uuid.UUID
+    ) -> RefreshToken | None:
+        for token in self.refresh_tokens_by_hash.values():
+            if token.family_id == family_id and token.user_id == user_id:
+                return token
+        return None
+
+    async def lock_live_refresh_tokens_for_user(self, *, user_id: uuid.UUID) -> None:
+        """The row lock's actual effect (serializing concurrent
+        transactions) isn't observable against an in-memory fake - proven
+        at the integration level instead (T8). Records which `user_id` it
+        was called with, so a unit test can confirm the service scopes the
+        lock to the acting user, never a global/table-wide call.
+        """
+        self.lock_calls.append(user_id)
+
+    async def list_live_families_for_user(self, *, user_id: uuid.UUID) -> list[RefreshToken]:
+        now = datetime.now(UTC)
+        latest_by_family: dict[uuid.UUID, RefreshToken] = {}
+        for token in self.refresh_tokens_by_hash.values():
+            if token.user_id != user_id or token.revoked_at is not None or token.expires_at <= now:
+                continue
+            current = latest_by_family.get(token.family_id)
+            if current is None or token.issued_at > current.issued_at:
+                latest_by_family[token.family_id] = token
+        return list(latest_by_family.values())
+
+    async def get_family_created_at_map_for_user(
+        self, *, user_id: uuid.UUID
+    ) -> dict[uuid.UUID, datetime]:
+        now = datetime.now(UTC)
+        result: dict[uuid.UUID, datetime] = {}
+        for token in self.refresh_tokens_by_hash.values():
+            if token.user_id != user_id or token.revoked_at is not None or token.expires_at <= now:
+                continue
+            existing = result.get(token.family_id)
+            if existing is None or token.issued_at < existing:
+                result[token.family_id] = token.issued_at
+        return result
 
     async def update_password_hash(self, *, user_id: uuid.UUID, hashed_password: str) -> None:
         self.password_hash_updates[user_id] = hashed_password
@@ -3112,3 +3163,465 @@ async def test_get_authenticated_user_allow_enrollment_scoped_accepts_scoped_tok
     # Assert
     assert result is not None
     assert result.mfa_enrollment_required is True
+
+
+# --- US-2.6 (spec US-010): Active Session Management -------------------------
+
+
+def _seed_family(
+    repository: FakeUserRepository,
+    *,
+    user_id: uuid.UUID,
+    family_id: uuid.UUID | None = None,
+    issued_at: datetime | None = None,
+    last_used_at: datetime | None = None,
+    ip: str | None = "203.0.113.10",
+    user_agent: str | None = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/120.0 Safari/537.36",
+    revoked: bool = False,
+    expires_at: datetime | None = None,
+) -> RefreshToken:
+    family_id = family_id or uuid.uuid4()
+    token_hash = hashlib.sha256(uuid.uuid4().bytes).hexdigest()
+    token = RefreshToken(
+        token_hash=token_hash,
+        family_id=family_id,
+        user_id=user_id,
+        expires_at=expires_at or (datetime.now(UTC) + timedelta(days=30)),
+        ip=ip,
+        user_agent=user_agent,
+        last_used_at=last_used_at,
+    )
+    token.issued_at = issued_at or datetime.now(UTC)
+    token.revoked_at = datetime.now(UTC) if revoked else None
+    repository.refresh_tokens_by_hash[token_hash] = token
+    return token
+
+
+async def test_list_sessions_returns_one_entry_per_live_family() -> None:
+    # Arrange
+    repository = FakeUserRepository()
+    user_id = uuid.uuid4()
+    _seed_family(repository, user_id=user_id)
+    _seed_family(repository, user_id=user_id)
+    _seed_family(repository, user_id=user_id)
+    service, _, _ = _make_service(repository)
+
+    # Act
+    result = await service.list_sessions(user_id=user_id, refresh_cookie=None)
+
+    # Assert
+    assert len(result.sessions) == 3
+
+
+async def test_list_sessions_created_at_is_earliest_issued_at_in_family() -> None:
+    # Arrange
+    repository = FakeUserRepository()
+    user_id = uuid.uuid4()
+    family_id = uuid.uuid4()
+    earliest = datetime.now(UTC) - timedelta(days=10)
+    _seed_family(repository, user_id=user_id, family_id=family_id, issued_at=earliest)
+    latest_row = _seed_family(
+        repository, user_id=user_id, family_id=family_id, issued_at=datetime.now(UTC)
+    )
+    service, _, _ = _make_service(repository)
+
+    # Act
+    result = await service.list_sessions(user_id=user_id, refresh_cookie=None)
+
+    # Assert: one entry (latest row represents the family), created_at is the earliest
+    assert len(result.sessions) == 1
+    assert result.sessions[0].family_id == latest_row.family_id
+    assert result.sessions[0].created_at == earliest
+
+
+async def test_list_sessions_is_current_matches_cookie_family() -> None:
+    # Arrange
+    repository = FakeUserRepository()
+    user_id = uuid.uuid4()
+    raw_token = "raw-current-refresh-token"
+    current = _seed_family(repository, user_id=user_id)
+    repository.refresh_tokens_by_hash[hash_refresh_token(raw_token)] = current
+    _seed_family(repository, user_id=user_id)
+    service, _, _ = _make_service(repository)
+
+    # Act
+    result = await service.list_sessions(user_id=user_id, refresh_cookie=raw_token)
+
+    # Assert
+    current_flags = {entry.family_id: entry.is_current for entry in result.sessions}
+    assert current_flags[current.family_id] is True
+    assert sum(1 for flag in current_flags.values() if flag) == 1
+
+
+async def test_list_sessions_no_cookie_all_entries_not_current() -> None:
+    # Arrange
+    repository = FakeUserRepository()
+    user_id = uuid.uuid4()
+    _seed_family(repository, user_id=user_id)
+    _seed_family(repository, user_id=user_id)
+    service, _, _ = _make_service(repository)
+
+    # Act
+    result = await service.list_sessions(user_id=user_id, refresh_cookie=None)
+
+    # Assert
+    assert all(entry.is_current is False for entry in result.sessions)
+
+
+async def test_list_sessions_stale_cookie_all_entries_not_current() -> None:
+    # Arrange
+    repository = FakeUserRepository()
+    user_id = uuid.uuid4()
+    _seed_family(repository, user_id=user_id)
+    service, _, _ = _make_service(repository)
+
+    # Act: cookie value matches no stored token hash at all
+    result = await service.list_sessions(user_id=user_id, refresh_cookie="unknown-stale-cookie")
+
+    # Assert
+    assert all(entry.is_current is False for entry in result.sessions)
+
+
+async def test_list_sessions_response_excludes_token_and_full_ip() -> None:
+    # Arrange
+    repository = FakeUserRepository()
+    user_id = uuid.uuid4()
+    _seed_family(repository, user_id=user_id, ip="198.51.100.7")
+    service, _, _ = _make_service(repository)
+
+    # Act
+    result = await service.list_sessions(user_id=user_id, refresh_cookie=None)
+
+    # Assert: SessionEntry's field set is exhaustive - no token/hash/full-IP field exists
+    entry_fields = set(type(result.sessions[0]).model_fields)
+    assert entry_fields == {
+        "family_id",
+        "created_at",
+        "last_used_at",
+        "location",
+        "device_label",
+        "is_current",
+    }
+
+
+async def test_list_sessions_unresolvable_ip_returns_null_location() -> None:
+    # Arrange — no GeoLite2 database is bundled in this test environment
+    # (OD-4: fetched at build/deploy time), so every lookup naturally
+    # resolves to None regardless of the IP's validity.
+    repository = FakeUserRepository()
+    user_id = uuid.uuid4()
+    _seed_family(repository, user_id=user_id, ip="8.8.8.8")
+    service, _, _ = _make_service(repository)
+
+    # Act
+    result = await service.list_sessions(user_id=user_id, refresh_cookie=None)
+
+    # Assert
+    assert result.sessions[0].location is None
+
+
+async def test_list_sessions_unparseable_user_agent_returns_unknown_device() -> None:
+    # Arrange
+    repository = FakeUserRepository()
+    user_id = uuid.uuid4()
+    _seed_family(repository, user_id=user_id, user_agent="not-a-real-user-agent-string")
+    service, _, _ = _make_service(repository)
+
+    # Act
+    result = await service.list_sessions(user_id=user_id, refresh_cookie=None)
+
+    # Assert
+    assert result.sessions[0].device_label == "Unknown device"
+
+
+async def test_list_sessions_no_live_families_returns_empty_list() -> None:
+    # Arrange
+    repository = FakeUserRepository()
+    user_id = uuid.uuid4()
+    service, _, _ = _make_service(repository)
+
+    # Act
+    result = await service.list_sessions(user_id=user_id, refresh_cookie=None)
+
+    # Assert
+    assert result.sessions == []
+
+
+async def test_revoke_session_own_other_family_returns_204_and_revokes() -> None:
+    # Arrange
+    repository = FakeUserRepository()
+    user_id = uuid.uuid4()
+    target = _seed_family(repository, user_id=user_id)
+    service, _, _ = _make_service(repository)
+
+    # Act
+    await service.revoke_session(
+        user_id=user_id,
+        family_id=target.family_id,
+        refresh_cookie=None,
+        ip=_IP,
+        user_agent="pytest-agent",
+        request_id=_REQUEST_ID,
+    )
+
+    # Assert
+    assert repository.revoked_family_ids == [target.family_id]
+
+
+async def test_revoke_session_writes_session_revoked_audit_entry() -> None:
+    # Arrange
+    repository = FakeUserRepository()
+    user_id = uuid.uuid4()
+    target = _seed_family(repository, user_id=user_id)
+    service, _, _ = _make_service(repository)
+
+    # Act
+    await service.revoke_session(
+        user_id=user_id,
+        family_id=target.family_id,
+        refresh_cookie=None,
+        ip=_IP,
+        user_agent="pytest-agent",
+        request_id=_REQUEST_ID,
+    )
+
+    # Assert
+    assert repository.audit_log_entries[-1]["event"] == "session_revoked"
+    assert repository.audit_log_entries[-1]["target_family"] == target.family_id
+
+
+async def test_revoke_session_other_users_family_returns_404() -> None:
+    # Arrange
+    repository = FakeUserRepository()
+    other_user_id = uuid.uuid4()
+    target = _seed_family(repository, user_id=other_user_id)
+    service, _, _ = _make_service(repository)
+
+    # Act & Assert
+    with pytest.raises(SessionNotFoundError):
+        await service.revoke_session(
+            user_id=uuid.uuid4(),
+            family_id=target.family_id,
+            refresh_cookie=None,
+            ip=_IP,
+            user_agent="pytest-agent",
+            request_id=_REQUEST_ID,
+        )
+    assert repository.revoked_family_ids == []
+
+
+async def test_revoke_session_malformed_family_id_returns_404() -> None:
+    # Arrange
+    repository = FakeUserRepository()
+    user_id = uuid.uuid4()
+    service, _, _ = _make_service(repository)
+
+    # Act & Assert: a family_id matching no record at all
+    with pytest.raises(SessionNotFoundError):
+        await service.revoke_session(
+            user_id=user_id,
+            family_id=uuid.uuid4(),
+            refresh_cookie=None,
+            ip=_IP,
+            user_agent="pytest-agent",
+            request_id=_REQUEST_ID,
+        )
+
+
+async def test_revoke_session_already_revoked_returns_204_idempotent() -> None:
+    # Arrange
+    repository = FakeUserRepository()
+    user_id = uuid.uuid4()
+    target = _seed_family(repository, user_id=user_id, revoked=True)
+    service, _, _ = _make_service(repository)
+
+    # Act
+    await service.revoke_session(
+        user_id=user_id,
+        family_id=target.family_id,
+        refresh_cookie=None,
+        ip=_IP,
+        user_agent="pytest-agent",
+        request_id=_REQUEST_ID,
+    )
+
+    # Assert: idempotent revoke succeeds, but no audit entry for a no-op
+    assert repository.audit_log_entries == []
+
+
+async def test_revoke_session_expired_family_returns_204_idempotent() -> None:
+    # Arrange
+    repository = FakeUserRepository()
+    user_id = uuid.uuid4()
+    target = _seed_family(
+        repository, user_id=user_id, expires_at=datetime.now(UTC) - timedelta(days=1)
+    )
+    service, _, _ = _make_service(repository)
+
+    # Act
+    await service.revoke_session(
+        user_id=user_id,
+        family_id=target.family_id,
+        refresh_cookie=None,
+        ip=_IP,
+        user_agent="pytest-agent",
+        request_id=_REQUEST_ID,
+    )
+
+    # Assert
+    assert repository.audit_log_entries == []
+
+
+async def test_revoke_session_own_current_family_returns_409() -> None:
+    # Arrange
+    repository = FakeUserRepository()
+    user_id = uuid.uuid4()
+    raw_token = "raw-current-refresh-token"
+    current = _seed_family(repository, user_id=user_id)
+    repository.refresh_tokens_by_hash[hash_refresh_token(raw_token)] = current
+    service, _, _ = _make_service(repository)
+
+    # Act & Assert
+    with pytest.raises(CurrentSessionError):
+        await service.revoke_session(
+            user_id=user_id,
+            family_id=current.family_id,
+            refresh_cookie=raw_token,
+            ip=_IP,
+            user_agent="pytest-agent",
+            request_id=_REQUEST_ID,
+        )
+    assert repository.revoked_family_ids == []
+
+
+async def test_revoke_session_no_cookie_current_check_never_triggers() -> None:
+    # Arrange: no cookie presented, so even the caller's own only family
+    # is treated as an ordinary other-device revoke, not rejected as
+    # "current".
+    repository = FakeUserRepository()
+    user_id = uuid.uuid4()
+    only_family = _seed_family(repository, user_id=user_id)
+    service, _, _ = _make_service(repository)
+
+    # Act
+    await service.revoke_session(
+        user_id=user_id,
+        family_id=only_family.family_id,
+        refresh_cookie=None,
+        ip=_IP,
+        user_agent="pytest-agent",
+        request_id=_REQUEST_ID,
+    )
+
+    # Assert
+    assert repository.revoked_family_ids == [only_family.family_id]
+
+
+# --- FR-7: live-session cap eviction (triggered from the login path) --------
+
+
+async def test_login_below_cap_creates_family_without_eviction() -> None:
+    # Arrange
+    repository = FakeUserRepository()
+    user = await _seed_user(
+        repository, email="cap@example.com", password="Str0ng!Pass", email_verified=True
+    )
+    for _ in range(19):
+        _seed_family(repository, user_id=user.id)
+    service, _, _ = _make_service(repository)
+    payload = LoginRequest(email="cap@example.com", password="Str0ng!Pass")
+
+    # Act
+    await _login(service, payload)
+
+    # Assert: 19 pre-existing + 1 new = 20, still at (not over) the cap - no eviction
+    assert repository.revoked_family_ids == []
+    assert not any(entry["event"] == "session_evicted" for entry in repository.audit_log_entries)
+
+
+async def test_login_at_cap_evicts_oldest_family() -> None:
+    # Arrange
+    repository = FakeUserRepository()
+    user = await _seed_user(
+        repository, email="atcap@example.com", password="Str0ng!Pass", email_verified=True
+    )
+    oldest = _seed_family(
+        repository, user_id=user.id, issued_at=datetime.now(UTC) - timedelta(days=30)
+    )
+    for offset in range(1, 20):
+        issued_at = datetime.now(UTC) - timedelta(days=30 - offset)
+        _seed_family(repository, user_id=user.id, issued_at=issued_at)
+    service, _, _ = _make_service(repository)
+    payload = LoginRequest(email="atcap@example.com", password="Str0ng!Pass")
+
+    # Act
+    await _login(service, payload)
+
+    # Assert
+    assert repository.revoked_family_ids == [oldest.family_id]
+
+
+async def test_login_new_family_never_evicted_on_same_login() -> None:
+    # Arrange: 20 existing families already at the cap
+    repository = FakeUserRepository()
+    user = await _seed_user(
+        repository, email="newfam@example.com", password="Str0ng!Pass", email_verified=True
+    )
+    for offset in range(20):
+        issued_at = datetime.now(UTC) - timedelta(days=offset + 1)
+        _seed_family(repository, user_id=user.id, issued_at=issued_at)
+    service, _, _ = _make_service(repository)
+    payload = LoginRequest(email="newfam@example.com", password="Str0ng!Pass")
+
+    # Act
+    _, raw_refresh_token = await _login(service, payload)
+
+    # Assert: the newly-created family (this login's own) is never the one evicted
+    new_family_ids = {
+        entry["family_id"]
+        for entry in repository.refresh_tokens
+        if entry["token_hash"] == hash_refresh_token(raw_refresh_token)
+    }
+    assert not new_family_ids & set(repository.revoked_family_ids)
+
+
+async def test_login_eviction_writes_session_evicted_audit_no_email() -> None:
+    # Arrange
+    repository = FakeUserRepository()
+    email_sender = FakeEmailSender()
+    user = await _seed_user(
+        repository, email="auditcap@example.com", password="Str0ng!Pass", email_verified=True
+    )
+    oldest = _seed_family(
+        repository, user_id=user.id, issued_at=datetime.now(UTC) - timedelta(days=30)
+    )
+    for offset in range(1, 20):
+        issued_at = datetime.now(UTC) - timedelta(days=30 - offset)
+        _seed_family(repository, user_id=user.id, issued_at=issued_at)
+    service, _, _ = _make_service(repository, email_sender=email_sender)
+    payload = LoginRequest(email="auditcap@example.com", password="Str0ng!Pass")
+
+    # Act
+    await _login(service, payload)
+
+    # Assert
+    evicted_entries = [e for e in repository.audit_log_entries if e["event"] == "session_evicted"]
+    assert len(evicted_entries) == 1
+    assert evicted_entries[0]["target_family"] == oldest.family_id
+    assert email_sender.sent == []
+
+
+async def test_login_eviction_lock_scoped_to_acting_user_only() -> None:
+    # Arrange
+    repository = FakeUserRepository()
+    user = await _seed_user(
+        repository, email="lockscope@example.com", password="Str0ng!Pass", email_verified=True
+    )
+    service, _, _ = _make_service(repository)
+    payload = LoginRequest(email="lockscope@example.com", password="Str0ng!Pass")
+
+    # Act
+    await _login(service, payload)
+
+    # Assert: the lock call is scoped to this user only, never a bare/global call
+    assert repository.lock_calls == [user.id]

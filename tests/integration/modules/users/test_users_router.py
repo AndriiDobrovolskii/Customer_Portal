@@ -1,12 +1,13 @@
 import asyncio
 import hashlib
+import time
 import uuid
 from datetime import UTC, datetime, timedelta
 
 import jwt
 import pytest
 from httpx import AsyncClient
-from sqlalchemy import select
+from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.cache_keys import login_fail_account_key, login_fail_ip_key
@@ -1804,3 +1805,400 @@ async def test_stale_access_token_after_role_change_returns_401_then_refresh_car
     assert refresh_response.status_code == 200
     new_claims = decode_access_token(refresh_response.json()["access_token"])
     assert new_claims.scopes == ["audit:read"]
+
+
+# --- US-2.6 (spec US-010): Active Session Management -------------------------
+
+
+async def _seed_refresh_token(
+    db_session: AsyncSession,
+    *,
+    user_id: uuid.UUID,
+    family_id: uuid.UUID | None = None,
+    issued_at: datetime | None = None,
+    last_used_at: datetime | None = None,
+    ip: str | None = "203.0.113.10",
+    user_agent: str | None = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/120.0 Safari/537.36",
+    revoked: bool = False,
+    expires_at: datetime | None = None,
+) -> RefreshToken:
+    token = RefreshToken(
+        token_hash=hashlib.sha256(uuid.uuid4().bytes).hexdigest(),
+        family_id=family_id or uuid.uuid4(),
+        user_id=user_id,
+        expires_at=expires_at or (datetime.now(UTC) + timedelta(days=30)),
+        ip=ip,
+        user_agent=user_agent,
+        last_used_at=last_used_at,
+        issued_at=issued_at or datetime.now(UTC),
+    )
+    db_session.add(token)
+    await db_session.flush()
+    if revoked:
+        token.revoked_at = datetime.now(UTC)
+        await db_session.flush()
+    return token
+
+
+# --- SM-AC5: unauthenticated (FR-5) ------------------------------------------
+
+
+async def test_list_sessions_missing_token_returns_401(client: AsyncClient) -> None:
+    # Act
+    response = await client.get("/api/v1/auth/sessions")
+
+    # Assert: no session metadata leaks in an unauthenticated response
+    assert response.status_code == 401
+    assert "sessions" not in response.text
+
+
+async def test_list_sessions_invalid_token_returns_401(client: AsyncClient) -> None:
+    # Act
+    response = await client.get("/api/v1/auth/sessions", headers=_auth_headers("not-a-real-jwt"))
+
+    # Assert
+    assert response.status_code == 401
+
+
+async def test_list_sessions_expired_token_returns_401(
+    client: AsyncClient, db_session: AsyncSession
+) -> None:
+    # Arrange
+    user = await _seed_login_user(
+        db_session,
+        email="sessions.list.expired@example.com",
+        password="Str0ng!Pass1",
+        email_verified=True,
+        status="active",
+    )
+    expired_token = await _make_expired_token(db_session, user_id=user.id)
+
+    # Act
+    response = await client.get("/api/v1/auth/sessions", headers=_auth_headers(expired_token))
+
+    # Assert
+    assert response.status_code == 401
+
+
+# --- SM-AC1: listing sessions (FR-1) -----------------------------------------
+
+
+async def test_get_sessions_returns_200_and_correct_family_shapes(
+    client: AsyncClient, db_session: AsyncSession
+) -> None:
+    # Arrange
+    user, access_token = await _login(client, db_session, email="sessions.list@example.com")
+    other_1 = await _seed_refresh_token(db_session, user_id=user.id, ip="198.51.100.5")
+    other_2 = await _seed_refresh_token(db_session, user_id=user.id, ip="198.51.100.6")
+
+    # Act
+    response = await client.get("/api/v1/auth/sessions", headers=_auth_headers(access_token))
+
+    # Assert: status + body shape
+    assert response.status_code == 200
+    body = response.json()
+    family_ids = {entry["family_id"] for entry in body["sessions"]}
+    assert len(body["sessions"]) == 3
+    assert {str(other_1.family_id), str(other_2.family_id)}.issubset(family_ids)
+    current_entries = [entry for entry in body["sessions"] if entry["is_current"]]
+    assert len(current_entries) == 1
+    # The real login's own family is the current one - neither directly-
+    # seeded "other device" family is.
+    assert current_entries[0]["family_id"] not in {str(other_1.family_id), str(other_2.family_id)}
+    for entry in body["sessions"]:
+        assert set(entry.keys()) == {
+            "family_id",
+            "created_at",
+            "last_used_at",
+            "location",
+            "device_label",
+            "is_current",
+        }
+        assert "token" not in entry and "hash" not in entry and "ip" not in entry
+
+
+async def test_get_sessions_p95_latency_within_budget_at_cap(
+    client: AsyncClient, db_session: AsyncSession
+) -> None:
+    # Arrange: 20 live families - the documented cap (NFR).
+    user, access_token = await _login(client, db_session, email="sessions.perf@example.com")
+    for _ in range(19):
+        await _seed_refresh_token(db_session, user_id=user.id)
+
+    # Act
+    start = time.monotonic()
+    response = await client.get("/api/v1/auth/sessions", headers=_auth_headers(access_token))
+    elapsed_ms = (time.monotonic() - start) * 1000
+
+    # Assert
+    assert response.status_code == 200
+    assert len(response.json()["sessions"]) == 20
+    assert elapsed_ms <= 200
+
+
+# --- SM-AC3/SM-AC5: revoke security cases ------------------------------------
+
+
+async def test_revoke_session_missing_token_returns_401(client: AsyncClient) -> None:
+    # Act
+    response = await client.delete(f"/api/v1/auth/sessions/{uuid.uuid4()}")
+
+    # Assert
+    assert response.status_code == 401
+
+
+async def test_revoke_session_invalid_token_returns_401(client: AsyncClient) -> None:
+    # Act
+    response = await client.delete(
+        f"/api/v1/auth/sessions/{uuid.uuid4()}", headers=_auth_headers("not-a-real-jwt")
+    )
+
+    # Assert
+    assert response.status_code == 401
+
+
+async def test_revoke_session_expired_token_returns_401(
+    client: AsyncClient, db_session: AsyncSession
+) -> None:
+    # Arrange
+    user = await _seed_login_user(
+        db_session,
+        email="sessions.revoke.expired@example.com",
+        password="Str0ng!Pass1",
+        email_verified=True,
+        status="active",
+    )
+    expired_token = await _make_expired_token(db_session, user_id=user.id)
+
+    # Act
+    response = await client.delete(
+        f"/api/v1/auth/sessions/{uuid.uuid4()}", headers=_auth_headers(expired_token)
+    )
+
+    # Assert
+    assert response.status_code == 401
+
+
+# --- SM-AC2: revoking another device (FR-2) ----------------------------------
+
+
+async def test_delete_session_returns_204_and_persists_revocation(
+    client: AsyncClient, db_session: AsyncSession
+) -> None:
+    # Arrange
+    user, access_token = await _login(client, db_session, email="sessions.revoke@example.com")
+    target = await _seed_refresh_token(db_session, user_id=user.id)
+    own_result = await db_session.execute(
+        select(RefreshToken).where(
+            RefreshToken.user_id == user.id, RefreshToken.family_id != target.family_id
+        )
+    )
+    own_family = own_result.scalar_one()
+
+    # Act
+    response = await client.delete(
+        f"/api/v1/auth/sessions/{target.family_id}", headers=_auth_headers(access_token)
+    )
+
+    # Assert: status
+    assert response.status_code == 204
+    assert response.content == b""
+
+    # Assert: persisted state - target revoked, caller's own family untouched
+    await db_session.refresh(target)
+    assert target.revoked_at is not None
+    await db_session.refresh(own_family)
+    assert own_family.revoked_at is None
+
+    audit_result = await db_session.execute(
+        select(AuthAuditLog).where(
+            AuthAuditLog.event == "session_revoked", AuthAuditLog.target_family == target.family_id
+        )
+    )
+    entry = audit_result.scalar_one()
+    assert entry.actor_id == user.id
+
+
+# --- SM-AC3: another user's session returns 404 ------------------------------
+
+
+async def test_delete_other_users_session_returns_404_and_leaves_untouched(
+    client: AsyncClient, db_session: AsyncSession
+) -> None:
+    # Arrange
+    _, access_token = await _login(client, db_session, email="sessions.caller@example.com")
+    victim = await _seed_login_user(
+        db_session,
+        email="sessions.victim@example.com",
+        password="Str0ng!Pass1",
+        email_verified=True,
+        status="active",
+    )
+    victim_family = await _seed_refresh_token(db_session, user_id=victim.id)
+
+    # Act
+    response = await client.delete(
+        f"/api/v1/auth/sessions/{victim_family.family_id}", headers=_auth_headers(access_token)
+    )
+
+    # Assert
+    assert response.status_code == 404
+    assert response.json()["type"].endswith("/not-found")
+    await db_session.refresh(victim_family)
+    assert victim_family.revoked_at is None
+
+
+# --- OD-1/FR-6: own current session rejected with 409 ------------------------
+
+
+async def test_delete_own_current_session_returns_409_and_persists_nothing(
+    client: AsyncClient, db_session: AsyncSession
+) -> None:
+    # Arrange
+    user, access_token = await _login(client, db_session, email="sessions.current@example.com")
+    current_result = await db_session.execute(
+        select(RefreshToken).where(RefreshToken.user_id == user.id)
+    )
+    current_family = current_result.scalar_one()
+
+    # Act
+    response = await client.delete(
+        f"/api/v1/auth/sessions/{current_family.family_id}", headers=_auth_headers(access_token)
+    )
+
+    # Assert
+    assert response.status_code == 409
+    assert response.json()["type"].endswith("/current-session")
+    await db_session.refresh(current_family)
+    assert current_family.revoked_at is None
+
+
+# --- FR-7: live-session cap eviction ------------------------------------------
+
+
+async def test_login_creates_21st_family_evicts_oldest_persisted(
+    client: AsyncClient, db_session: AsyncSession
+) -> None:
+    # Arrange: 20 live families already at the cap, the oldest clearly first.
+    user = await _seed_login_user(
+        db_session,
+        email="sessions.cap@example.com",
+        password="Str0ng!Pass1",
+        email_verified=True,
+        status="active",
+    )
+    oldest = await _seed_refresh_token(
+        db_session, user_id=user.id, issued_at=datetime.now(UTC) - timedelta(days=30)
+    )
+    for offset in range(1, 20):
+        await _seed_refresh_token(
+            db_session,
+            user_id=user.id,
+            issued_at=datetime.now(UTC) - timedelta(days=30 - offset),
+        )
+
+    # Act
+    response = await client.post(
+        "/api/v1/auth/login",
+        json={"email": "sessions.cap@example.com", "password": "Str0ng!Pass1"},
+    )
+
+    # Assert
+    assert response.status_code == 200
+    await db_session.refresh(oldest)
+    assert oldest.revoked_at is not None
+
+    audit_result = await db_session.execute(
+        select(AuthAuditLog).where(
+            AuthAuditLog.event == "session_evicted", AuthAuditLog.target_family == oldest.family_id
+        )
+    )
+    assert audit_result.scalar_one() is not None
+
+    live_result = await db_session.execute(
+        select(RefreshToken).where(
+            RefreshToken.user_id == user.id,
+            RefreshToken.revoked_at.is_(None),
+            RefreshToken.expires_at > datetime.now(UTC),
+        )
+    )
+    assert len(live_result.scalars().all()) == 20
+
+
+async def _seed_committed_active_user(*, email: str, password: str) -> uuid.UUID:
+    """Commits directly via the app's real engine, bypassing the rollback-
+    wrapped `db_session` fixture - `real_client` requests use independent,
+    genuinely-committed sessions (see conftest.py), so seed data must be
+    committed the same way to be visible to them.
+    """
+    user_id = uuid.uuid4()
+    hashed = await hash_password(password)
+    engine = app.state.db_engine
+    async with engine.begin() as connection:
+        await connection.execute(
+            text(
+                "INSERT INTO users (id, email, hashed_password, status, email_verified) "
+                "VALUES (:id, :email, :hashed_password, 'active', true)"
+            ),
+            {"id": user_id, "email": email, "hashed_password": hashed},
+        )
+    return user_id
+
+
+async def test_concurrent_logins_at_cap_boundary_never_exceed_cap(
+    real_client: AsyncClient, cleanup_users: list[str]
+) -> None:
+    """Spec-review resolution: two logins racing at the 20-family cap
+    boundary must not both skip eviction - the row lock
+    (`lock_live_refresh_tokens_for_user`) must serialize them so the live
+    count never transiently exceeds the cap.
+    """
+    # Arrange
+    email = "sessions.concurrent.cap@example.com"
+    password = "Str0ng!Pass1"
+    cleanup_users.append(email)
+    await _seed_committed_active_user(email=email, password=password)
+    settings = get_settings()
+    for _ in range(settings.max_live_sessions_per_user):
+        seed_response = await real_client.post(
+            "/api/v1/auth/login", json={"email": email, "password": password}
+        )
+        assert seed_response.status_code == 200
+
+    # Act: two concurrent logins, both racing past the cap
+    responses = await asyncio.gather(
+        real_client.post("/api/v1/auth/login", json={"email": email, "password": password}),
+        real_client.post("/api/v1/auth/login", json={"email": email, "password": password}),
+    )
+    assert all(response.status_code == 200 for response in responses)
+
+    # Assert: the row lock serialized both evictions - the cap is never
+    # transiently exceeded, and exactly one eviction happened per login.
+    engine = app.state.db_engine
+    async with engine.connect() as connection:
+        user_id = (
+            await connection.execute(
+                text("SELECT id FROM users WHERE email = :email"), {"email": email}
+            )
+        ).scalar_one()
+        live_count = (
+            await connection.execute(
+                text(
+                    "SELECT COUNT(DISTINCT family_id) FROM refresh_tokens "
+                    "WHERE user_id = :user_id AND revoked_at IS NULL AND expires_at > now()"
+                ),
+                {"user_id": user_id},
+            )
+        ).scalar_one()
+        evicted_count = (
+            await connection.execute(
+                text(
+                    "SELECT COUNT(*) FROM auth_audit_log "
+                    "WHERE actor_id = :user_id AND event = 'session_evicted'"
+                ),
+                {"user_id": user_id},
+            )
+        ).scalar_one()
+
+    assert live_count == settings.max_live_sessions_per_user
+    assert evicted_count == 2

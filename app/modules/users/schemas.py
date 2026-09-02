@@ -138,3 +138,28 @@ class MfaDisableRequest(BaseModel):
     # here is an open question (US-009-api-design.md Open Questions #2),
     # not decided by this schema.
     code: str = Field(pattern=r"^\d{6}$")
+
+
+class SessionLocation(BaseModel):
+    city: str | None = None
+    country: str | None = None
+
+
+class SessionEntry(BaseModel):
+    """FR-1: one live refresh-token family. Composed by the service from a
+    repository row plus the geo-IP/device-label lookups (US-010-db-design.md
+    - "current-state row" + "created_at" per family) - not a direct
+    `from_attributes` passthrough of any single ORM row, so no ConfigDict
+    is set here.
+    """
+
+    family_id: uuid.UUID
+    created_at: datetime
+    last_used_at: datetime | None
+    location: SessionLocation | None
+    device_label: str
+    is_current: bool
+
+
+class SessionListResponse(BaseModel):
+    sessions: list[SessionEntry]

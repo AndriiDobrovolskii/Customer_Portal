@@ -122,6 +122,7 @@ class UserRepository:
         user_agent: str | None,
         request_id: str,
         severity: str | None = None,
+        target_family: uuid.UUID | None = None,
     ) -> None:
         self._session.add(
             AuthAuditLog(
@@ -133,6 +134,7 @@ class UserRepository:
                 ip=ip,
                 user_agent=user_agent,
                 request_id=request_id,
+                target_family=target_family,
             )
         )
 
@@ -303,6 +305,88 @@ class UserRepository:
         await self._session.execute(
             delete(MfaRecoveryCode).where(MfaRecoveryCode.user_id == user_id)
         )
+
+    async def get_any_refresh_token_for_family(
+        self, *, family_id: uuid.UUID, user_id: uuid.UUID
+    ) -> RefreshToken | None:
+        """FR-3/FR-4 (US-2.6): confirms family ownership regardless of
+        revoked/expired state, distinguishing "belongs to caller but
+        inactive" (204, idempotent) from "never belonged to this user"
+        (404) - `list_live_families_for_user` only returns live rows,
+        which can't answer this question on its own. Found while building
+        `service.py`'s `revoke_session` - same class of gap prior stories
+        hit (e.g. `get_by_id`, US-2.3).
+        """
+        result = await self._session.execute(
+            select(RefreshToken)
+            .where(RefreshToken.family_id == family_id, RefreshToken.user_id == user_id)
+            .limit(1)
+        )
+        return result.scalar_one_or_none()
+
+    async def lock_live_refresh_tokens_for_user(self, *, user_id: uuid.UUID) -> None:
+        """US-2.6 FR-7 (spec-review resolution): row-locks the acting
+        user's own live rows ahead of the count-and-evict check in
+        `service.py`'s login path, so two logins racing concurrently for
+        the SAME user serialize rather than both observing a stale family
+        count. Scoped to `user_id` only - never a table-wide lock, which
+        would serialize unrelated users' logins and blow the login
+        endpoint's own latency budget.
+        """
+        await self._session.execute(
+            select(RefreshToken.id)
+            .where(
+                RefreshToken.user_id == user_id,
+                RefreshToken.revoked_at.is_(None),
+                RefreshToken.expires_at > func.now(),
+            )
+            .with_for_update()
+        )
+
+    async def list_live_families_for_user(self, *, user_id: uuid.UUID) -> list[RefreshToken]:
+        """FR-1/FR-7: one row per live family - the row with the latest
+        `issued_at` represents that family's current state (US-2.3's
+        single-use-then-rotate invariant guarantees at most one un-revoked,
+        un-expired row is "live" per family at a time). PostgreSQL's
+        DISTINCT ON, not a Python-side reduction, keeps this a single
+        indexed query against `ix_refresh_tokens_user_id_family_id_issued_at`
+        (see docs/designs/database/US-010-db-design.md).
+        """
+        result = await self._session.execute(
+            select(RefreshToken)
+            .distinct(RefreshToken.family_id)
+            .where(
+                RefreshToken.user_id == user_id,
+                RefreshToken.revoked_at.is_(None),
+                RefreshToken.expires_at > func.now(),
+            )
+            .order_by(RefreshToken.family_id, RefreshToken.issued_at.desc())
+        )
+        return list(result.scalars().all())
+
+    async def get_family_created_at_map_for_user(
+        self, *, user_id: uuid.UUID
+    ) -> dict[uuid.UUID, datetime]:
+        """FR-1's `created_at` (per family) is `MIN(issued_at)` across that
+        family's rotation chain, not the current row's own `issued_at` -
+        see US-010-db-design.md. Also doubles as FR-7's oldest-family
+        lookup: the caller picks the minimum value from the returned map
+        rather than a second, near-duplicate query (at most 20 live
+        families per user, so this is cheap in Python).
+        """
+        result = await self._session.execute(
+            select(RefreshToken.family_id, func.min(RefreshToken.issued_at))
+            .where(
+                RefreshToken.user_id == user_id,
+                RefreshToken.revoked_at.is_(None),
+                RefreshToken.expires_at > func.now(),
+            )
+            .group_by(RefreshToken.family_id)
+        )
+        # dict(result.all()) (ruff's C416 suggestion) fails mypy strict:
+        # Row isn't a subtype of tuple[UUID, datetime] as far as dict()'s
+        # overloads see it.
+        return {family_id: created_at for family_id, created_at in result.all()}  # noqa: C416
 
     async def commit(self) -> None:
         await self._session.commit()
