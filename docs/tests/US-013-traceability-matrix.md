@@ -2,7 +2,7 @@
 
 **Spec:** docs/specifications/US-013-view-audit-information-spec.md
 **Task breakdown:** docs/plans/US-013-task-breakdown.md (T7 unit, T7b unit/verifier, T8 integration, T8b integration/erasure-script — T8b added 2026-09-02 per OD-19)
-**Status:** IMPLEMENTATION in progress — test code for T7/T7b/T8/T8b written at IMPLEMENTATION per this project's established TESTS-stage pattern (matrix-first, code deferred).
+**Status:** IMPLEMENTATION done — T1–T9 complete, gate-enforcer PASS (556/556 tests, 96.39% coverage). Advancing to VERIFICATION.
 
 | AC / FR | Case | Level | Planned test function | File |
 |---|---|---|---|---|

@@ -1,8 +1,28 @@
 story: US-3.3
 
-current_stage: IMPLEMENTATION
+current_stage: VERIFICATION
 
 status: IN_PROGRESS
+# IMPLEMENTATION done 2026-09-02 (T1-T9 complete). gate-enforcer PASS:
+# 6/7 pre-commit hooks clean (ruff lint+format, mypy strict on 131 files,
+# import-linter 6/6, unit tests, no-mock-in-integration guard); 7th
+# (detect-secrets) blocked by this environment's WDAC policy (WinError
+# 4551), independently confirmed via direct hook invocation as not a
+# real secret finding - committed with --no-verify under the user's
+# standing per-session authorization (see project_precommit_detect_
+# secrets_wdac.md auto-memory). 556/556 tests, 96.39% coverage (floor
+# 85%; audit/service.py and audit/router.py both 100%, floor 90%).
+# lint-imports 6/6 contracts kept. T7/T7b/T8/T8b (61 audit-scoped tests)
+# hardened after advisor review before this gate run: the genesis-hash
+# test now asserts its own empty-table precondition explicitly instead
+# of relying on test-ordering/rollback isolation; the pagination query-
+# plan test now asserts the real EXPLAIN signal (Index Scan feeding
+# Merge Append, no Seq Scan) instead of a substring check that couldn't
+# fail; AU-AC6's CI-grep docstring narrowed to state plainly it's a
+# field-name check, not a runtime-value scan. Committed 96ec17a (T8/T8b/
+# AU-AC6-scan/schema-tests) + f231937 (ruff-format autofix). Advancing
+# to VERIFICATION.
+#
 # IMPLEMENTATION T1/T2/T2b/T3/T3b/T3c done 2026-09-02, committed 15fcc3b
 # on feat/us-3.3-view-audit-information (branched off main post-US-3.1
 # merge). New app/modules/audit/ (schemas/models/repository);
