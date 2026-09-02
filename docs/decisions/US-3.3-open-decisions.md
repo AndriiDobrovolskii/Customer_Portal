@@ -185,6 +185,8 @@ Raised by `docs/reviews/specifications/US-013-spec-review.md` (SPEC_REVIEW, 2026
 
 **Resolved 2026-09-02 (user):** Option 1, field-aware redaction. The erasure script (OD-2's minimal provisional job) maintains a known list of identifier-bearing `field` values for `profile_audit_log` (starting with `display_name`) and redacts `old_value`/`new_value` on that user's matching rows. `payload` JSONB scanning (the pre-existing, still-open Open Question about `payload` scope) is not addressed by this resolution and remains open separately.
 
+**Superseded 2026-09-02 by OD-20 (IMPLEMENTATION, T6b):** this UPDATE-based mechanism cannot execute — `profile_audit_log` carries a `BEFORE UPDATE OR DELETE` trigger (from an earlier story) that unconditionally denies mutation, discovered only when the redaction SQL was actually run against a real database. See OD-20 for the full finding and resolution: the script ships without `profile_audit_log` redaction, deferred to a separate architectural review.
+
 ---
 
 ## OD-14 — High: does every existing audit-write call site get repointed to the new `audit_log` table, or only this story's two new events?
@@ -250,3 +252,35 @@ Raised by `advisor` at TESTS-stage review (2026-09-02): AU-AC9/FR-9 (move entrie
 2. Build now with a placeholder cold-storage target (e.g. a separate DB table), to be repointed once legal/DPO decide.
 
 **Resolved 2026-09-02 (user):** Option 1. AU-AC9's retention job is explicitly out of this story's build scope, blocked on OD-9 (cold-storage target, legal/DPO sign-off pending). AU-AC9 remains `[manual]` per the story's own Enforcement Matrix, with no code, test, or task delivered against it in US-3.3. Recommended option accepted.
+
+---
+
+## OD-19 — Resolved: OD-2's committed erasure script was never carried into the plan/task breakdown
+
+Found 2026-09-02 at IMPLEMENTATION (T7/T8 prep, advisor review): OD-2 (CLARIFICATION) resolved with an explicit, unconditional build commitment — "build a minimal, provisional DA-AC9 script now" (anonymize the `users` row, redact direct identifiers on that user's existing audit rows) — later refined by OD-13 (SPEC_REVIEW) into field-aware redaction for `profile_audit_log`. Neither `docs/plans/US-013-implementation-plan.md`'s Files To Create nor `docs/plans/US-013-task-breakdown.md`'s T1-T9 ever listed this script — it silently dropped out between CLARIFICATION and PLANNING and was never caught, unlike `scripts/verify_audit_chain.py` (caught at PLANNING) and AU-AC9's retention job (caught at TESTS). **Third instance of the same defect class** — worth naming as a pattern, not just a one-off: a resolved Open Decision's committed artifact needs to be checked against the plan/task breakdown by name, not assumed present because the decision was resolved.
+
+Unlike OD-9/OD-18 (AU-AC9), this is not a deferral candidate: OD-2's resolution was unconditional (not blocked on any still-open policy question), so silently dropping it now would reverse a decision the user already made, not merely disclose a gap.
+
+**Resolved 2026-09-02:** build it now, scoped to exactly what OD-2/OD-13 committed to, nothing wider:
+1. Anonymize the target `users` row (email → an opaque anonymized placeholder, `display_name` → `NULL`) — OD-2's "anonymize, don't hard-delete" default, matching BR-007's leaning.
+2. Redact `auth_audit_log.ip` for that user's rows.
+3. Field-aware redaction (OD-13) on `profile_audit_log.old_value`/`new_value` for that user's rows where `field` is in a known identifier-bearing list (starting with `display_name`).
+4. Entries remain queryable; `actor_id` is retained everywhere as an opaque UUID (AU-AC8's own third clause) — never nulled.
+
+**Explicitly out of scope, both already-disclosed, separate open questions:** `payload` JSONB scanning for embedded identifiers (OD-8, still open) and anything touching `audit_log` itself. The second exclusion is load-bearing, not incidental: `audit_log`'s hash chain (`audit_log_row_hash()`) is computed over `(previous_hash, occurred_at, actor_id, event, target_id, payload)` — mutating any of those in place breaks AU-AC7's tamper-evidence guarantee. Verified this doesn't collide with AU-AC8 for this story's own scope: under staged OD-14, `audit_log` receives only `audit_log_viewed`/`audit_log_access_denied`, whose `actor_id` is retained (not redacted) and whose `payload` carries only query filter parameters, never the three named PII identifiers (email/display_name/ip). `ip` itself is *not* one of `audit_log_row_hash()`'s inputs, so redacting it there would in fact be hash-safe if ever needed — moot here since `audit_log`'s own rows carry no PII to redact under this story's narrow event set.
+
+Added to the plan and task breakdown as a new file (`scripts/anonymize_erased_user.py`) and task (T6b, owner `service-and-router-builder` — same OD-15 precedent as T6, since no execution skill's contract literally covers `scripts/`).
+
+---
+
+## OD-20 — Resolved: `profile_audit_log` is DB-enforced append-only; OD-13's redaction mechanism is technically impossible
+
+Found 2026-09-02 while building `scripts/anonymize_erased_user.py` (T6b) and actually running OD-13's committed redaction SQL against real Postgres, not merely designing it on paper: `profile_audit_log` carries a `BEFORE UPDATE OR DELETE` trigger, `profile_audit_log_deny_mutation` (from an earlier, already-shipped story — not this one), whose entire body unconditionally raises: `RAISE EXCEPTION 'profile_audit_log is append-only: % is not permitted', TG_OP`. No bypass path exists in the function itself (no session-variable escape hatch, no conditional). Confirmed no other table this story touches (`users`, `auth_audit_log`, `admin_audit_log`, `account_lifecycle_audit_log`) carries an equivalent trigger — this is specific to `profile_audit_log`.
+
+This directly contradicts OD-13's resolution (SPEC_REVIEW, 2026-09-02): "the erasure script... redacts `old_value`/`new_value` on any of that user's rows where `field` matches" via `UPDATE`. That mechanism cannot execute against the real schema. This was not caught at DESIGN or PLANNING because no artifact before this point actually executed the redaction SQL against a real database — a paper design can commit to a mechanism a live schema already forbids.
+
+**Options presented:**
+1. Defer `profile_audit_log`'s redaction specifically (ship `users` anonymization + `auth_audit_log.ip` redaction now, both of which work); log this as a disclosed gap for a separate architectural review, not a silent scope drop.
+2. Have the script temporarily `ALTER TABLE profile_audit_log DISABLE TRIGGER profile_audit_log_deny_mutation`, perform the redaction `UPDATE`, then re-enable it in the same transaction — technically satisfies OD-13's original mechanism.
+
+**Resolved 2026-09-02 (user):** Option 1. Disabling another story's already-shipped integrity trigger — even transactionally, even to satisfy this story's own AC — was explicitly rejected as an architectural anti-pattern that overrides a guarantee this story doesn't own. `scripts/anonymize_erased_user.py` ships without touching `profile_audit_log`; `display_name` values embedded in that table's `old_value`/`new_value` for an erased user remain unredacted until a separate architectural review addresses it (out of this story's scope to resolve). AU-AC8's matrix rows and OD-13 updated to reflect this constraint, not the original UPDATE-based design.
