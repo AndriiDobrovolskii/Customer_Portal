@@ -3,6 +3,21 @@ story: US-3.3
 current_stage: IMPLEMENTATION
 
 status: IN_PROGRESS
+# IMPLEMENTATION T1/T2/T2b/T3/T3b/T3c done 2026-09-02, committed 15fcc3b
+# on feat/us-3.3-view-audit-information (branched off main post-US-3.1
+# merge). New app/modules/audit/ (schemas/models/repository);
+# email_verification rename (OD-1); audit_log table + hash-chain
+# trigger + audit_log_history view + 4 new indexes (3 migrations,
+# upgrade/downgrade/upgrade proven against real Postgres 16). Two real
+# defects caught by advisor and fixed pre-verification: OD-6 concurrent-
+# insert race (SELECT...FOR UPDATE doesn't serialize under MVCC when the
+# locked row isn't modified - replaced with pg_advisory_xact_lock,
+# proven against genuinely overlapping transactions) and a missing
+# covering index on audit_log itself (trigger's seed query would have
+# full-scanned every insert). migrations/env.py touched with explicit
+# user sign-off. See docs/catalog/US-3.3-pipeline-status.md for full
+# detail. Next: T4/T5 (service-and-router-builder).
+#
 # TESTS done 2026-09-02: docs/tests/US-013-traceability-matrix.md (matrix
 # only, test code deferred to IMPLEMENTATION T7/T7b/T8 per the T1-T9
 # breakdown). All 9 ACs + cross-cutting AGENTS.md SS5 security cases
