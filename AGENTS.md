@@ -18,6 +18,8 @@ You are a senior engineer on a production codebase, not a demo generator. Every 
 
 Propose, never execute unilaterally: new or upgraded dependencies, auth scheme changes, migration history edits, CI or enforcement-config edits, changes to this file.
 
+Work is delivered story by story through the harness in `docs/workflow/`. §8 names the canonical files, §9 the active scope, §10 the human gates, §11 the Open Decisions policy, §12 observability.
+
 **Communication language:** talk to the user in Ukrainian. Everything you produce — code, comments, commit messages, docs, other artifacts — stays in English.
 
 ## 2. Tech Stack
@@ -135,3 +137,51 @@ Do not report a task complete until all seven are verified with real command out
 9. **Bypassing the gate** — `--no-verify`/`-n`, `SKIP=<hook>`, `pre-commit uninstall`, deleting or downgrading a hook, narrowing mypy to one file, adding `exclude:` patterns, deleting an import-linter contract or adding `ignore_imports`, setting `exhaustive = false`, or dodging a contract via `if TYPE_CHECKING:`, a function-body import, or `importlib`. **Reporting a check as passing without running it is the most serious violation here — it silently disables every other rule in this file.** Config drift counts too: a `pyproject.toml` that quietly ships a narrower ruff rule set, a per-module (not wildcarded) import-linter contract, or a dropped mypy extension is the same violation committed instead of typed at the CLI — the one exception is a flag verified genuinely incompatible with this stack and recorded as such (see ARCHITECTURE.md §2.3's `disallow_any_explicit` note).
 
 **Security, non-negotiable:** passwords stored only as Argon2id hashes — never plaintext, reversible encryption, or a fast hash; tokens, hashes, and PII never logged or returned; all input arrives as a validated schema with `extra="forbid"`; privilege fields never client-writable; all SQL built through SQLAlchemy constructs with bound parameters — no string interpolation, ever.
+
+## 8. Canonical Sources
+
+Authoritative files for the delivery harness. Do not duplicate their content elsewhere; if two documents disagree, the file named here wins.
+
+| Concern | File |
+| --- | --- |
+| Workflow: stages, order, ownership, transitions, loop-backs, human gates | `docs/workflow/stage-map.yaml` |
+| Where every artifact lives and which skill owns it | `docs/workflow/artifact-paths.yaml` |
+| Status vocabularies (artifact status / review verdict / workflow status) | `docs/workflow/artifact-lifecycle.md` |
+| Workflow-state, active-story, and history event schemas | `docs/workflow/state-schema.md` |
+| Artifact front-matter schema and the staleness contract | `docs/workflow/artifact-schema.md` |
+| Human-readable workflow overview (non-normative) | `docs/workflow/stages.md` |
+| Story lifecycle status | `docs/catalog/stories.yaml` |
+| Delivered capability | `docs/knowledge/project-state.md` |
+| Architecture, layering, conventions | §3–§4 above, and `docs/ARCHITECTURE.md` |
+| Product context | `docs/product/` (vision, epic-map, business-glossary, business-rules, personas, non-functional-requirements) |
+
+No skill, command, or document may define an alternative stage list, alternative stage identifiers, or an alternative artifact-path convention. A skill resolves every artifact location from the registry — a hard-coded path is a defect even when it currently happens to be correct. `scripts/validate_harness.py` enforces all of this; run it after touching `docs/workflow/` or `.claude/skills/`.
+
+Retired vocabulary MUST NOT appear anywhere new: the sequential story ids (`US-0NN` → `US-N.N`, mapped in `artifact-paths.yaml` `retired_id_scheme`), the retired stage identifiers (`DESIGN`, `PLANNING`, `TESTS`, `VERIFICATION`, `PR`, mapped in `stage-map.yaml` `retired_identifiers`), and the retired artifact paths (`retired_paths`). `docs/workflow/history.jsonl` is the single exception — it is append-only history and carries a `HARNESS_MIGRATION` marker at the changeover.
+
+## 9. Active Scope
+
+The active Story is `docs/workflow/active-story.yaml`; its execution state is `docs/workflow/workflow-state.yaml`. Work only on the active Story unless explicitly instructed otherwise.
+
+Only `story-orchestrator` writes `workflow-state.yaml` and appends `history.jsonl`. Only `backlog-sync` writes `active-story.yaml` and `docs/catalog/stories.yaml`. **Stage skills never write workflow state** — they return a Result Envelope (`artifact-lifecycle.md` §2) and the orchestrator records the transition. Adding a field to either state file is a schema change and needs explicit human sign-off (§7.8).
+
+## 10. Human Gates
+
+`stage-map.yaml` defines five stages where the workflow stops for a person: `HUMAN_SPEC_APPROVAL`, `HUMAN_PLAN_APPROVAL`, `HUMAN_PR_APPROVAL`, `READY_FOR_PR`, `COMPLETED`.
+
+**A review skill returning `PASS` is not human approval.** Approval is recorded only via `/so:approve` (or `/so:reject`). Never infer one from the other, and never pass a gate automatically — including when asked to advance several stages at once.
+
+This is §1's "propose, never execute unilaterally" applied to the pipeline: the harness assembles evidence, a person decides. Skills do not push, open, or merge Pull Requests; `pr-preparer` drafts the content and a human acts on it.
+
+## 11. Open Decisions Policy
+
+Open Decisions are blockers. If an artifact marked `APPROVED` contains `TODO`, `TBD`, `FIXME`, `???`, or an unresolved Open Decision affecting the next stage, do not proceed: document the gap, request clarification, update the Specification. Clarification is always preferred over guessing.
+
+When information is missing, do not assume and do not invent requirements, security rules, or business rules. Record an Open Decision stating the question, what was checked and came up empty, and the concrete impact of leaving it unresolved. This is §1's "report conflicts" rule applied to requirements rather than code.
+
+## 12. Observability
+
+- `docs/workflow/history.jsonl` — the append-only workflow transition log, owned by `story-orchestrator`. One event per transition. Never edited, never rewritten, never backfilled.
+- `docs/hooks/tool-usage.jsonl` — tool-usage telemetry, metadata only, never full sensitive payloads.
+
+Telemetry is execution evidence, never requirement authority. Do not disable or bypass configured hooks (§7.9).
