@@ -2,7 +2,27 @@ story: US-3.3
 
 current_stage: RECONCILIATION
 
-status: IN_PROGRESS
+status: BLOCKED
+# RECONCILIATION done 2026-09-03: docs/reconciliation/US-013-
+# reconciliation-report.md - FAIL. Every AC has a matrix row and every
+# named test function exists (2 stale matrix lines fixed in place: a
+# harmless AU-AC7 test-name mismatch, an AU-AC8 line wrongly claiming
+# no test existed for the OD-20 negative-proof case). 3 real gaps force
+# Fail, each a test asserting less than the AC's literal text: AU-AC1's
+# full 9-field response shape is never asserted for an audit_log-native
+# row; AU-AC2's "exact filter parameters" claim - only 1-3 of the 7
+# payload keys are ever checked (target_id/from/to/cursor never
+# asserted); AU-AC5's message-content clause ("states the maximum
+# window and suggests the export") - RangeTooWideError.detail says the
+# right thing but no test reads it, only status+type slug are checked.
+# None are spec drift - shipped code is correct in all 3 cases, only
+# test coverage is short. Also carries forward SECURITY_REVIEW's
+# unbounded event/cursor-into-payload Low advisory as promised there.
+# Per story-orchestrator's own rule, NOT advancing past this stage on a
+# Fail - pipeline halted here pending user decision: re-invoke
+# test-writer to close the 3 gaps (plus optionally the max_length
+# advisory), or explicitly accept the gaps as disclosed and proceed.
+#
 # SECURITY_REVIEW done 2026-09-02: docs/security/US-013-security-
 # review.md - Pass. 3/6 AGENTS.md SS7 rows N/A (no credential/new-auth
 # surface in this story's scope, each verified not assumed), 3/6 Pass
