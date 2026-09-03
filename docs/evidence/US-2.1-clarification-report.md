@@ -1,7 +1,7 @@
 # Clarification Report: US-2.1 — Login
 
 **Story:** docs/stories/US-2.1-login.md
-**Reviewed against:** docs/product/product-vision.md, personas.md, business-rules.md, business-glossary.md; sibling stories US-1.2, US-1.4, US-2.3, US-2.5, US-2.6, US-013; existing spec + review (US-005); current codebase state.
+**Reviewed against:** docs/product/product-vision.md, personas.md, business-rules.md, business-glossary.md; sibling stories US-1.2, US-1.4, US-2.3, US-2.5, US-2.6, US-3.3; existing spec + review (US-2.1); current codebase state.
 **Date:** 2026-08-31
 
 ## Business Intent
@@ -10,7 +10,7 @@ Actor, trigger, and value are explicit and unambiguous: a registered Customer (`
 
 ## Acceptance Criteria — Completeness & Testability
 
-All six ACs (LI-AC1–LI-AC6) are concrete, Gherkin-structured, and independently verifiable — no "handle appropriately"-style language. The existing spec (`US-005-login-spec.md`) and its review confirm faithful, complete coverage with no contradictions. This clarification pass did not find any AC-level gap the spec missed.
+All six ACs (LI-AC1–LI-AC6) are concrete, Gherkin-structured, and independently verifiable — no "handle appropriately"-style language. The existing spec (`US-2.1-login-spec.md`) and its review confirm faithful, complete coverage with no contradictions. This clarification pass did not find any AC-level gap the spec missed.
 
 ## Security & Validation Expectations
 
@@ -56,4 +56,4 @@ All six substantive Open Decisions (OD-1–OD-6) were resolved by the user on 20
 - OD-5: per-IP throttle counter is deliberately left unreset on success.
 - OD-6: neither `429` nor `422` responses are audit-logged.
 
-OD-7 (spec doesn't inline concrete JSON/audit-field shapes) is a spec-quality note, not a business decision — forwarded directly to `story-spec-writer` for the next spec revision. The existing spec (`US-005-login-spec.md`) needs to be updated to incorporate OD-1–OD-7 before SPEC_REVIEW is re-run.
+OD-7 (spec doesn't inline concrete JSON/audit-field shapes) is a spec-quality note, not a business decision — forwarded directly to `story-spec-writer` for the next spec revision. The existing spec (`US-2.1-login-spec.md`) needs to be updated to incorporate OD-1–OD-7 before SPEC_REVIEW is re-run.

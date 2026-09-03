@@ -10,14 +10,14 @@ As an authenticated user, end my session on this device (`POST /v1/auth/logout`)
 ## What's Clear
 
 - Both endpoints, their auth requirement, and success responses (`204`) are explicit.
-- All 5 ACs (LO-AC1–5) are testable and covered 1:1 by FRs in the existing `docs/specifications/US-006-logout-spec.md`.
+- All 5 ACs (LO-AC1–5) are testable and covered 1:1 by FRs in the existing `docs/specifications/US-2.2-spec.md`.
 - Idempotency and anti-enumeration intent (no error confirming a token's prior state) is explicit.
 - `revoke_before:{user_id}` reuse for logout-all is consistent with the already-implemented US-1.4/US-2.1 mechanism (`RevocationCache`) — this part needs no new design.
 - BR-009 (business-rules.md) already codifies this story's core behavior (per-device default, `revoke_before` for everywhere, both idempotent) — no conflict found.
 
 ## What's Ambiguous / Newly Surfaced
 
-This story and its pre-existing spec (`US-006-logout-spec.md`, drafted 2026-08-22, spec review Pass with Issues) were written before US-2.1 was actually implemented. Reading the current codebase surfaced real divergences a spec-writer cannot resolve alone — logged as OD-1 through OD-6 in `docs/decisions/US-2.2-open-decisions.md`:
+This story and its pre-existing spec (`US-2.2-logout-spec.md`, drafted 2026-08-22, spec review Pass with Issues) were written before US-2.1 was actually implemented. Reading the current codebase surfaced real divergences a spec-writer cannot resolve alone — logged as OD-1 through OD-6 in `docs/decisions/US-2.2-open-decisions.md`:
 
 - **OD-1 (High):** The story assumes a Valkey `jti_denylist:{jti}` mechanism for access-token revocation, but US-2.1 already built a Postgres `user_sessions` table with `revoked_at`, already checked on every authenticated request. Which one does logout use?
 - **OD-2 (High, carried over from the spec review):** LO-AC4 (repeat logout → `204`) is difficult to reconcile with LO-AC5 (any request with a denylisted/revoked jti → `401`) — never resolved when the spec was first reviewed.
@@ -43,4 +43,4 @@ Every recommendation in the Open Decisions log follows the same precedent US-2.1
 - **OD-5:** Add a dedicated nullable `scope` column to `AuthAuditLog`.
 - **OD-6:** A valid access token with no refresh cookie still revokes the jti and returns `204`; only the cookie/family steps are skipped.
 
-`story-spec-writer` should revise `docs/specifications/US-006-logout-spec.md` to incorporate all six resolutions before `story-spec-reviewer` re-runs.
+`story-spec-writer` should revise `docs/specifications/US-2.2-spec.md` to incorporate all six resolutions before `story-spec-reviewer` re-runs.

@@ -1,7 +1,7 @@
 # Open Decisions: US-2.3 (Refresh Token)
 
 **Story:** `docs/stories/US-2.3-refresh-token.md`
-**Existing spec (outside this pipeline):** `docs/specifications/US-007-refresh-token-spec.md`, reviewed at `docs/reviews/specifications/US-007-spec-review.md` (verdict: Pass with Issues, 2026-08-22 — 3 Open Questions never resolved, plus 2 Missing-Edge-Case findings)
+**Existing spec (outside this pipeline):** `docs/specifications/US-2.3-spec.md`, reviewed at `docs/reviews/specifications/US-2.3-spec-review.md` (verdict: Pass with Issues, 2026-08-22 — 3 Open Questions never resolved, plus 2 Missing-Edge-Case findings)
 **Generated:** 2026-09-01
 **Resolved:** 2026-09-01 — user accepted the recommended option on all 6 items (OD-1–OD-6), same pattern as US-2.1/US-2.2. Both carried-forward spec-review findings are also to be addressed explicitly in the revised spec.
 
@@ -11,7 +11,7 @@ The story and its existing spec were written before US-2.1 (Login) and US-2.2 (L
 
 ## OD-1 — Refresh rate limit (60 req/family/hour): what response does an over-limit client get?
 
-**Question:** The story's Assumptions & Defaults table sets a refresh rate limit of 60 requests/family/hour, but no Acceptance Criterion defines the response when it's exceeded (already flagged as an unresolved Open Question in `US-007-refresh-token-spec.md`). Does exceeding it return `429` with a `Retry-After` header — the same shape login throttling already uses (`TooManyAttemptsError`, `app/modules/users/exceptions.py:47`) — or the story's own `401 token-invalid` envelope, or something else?
+**Question:** The story's Assumptions & Defaults table sets a refresh rate limit of 60 requests/family/hour, but no Acceptance Criterion defines the response when it's exceeded (already flagged as an unresolved Open Question in `US-2.3-refresh-token-spec.md`). Does exceeding it return `429` with a `Retry-After` header — the same shape login throttling already uses (`TooManyAttemptsError`, `app/modules/users/exceptions.py:47`) — or the story's own `401 token-invalid` envelope, or something else?
 
 **Why it can't be inferred:** Neither the story nor `business-rules.md`/`business-glossary.md` states this; the spec review flagged it and it was never answered.
 

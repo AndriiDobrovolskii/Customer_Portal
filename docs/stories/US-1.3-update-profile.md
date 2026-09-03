@@ -1,6 +1,6 @@
 # Epic 1 — Users: Update Profile
 
-**Story ID:** US-1.2
+**Story ID:** US-1.3
 **Project:** Customer Portal
 
 ## User Story

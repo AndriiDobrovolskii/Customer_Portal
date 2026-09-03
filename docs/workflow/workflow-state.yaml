@@ -3,7 +3,7 @@ story: US-3.3
 current_stage: PR
 
 status: IN_PROGRESS
-# RECONCILIATION re-run done 2026-09-03: docs/reconciliation/US-013-
+# RECONCILIATION re-run done 2026-09-03: docs/reconciliation/US-3.3-
 # reconciliation-report.md - PASS (initial pass Fail, 3 gaps
 # found+closed same-day). User chose "re-invoke test-writer" over
 # accepting the gaps; test-writer closed all 3 (AU-AC1 new field-shape
@@ -21,7 +21,7 @@ status: IN_PROGRESS
 # push/PR-creation still requires explicit user authorization per this
 # pipeline's standing convention (every prior story required "go"/"gp").
 #
-# RECONCILIATION done 2026-09-03: docs/reconciliation/US-013-
+# RECONCILIATION done 2026-09-03: docs/reconciliation/US-3.3-
 # reconciliation-report.md - FAIL. Every AC has a matrix row and every
 # named test function exists (2 stale matrix lines fixed in place: a
 # harmless AU-AC7 test-name mismatch, an AU-AC8 line wrongly claiming
@@ -41,7 +41,7 @@ status: IN_PROGRESS
 # test-writer to close the 3 gaps (plus optionally the max_length
 # advisory), or explicitly accept the gaps as disclosed and proceed.
 #
-# SECURITY_REVIEW done 2026-09-02: docs/security/US-013-security-
+# SECURITY_REVIEW done 2026-09-02: docs/security/US-3.3-security-
 # review.md - Pass. 3/6 AGENTS.md SS7 rows N/A (no credential/new-auth
 # surface in this story's scope, each verified not assumed), 3/6 Pass
 # directly: zero log/logger/print calls in the module (grep-confirmed),
@@ -55,7 +55,7 @@ status: IN_PROGRESS
 # reconciliation-reviewer, not a SS7 violation, doesn't change verdict.
 # Advancing to RECONCILIATION.
 #
-# VERIFICATION done 2026-09-02: docs/verification/US-013-verification-
+# VERIFICATION done 2026-09-02: docs/verification/US-3.3-verification-
 # report.md - Pass. No ORM leak, no missing eager-load (N/A - no
 # relationships), no TTL-less cache write (N/A - no cache.py in this
 # module), no service->router cross-module call, no missing
@@ -106,7 +106,7 @@ status: IN_PROGRESS
 # user sign-off. See docs/catalog/US-3.3-pipeline-status.md for full
 # detail. Next: T4/T5 (service-and-router-builder).
 #
-# TESTS done 2026-09-02: docs/tests/US-013-traceability-matrix.md (matrix
+# TESTS done 2026-09-02: docs/tests/US-3.3-ac-test-matrix.md (matrix
 # only, test code deferred to IMPLEMENTATION T7/T7b/T8 per the T1-T9
 # breakdown). All 9 ACs + cross-cutting AGENTS.md SS5 security cases
 # mapped to planned test function names. advisor caught 2 real gaps in
@@ -128,7 +128,7 @@ status: IN_PROGRESS
 # resolved - explicitly deferred out of this story's build scope,
 # blocked on OD-9's still-open legal/DPO cold-storage decision, no code/
 # task/test delivered against it. docs/decisions/US-3.3-open-decisions.md,
-# docs/designs/database/US-013-db-design.md, docs/plans/US-013-
+# docs/designs/database/US-3.3-db-design.md, docs/plans/US-3.3-
 # {implementation-plan,task-breakdown}.md, and the traceability matrix
 # all updated to match. Advancing to IMPLEMENTATION per T1-T9.
 #
@@ -136,11 +136,11 @@ status: IN_PROGRESS
 # service-and-router-builder builds scripts/verify_audit_chain.py (T6).
 # OD-16 (partition safety net) resolved - T3b's migration also creates
 # a DEFAULT partition, preventing the hard-INSERT-failure risk planner
-# flagged. docs/plans/US-013-{implementation-plan,task-breakdown}.md and
-# docs/designs/database/US-013-db-design.md updated to match. Advancing
+# flagged. docs/plans/US-3.3-{implementation-plan,task-breakdown}.md and
+# docs/designs/database/US-3.3-db-design.md updated to match. Advancing
 # to TESTS.
 #
-# PLANNING (plan-reviewer) done 2026-09-02: docs/reviews/plans/US-013-
+# PLANNING (plan-reviewer) done 2026-09-02: docs/reviews/plans/US-3.3-
 # plan-review.md - Pass with Issues. Full impact-analysis coverage, no
 # layering-order violations, realistic risk/test strategy. 1 process
 # finding (non-blocking, fixed same-day): scripts/verify_audit_chain.py
@@ -153,7 +153,7 @@ status: IN_PROGRESS
 # (DEFAULT partition vs. a maintenance-job task added to this story).
 # Awaiting user resolution.
 #
-# PLANNING (implementation-planner) done 2026-09-02: docs/plans/US-013-
+# PLANNING (implementation-planner) done 2026-09-02: docs/plans/US-3.3-
 # task-breakdown.md. T1-T9 (+T2b/T3b/T3c/T7b). advisor caught 2 real
 # dependency-graph defects, both fixed: (1) T7 originally depended on
 # T6, which has no assigned owner - a test task depending on an unowned
@@ -169,7 +169,7 @@ status: IN_PROGRESS
 # maintenance decision are flagged as one bundled open question for the
 # user, not invented here. Advancing to plan-reviewer.
 #
-# PLANNING (planner) done 2026-09-02: docs/plans/US-013-implementation-
+# PLANNING (planner) done 2026-09-02: docs/plans/US-3.3-implementation-
 # plan.md. New app/modules/audit/ module; audit_log table + trigger +
 # audit_log_history view; OD-1 rename migration must precede audit_log
 # creation; 4 CONCURRENTLY indexes; FR-3 denial-write resolved as an
@@ -189,7 +189,7 @@ status: IN_PROGRESS
 # than leaving it open. Advancing to plan-reviewer.
 #
 # PLANNING (impact-analysis) done 2026-09-02: docs/impact-analysis/
-# US-013-impact-analysis.md. New app/modules/audit/ module (7 files).
+# US-3.3-impact-analysis.md. New app/modules/audit/ module (7 files).
 # Rename app/modules/email_verification/models.py::AuditLog table (OD-1).
 # 4 new occurred_at indexes on existing audit tables (CONCURRENTLY).
 # advisor caught 2 issues, both fixed: (1) verified the implicit-405
@@ -208,14 +208,14 @@ status: IN_PROGRESS
 # OD-14 resolved 2026-09-02 (user): staged (option 3). audit_log + hash
 # chain + this story's own 2 new events ship now; repointing the 4
 # existing modules' audit writes is a future follow-up, one module at a
-# time. docs/designs/database/US-013-db-design.md and entity-model.md
+# time. docs/designs/database/US-3.3-db-design.md and entity-model.md
 # updated to reflect this as confirmed, not a working assumption.
 # Advancing to PLANNING.
 #
-# DESIGN done 2026-09-02: docs/designs/api/US-013-{openapi.yaml,api-
+# DESIGN done 2026-09-02: docs/designs/api/US-3.3-{openapi.yaml,api-
 # design.md} (1 GET endpoint + 405 on PATCH/PUT/DELETE; limit/cursor
 # reuse admin_users precedent per OD-5; per-entry {id} 405 path flagged
-# as unmodeled routing question). docs/designs/database/US-013-{db-
+# as unmodeled routing question). docs/designs/database/US-3.3-{db-
 # design,entity-model}.md - central finding: audit_log MUST be a real,
 # daily-partitioned physical table, not a pure view (a view can't be
 # partitioned, and AU-AC7's BEFORE INSERT trigger needs a physical
@@ -237,7 +237,7 @@ status: IN_PROGRESS
 # radius to survey).
 #
 # SPEC_REVIEW third run done 2026-09-02: docs/reviews/specifications/
-# US-013-spec-review.md - Pass with Issues, clean this time, no override
+# US-3.3-spec-review.md - Pass with Issues, clean this time, no override
 # needed. 9/9 ACs Covered, zero Contradictions - both prior Fail triggers
 # resolved by amending the story itself rather than accepting a
 # disclosed gap. 6 non-blocking ambiguities/edge-case findings remain
@@ -256,13 +256,13 @@ status: IN_PROGRESS
 # documented note tracking DB-grant enforcement as a separate, project-
 # wide infrastructure follow-up (OD-12); Data Model Notes' "monthly"
 # partition line corrected to "daily" (OD-11), removing the story's own
-# self-contradiction. No other AC changed. docs/specifications/US-013-
+# self-contradiction. No other AC changed. docs/specifications/US-3.3-
 # view-audit-information-spec.md updated to match (AU-AC4/FR-4 now
 # honestly fully Covered, no divergence to disclose). Re-running
 # story-spec-reviewer once more to confirm an honest Pass before DESIGN.
 #
 # SPEC_REVIEW re-run done 2026-09-02: docs/reviews/specifications/
-# US-013-spec-review.md re-run after OD-13 (field-aware redaction for
+# US-3.3-spec-review.md re-run after OD-13 (field-aware redaction for
 # AU-AC8, raised by the first SPEC_REVIEW run and resolved same-day) -
 # verdict still Fail, mechanically unchanged, because AU-AC4's Partial
 # Coverage and the daily/monthly Contradiction cannot resolve to Pass
@@ -278,11 +278,11 @@ status: IN_PROGRESS
 # coverage gaps (matching OD-12/OD-11's own resolutions) rather than
 # amend the story - an informed, explicit risk acceptance, not a silent
 # skip. Advancing to DESIGN on that basis. Both gaps are disclosed in
-# docs/specifications/US-013-view-audit-information-spec.md's Open
+# docs/specifications/US-3.3-spec.md's Open
 # Decision Resolutions section and Out of Scope; anyone reading the spec
 # sees them without needing this pipeline history.
 #
-# SPEC_REVIEW done 2026-09-02: docs/reviews/specifications/US-013-spec-
+# SPEC_REVIEW done 2026-09-02: docs/reviews/specifications/US-3.3-spec-
 # review.md - Fail. 8/9 ACs Covered on independent literal-text
 # comparison. AU-AC4 Partially Covered (its Gherkin has a 405 clause AND
 # a DB-grant clause; FR-4 delivers only the 405 - the DB-grant half was
@@ -307,7 +307,7 @@ status: IN_PROGRESS
 # follow-up story (makes AU-AC4 honestly Covered, spec review Pass) -
 # user's call since it edits the scope source of truth.
 #
-# SPECIFICATION done 2026-09-02: docs/specifications/US-013-view-audit-
+# SPECIFICATION done 2026-09-02: docs/specifications/US-3.3-view-audit-
 # information-spec.md revised in place (pre-existing 2026-08-22 draft).
 # Incorporates OD-1/OD-2/OD-11/OD-12 resolutions as an "Open Decision
 # Resolutions" section; adds a Data Model Notes section and the RFC 7807
@@ -357,8 +357,8 @@ status: IN_PROGRESS
 # doesn't exist since Epic 4 is unbuilt), non-blocking, recommendations
 # stated. OD-5 (limit/cursor bounds) resolved by admin_users precedent.
 # OD-6-OD-10 carried forward unresolved from the pre-existing 2026-08-22
-# draft spec/review (docs/specifications/US-013-view-audit-information-
-# spec.md, docs/reviews/specifications/US-013-spec-review.md), which
+# draft spec/review (docs/specifications/US-3.3-view-audit-information-
+# spec.md, docs/reviews/specifications/US-3.3-spec-review.md), which
 # predate US-3.1/US-3.2 landing on main and could not check the story
 # against the real codebase or against itself as closely as this run.
 # audit:read permission dependency (US-3.2) independently confirmed
@@ -370,7 +370,7 @@ status: IN_PROGRESS
 # story: US-3.1
 # current_stage: PR
 # status: DONE
-# PR done 2026-09-02: docs/pr/US-011-pr-description.md drafted by
+# PR done 2026-09-02: docs/pr/US-3.1-pr-summary.md drafted by
 # pr-preparer. All 4 gates confirmed Pass from their actual reports
 # (gate-enforcer 7/7 + 509/509 tests/96.64% coverage; implementation-
 # verifier Pass; security-reviewer Pass; reconciliation-reviewer Pass).
@@ -379,7 +379,7 @@ status: IN_PROGRESS
 # changed file traces to this story's scope. User explicitly authorized
 # push+PR ("go"). Pushed to origin, opened as GitHub PR #12
 # (https://github.com/AndriiDobrovolskii/Customer_Portal/pull/12).
-# RECONCILIATION done 2026-09-02: docs/reconciliation/US-011-
+# RECONCILIATION done 2026-09-02: docs/reconciliation/US-3.1-
 # reconciliation-report.md - Pass (initial pass Fail, 2 gaps found+
 # fixed same-day). All 21 source ACs + FR-17b/FR-22/FR-23 (no-AC) have
 # full, verified matrix coverage. Diffing every matrix-cited test
@@ -395,7 +395,7 @@ status: IN_PROGRESS
 # none leaves a numbered AC's own text unproven. No spec drift found.
 # Gate re-confirmed green: 509/509 tests, 96.64% coverage. Advances to
 # PR.
-# SECURITY_REVIEW done 2026-09-02: docs/security/US-011-security-
+# SECURITY_REVIEW done 2026-09-02: docs/security/US-3.1-security-
 # review.md - Pass. All 6 AGENTS.md SS7 rows clean (3 N/A - story has
 # no password/credential handling at all, creation is invitation-only
 # and structurally cannot accept a password field). 2 Low advisories
@@ -403,7 +403,7 @@ status: IN_PROGRESS
 # story's scope; resend's authz_denied audit lives in the shared
 # require_scope dependency, not admin_users itself - confirmed correct,
 # not a gap).
-# VERIFICATION done 2026-09-02: docs/verification/US-011-verification-
+# VERIFICATION done 2026-09-02: docs/verification/US-3.1-verification-
 # report.md - Pass. 1 real gap found+fixed same-day: 5 of 7 protected
 # routes had only a missing_token security case at the integration
 # level, not the full AGENTS.md SS5 five-case set (expired/malformed/
@@ -438,7 +438,7 @@ status: IN_PROGRESS
 # settings + .env.example entries; EmailSender protocol gained
 # send_invitation_email (3 existing test fakes updated). Advancing to
 # VERIFICATION.
-# TESTS done 2026-09-02: docs/tests/US-011-traceability-matrix.md (matrix
+# TESTS done 2026-09-02: docs/tests/US-3.1-ac-test-matrix.md (matrix
 # only, test code deferred to IMPLEMENTATION T7/T8 per T1-T9 breakdown).
 # All 21 source ACs + FR-17b/FR-22/FR-23 (no-AC) covered at unit and/or
 # integration level; MU-AC16/BR-001 both have dedicated concurrency
@@ -446,13 +446,13 @@ status: IN_PROGRESS
 # plus 2 regression-guard tests proving the plan-review-corrected wiring
 # (check_no_privilege_escalation extracted+called, raise_if_last_admin
 # additive-only+not called) holds. Advancing to IMPLEMENTATION.
-# PLANNING done 2026-09-02: docs/impact-analysis/US-011-impact-analysis.md
+# PLANNING done 2026-09-02: docs/impact-analysis/US-3.1-impact-analysis.md
 # (new module app/modules/admin_users/, mirrors profile/roles precedent;
-# 2 new cross-module RoleService calls flagged). docs/plans/US-011-
+# 2 new cross-module RoleService calls flagged). docs/plans/US-3.1-
 # implementation-plan.md (resolves PATCH's missing reason field, FR-18's
 # token-invalidation mechanism, adds 2 new RoleService methods).
-# docs/plans/US-011-task-breakdown.md (T1-T9). docs/reviews/plans/
-# US-011-plan-review.md - Pass with Issues, 4 findings found+fixed same-
+# docs/plans/US-3.1-task-breakdown.md (T1-T9). docs/reviews/plans/
+# US-3.1-plan-review.md - Pass with Issues, 4 findings found+fixed same-
 # day: T3's migration bundled a CONCURRENTLY index with transactional
 # DDL (split into T3/T3b per US-2.6 precedent); migrations/env.py touch
 # was assigned outside its declared skill scope (now unassigned/out-of-
@@ -466,23 +466,23 @@ status: IN_PROGRESS
 # users off origin/main via git stash (clean, no conflicts). See
 # docs/catalog/US-3.1-pipeline-status.md for the full stage-by-stage
 # record. Advancing to TESTS.
-# DESIGN done 2026-09-02: docs/designs/api/US-011-{openapi.yaml,api-
+# DESIGN done 2026-09-02: docs/designs/api/US-3.1-{openapi.yaml,api-
 # design.md} (7 operations across 6 paths; ETag/If-Match mechanics reused
 # verbatim from app/core/etag.py + app/modules/profile's precedent,
 # previously unavailable to US-3.2; 9 Open Questions logged, none
-# blocking). docs/designs/database/US-011-{db-design,entity-model}.md
+# blocking). docs/designs/database/US-3.1-{db-design,entity-model}.md
 # (users: no schema change, 2 new indexes incl. first-ever pg_trgm use in
 # this codebase; new invitation_tokens table matching existing token
 # precedent; admin_audit_log gains 4 nullable columns per OD-1;
 # account_lifecycle_audit_log gains 1 nullable column per OD-2; 3 Known
 # Gaps logged, incl. PATCH request body missing a reason field for FR-9's
 # new admin_audit_log.reason column). Advancing to PLANNING.
-# SPEC_REVIEW done 2026-09-02: docs/reviews/specifications/US-011-spec-
+# SPEC_REVIEW done 2026-09-02: docs/reviews/specifications/US-3.1-spec-
 # review.md - Pass with Issues. 21/21 ACs Covered, no contradictions. 3
 # Low findings, all disclosed/precedent-grounded (FR-6's BR-001
 # concurrency sentence; FR-17b/FR-22/FR-23 lacking a source AC, matching
 # US-2.6 FR-6/FR-7 precedent). User accepted as-is 2026-09-02.
-# SPECIFICATION done 2026-09-02: docs/specifications/US-011-manage-
+# SPECIFICATION done 2026-09-02: docs/specifications/US-3.1-manage-
 # users-spec.md revised in place (pre-existing 2026-08-22 draft).
 # Incorporates OD-1 (admin_audit_log gains nullable field/old_value/
 # new_value/reason columns for FR-9), OD-2 (account_lifecycle_audit_log
@@ -500,7 +500,7 @@ status: IN_PROGRESS
 # OD-2 account_lifecycle_audit_log (US-1.4-built) has no reason column
 # but MU-AC13/FR-13 requires persisting an admin-supplied reason; OD-3
 # GET /v1/admin/users/{id} is in-scope but has zero Acceptance Criteria.
-# 6 of the pre-existing US-011 spec's/review's open items resolved
+# 6 of the pre-existing US-3.1 spec's/review's open items resolved
 # outright by reading the real US-1.4 (account module)/US-3.2 (roles
 # module) codebase merged since the 2026-08-22 draft: concurrent
 # duplicate-email (BR-001 atomic constraint), role->permission mapping
@@ -517,7 +517,7 @@ status: IN_PROGRESS
 # story: US-2.6
 # current_stage: PR
 # status: DONE
-# PR done 2026-09-02: docs/pr/US-010-pr-description.md drafted by
+# PR done 2026-09-02: docs/pr/US-2.6-pr-summary.md drafted by
 # pr-preparer. All 4 gates confirmed Pass from their actual reports
 # (gate-enforcer 7/7 + 409/409 tests/97.42% coverage; implementation-
 # verifier Pass; security-reviewer Pass; reconciliation-reviewer Pass).
@@ -534,7 +534,7 @@ status: IN_PROGRESS
 # logged (docs/decisions/US-2.6-open-decisions.md) - own-current-session
 # revocation behavior, 20-family cap eviction mechanics, device/browser
 # label derivation, geo-IP location mechanism. 3 of the pre-existing
-# US-010 spec's 6 Open Questions resolved outright by reading US-2.3's
+# US-2.6 spec's 6 Open Questions resolved outright by reading US-2.3's
 # actual shipped implementation (metadata capture + last_used_at write
 # strategy already built; malformed family_id resolved by precedent).
 # All 4 ODs resolved by the user 2026-09-02, recommended option accepted
@@ -544,20 +544,20 @@ status: IN_PROGRESS
 # MaxMind GeoLite2-City DB, no live network call. See
 # docs/evidence/US-2.6-clarification-report.md. Advances to
 # SPECIFICATION.
-# SPECIFICATION done 2026-09-02: docs/specifications/US-010-active-
+# SPECIFICATION done 2026-09-02: docs/specifications/US-2.6-active-
 # session-management-spec.md revised in place (pre-existing 2026-08-22
 # draft). Incorporates OD-1-OD-4 plus 2 new FRs (FR-6 self-revoke 409,
 # FR-7 cap eviction) with no source AC. 5/5 source ACs traced.
-# SPEC_REVIEW done 2026-09-02: docs/reviews/specifications/US-010-spec-
+# SPEC_REVIEW done 2026-09-02: docs/reviews/specifications/US-2.6-spec-
 # review.md - Pass with Issues (2 Medium findings found+fixed same-day).
 # 5/5 ACs Covered, no contradictions. Current-session identification
 # mechanism (undefined for FR-1/FR-6) and concurrent-login cap-eviction
 # race (same class of bug already hit in US-3.2) both resolved by user:
 # read refresh_token cookie; row-lock the count-and-evict check. 4
 # disclosed Low scope-creep findings noted, non-blocking.
-# DESIGN done 2026-09-02: docs/designs/api/US-010-{openapi.yaml,api-
+# DESIGN done 2026-09-02: docs/designs/api/US-2.6-{openapi.yaml,api-
 # design.md} (2 endpoints, 1 new error slug current-session/409).
-# docs/designs/database/US-010-{db-design,entity-model}.md (no new
+# docs/designs/database/US-2.6-{db-design,entity-model}.md (no new
 # refresh_tokens columns - all already exist from US-2.1/2.2/2.3; 1 new
 # composite index for per-family aggregate queries; 1 new column
 # auth_audit_log.target_family since reason/scope were wrong size/
@@ -568,7 +568,7 @@ status: IN_PROGRESS
 # story: US-2.5
 # current_stage: PR
 # status: DONE
-# PR done 2026-09-02: docs/pr/US-009-pr-description.md drafted by
+# PR done 2026-09-02: docs/pr/US-2.5-pr-summary.md drafted by
 # pr-preparer. All 4 gates confirmed Pass from their actual reports
 # (gate-enforcer 7/7 + 367/367 tests/97.35% coverage; implementation-
 # verifier Pass; security-reviewer Pass; reconciliation-reviewer Pass).
@@ -579,7 +579,7 @@ status: IN_PROGRESS
 # pre-existing "WrongPassword1!" literal shifted line numbers due to this
 # session's own edits, re-flagged; pragma: allowlist secret added).
 # Committed as ae8d2a2, pushed to origin, opened as GitHub PR #10.
-# RECONCILIATION done 2026-09-02: docs/reconciliation/US-009-reconciliation-report.md
+# RECONCILIATION done 2026-09-02: docs/reviews/reconciliation/US-2.5-reconciliation.md
 # - Pass (7 gaps found+fixed same-day). All 7 source ACs + FR-8 have full,
 # verified matrix coverage. Initial pass found 7 test functions the
 # pre-implementation traceability matrix names did not exist under any
@@ -603,7 +603,7 @@ status: IN_PROGRESS
 # match its already-generic "cross-cutting shape, reused" contract, not a
 # divergence. Gate re-confirmed green: 7/7 pre-commit, mypy clean, 367/367
 # tests (was 361), 97.35% coverage. Advances to PR.
-# SECURITY_REVIEW done 2026-09-02: docs/security/US-009-security-review.md -
+# SECURITY_REVIEW done 2026-09-02: docs/reviews/security/US-2.5-security-review.md -
 # Pass (1 finding found+fixed same-day). 5/6 AGENTS.md SS7 rows clean on
 # first read; rule 2 (no reversible encryption for credentials) required
 # explicit reasoning - mfa_secret_encrypted's AES-GCM envelope encryption
@@ -624,7 +624,7 @@ status: IN_PROGRESS
 # indistinguishability test. Full gate re-run green: 7/7 pre-commit hooks,
 # mypy strict clean, 361/361 tests (was 360 - added 1), 97.35% coverage.
 # 3 Low advisory findings noted, none forcing a Fail.
-# VERIFICATION done 2026-09-02: docs/verification/US-009-verification-report.md
+# VERIFICATION done 2026-09-02: docs/verification/US-2.5-implementation-verification.md
 # - Pass. 1 real gap found+fixed same-day: 13 missing AGENTS.md SS5
 # security-case tests across enroll/activate/disable (activate/disable
 # had none at all) plus verify's scheme-specific equivalents. All added,
@@ -641,12 +641,12 @@ status: IN_PROGRESS
 # confirmed clean. Added `cryptography` as a new pyproject.toml
 # dependency (AES-GCM for OD-2's secret-at-rest encryption).
 # IMPLEMENTATION in progress 2026-09-01, T1-T6 done per
-# docs/plans/US-009-task-breakdown.md:
+# docs/plans/US-2.5-task-breakdown.md:
 # T1 schemas (users/schemas.py: 8 new MFA schemas, LoginResponse/
 #   RefreshResponse gain mfa_enrollment_deadline).
 # T2 users data layer (models.py: 4 new User columns + MfaRecoveryCode;
 #   repository.py: 8 new methods; cache.py: MfaTokenCache/MfaReplayCache;
-#   cache_keys.py: 3 new keys - moved here from planned T5 per US-008's
+#   cache_keys.py: 3 new keys - moved here from planned T5 per US-2.4's
 #   actual precedent, since cache.py is their first consumer).
 # T2b roles data layer (models.py: UserRole.granted_at; repository.py:
 #   list_role_grants_for_user, replace_for_user explicit granted_at write).
@@ -667,33 +667,33 @@ status: IN_PROGRESS
 #   get_current_user_allow_revoked. All routes confirmed live via
 #   app.openapi().
 # Remaining: T7 (unit tests), T8 (integration tests), T9 (gate-enforcer).
-# TESTS done 2026-09-01: docs/tests/US-009-traceability-matrix.md (matrix
+# TESTS done 2026-09-01: docs/tests/US-2.5-ac-test-matrix.md (matrix
 # only, test code deferred to IMPLEMENTATION T7/T8 per T1-T9 breakdown).
 # All 7 ACs + FR-8's no-AC disable path covered at unit+integration;
 # dedicated coverage for the default-deny enrolment-scoping mechanism
 # (plan's flagged highest-risk line) in both directions plus 2 full-flow
 # integration tests (one per trigger).
-# PLANNING done 2026-09-01: docs/impact-analysis/US-009-impact-analysis.md
+# PLANNING done 2026-09-01: docs/impact-analysis/US-2.5-impact-analysis.md
 # (extends users module, no new module; 2 open architectural tensions
 # flagged - enrolment-scoped-token mechanism, mfa_token mechanism).
-# docs/plans/US-009-implementation-plan.md resolves both tensions (JWT
+# docs/plans/US-2.5-implementation-plan.md resolves both tensions (JWT
 # claim + default-deny at get_authenticated_user mirroring
 # get_current_user_allow_revoked; Valkey-backed opaque mfa_token via
-# GETDEL). docs/plans/US-009-task-breakdown.md (T1-T9, roles-module data/
-# service work split into T2b/T4 per US-012's app/core/* placement
-# precedent). docs/reviews/plans/US-009-plan-review.md - Pass with
+# GETDEL). docs/plans/US-2.5-task-breakdown.md (T1-T9, roles-module data/
+# service work split into T2b/T4 per US-3.2's app/core/* placement
+# precedent). docs/reviews/plans/US-2.5-plan-review.md - Pass with
 # Issues (1 Low traceability nit, 1 Medium concurrency-risk gap), both
 # resolved same-day and folded into the plan.
-# DESIGN done 2026-09-01: docs/designs/api/US-009-{openapi.yaml,api-design.md}
+# DESIGN done 2026-09-01: docs/designs/api/US-2.5-{openapi.yaml,api-design.md}
 # (5 endpoints: enroll/activate/verify/disable new, login/refresh extended
 # per FR-6; 4 Open Questions deferred to PLANNING - activate's error
 # distinction, disable's recovery-code acceptance, disable's check-order,
-# grace-period field naming). docs/designs/database/US-009-{db-design,
+# grace-period field naming). docs/designs/database/US-2.5-{db-design,
 # entity-model}.md (4 new users columns, new mfa_recovery_codes table,
 # 1 new column - granted_at - on the already-merged US-3.2 user_roles
 # table; enrolment state derived, not a new enum; FR-8's hard-delete
 # deliberately diverges from PasswordResetToken's keep-but-mark pattern).
-# SPEC_REVIEW done 2026-09-01: docs/reviews/specifications/US-009-spec-review.md
+# SPEC_REVIEW done 2026-09-01: docs/reviews/specifications/US-2.5-spec-review.md
 # - Pass with Issues. 7/7 ACs Covered, no contradictions. 1 High finding
 # (no data source for the 14-day grace-period clock - user_roles had no
 # timestamp column) + 2 Medium ambiguities (recovery-trigger grace scope,
@@ -705,7 +705,7 @@ status: IN_PROGRESS
 # (mfa_reenrollment_required flag, perm_epoch/token-stale reuse, FR-8's
 # no-AC disable-success path) noted as disclosed/user-approved, non-
 # blocking.
-# SPECIFICATION done 2026-09-01: docs/specifications/US-009-mfa-totp-spec.md
+# SPECIFICATION done 2026-09-01: docs/specifications/US-2.5-spec.md
 # revised in place (pre-existing 2026-08-22 draft) to incorporate all 11
 # resolved Open Decisions as an "Open Decision Resolutions" section, plus
 # 2 new FRs not derivable from any single AC (FR-6 folds in the
@@ -717,8 +717,8 @@ status: IN_PROGRESS
 # CLARIFICATION done 2026-09-01 (re-run): OD-1 (blocking) resolved - US-3.2
 # reached PR #9 (open/unmerged, every stage Pass), role/scope system
 # confirmed live matching BR-010/011/013. A pre-existing draft spec
-# (US-009) and review already existed (2026-08-22) - did not resolve
-# OD-2/3/4/5/6/7 by precedent (unlike US-008 for US-2.4) but corroborated
+# (US-2.5) and review already existed (2026-08-22) - did not resolve
+# OD-2/3/4/5/6/7 by precedent (unlike US-2.4 for US-2.4) but corroborated
 # them, and surfaced OD-8 (disable-success path, "[High]" in the review),
 # OD-9 (recovery exhaustion), OD-10 (recovery-vs-lockout counter), OD-11
 # (re-enroll-while-pending). New OD-7: MF-AC6's "US-3.2 MR-AC1" citation
@@ -737,7 +737,7 @@ status: IN_PROGRESS
 # story: US-3.2
 # current_stage: PR
 # status: DONE
-# Every stage Pass through PR draft (see docs/pr/US-012-pr-description.md).
+# Every stage Pass through PR draft (see docs/pr/US-3.2-pr-summary.md).
 # gate-enforcer PASS: 7/7 hooks, mypy strict clean (94 files), lint-imports
 # 6/6, 281/281 tests, 97.27% coverage. VERIFICATION: Pass, 1 SS5 gap
 # found+fixed (4 new security-case tests). SECURITY_REVIEW: Pass, 4/6 SS7
@@ -794,7 +794,7 @@ status: IN_PROGRESS
 # list/bloom filter (no live network call), OD-2 check order cooldown ->
 # per-account/hour -> per-IP/hour, OD-3 request endpoint also writes
 # auth_audit_log (event=password_reset_requested) on every attempt
-# including unknown/deactivated accounts. A pre-existing spec (US-008,
+# including unknown/deactivated accounts. A pre-existing spec (US-2.4,
 # drafted 2026-08-22, predates the real US-2.1/2.2/2.3 codebase) already
 # existed; re-reading it resolved its own 2 unresolved Open Questions by
 # direct precedent (email_verification's token-state -> error-type
@@ -812,9 +812,9 @@ status: IN_PROGRESS
 # US-2.2 (Logout, Epic 2) reached PR with every stage Pass (post-PR IDOR
 # fix included), was committed and merged as PR #5 on GitHub (commit
 # 157fa36, merge 76e70e8) - confirmed via git log on main, 2026-09-01.
-# US-001, US-002, US-003 are implemented per git history (commits b6dc29e,
+# US-1.1, US-1.2, US-1.3 are implemented per git history (commits b6dc29e,
 # ed6e2a9, 90a612b, 1f8d2a5, 1ee7dc5), though not tracked through this
-# pipeline. US-004 (Deactivate Account, Epic 1 / "1.4") completed the full
+# pipeline. US-1.4 (Deactivate Account, Epic 1 / "1.4") completed the full
 # pipeline through PR, was committed (e3b42c4) and merged as PR #1 on
 # GitHub (confirmed via `gh pr view 1`, state: MERGED, 2026-08-31).
 # US-2.1 (Login, Epic 2) completed the full pipeline through PR (see

@@ -1,7 +1,7 @@
 # Clarification Report: US-2.3 (Refresh Token)
 
 **Story:** `docs/stories/US-2.3-refresh-token.md`
-**Existing spec (outside this pipeline):** `docs/specifications/US-007-refresh-token-spec.md` (drafted 2026-08-22, reviewed at `docs/reviews/specifications/US-007-spec-review.md`, verdict Pass with Issues)
+**Existing spec (outside this pipeline):** `docs/specifications/US-2.3-spec.md` (drafted 2026-08-22, reviewed at `docs/reviews/specifications/US-2.3-spec-review.md`, verdict Pass with Issues)
 **Reviewed:** 2026-09-01
 
 ## Scope, Actor, Business Value
@@ -41,4 +41,4 @@ Plus two items carried forward from the 2026-08-22 spec review that were never r
 
 **Not Ready — see Open Decisions.**
 
-Six new Open Decisions (OD-1–OD-6) plus two carried-forward spec-review findings need the user's resolution before `story-spec-writer` revises `US-007-refresh-token-spec.md`. This mirrors the pattern from US-2.1 (7 ODs) and US-2.2 (6 ODs): the story and its pre-existing spec were written before the surrounding codebase (login's actual refresh-token shape, US-2.2's partial schema work, the login-throttle precedent) existed to check them against.
+Six new Open Decisions (OD-1–OD-6) plus two carried-forward spec-review findings need the user's resolution before `story-spec-writer` revises `US-2.3-refresh-token-spec.md`. This mirrors the pattern from US-2.1 (7 ODs) and US-2.2 (6 ODs): the story and its pre-existing spec were written before the surrounding codebase (login's actual refresh-token shape, US-2.2's partial schema work, the login-throttle precedent) existed to check them against.

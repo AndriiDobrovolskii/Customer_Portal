@@ -1,6 +1,6 @@
 ---
 name: story-spec-reviewer
-description: Reviews a generated Story Specification artifact (e.g. docs/specifications/US-001-spec.md, typically produced by story-spec-writer) against its original User Story file (e.g. docs/stories/US-001.md, containing business context and Acceptance Criteria) to check completeness and accuracy before implementation begins. Use this whenever the user asks to "review a spec," "check a spec against the story," "audit this specification," "verify AC coverage," or wants a QA pass on a spec before handing it to engineering — even if they just paste two file paths (a story and a spec) and ask "does this spec match?" Produces a structured Markdown review report saved under docs/reviews/specifications/, checking for: ambiguous or non-verifiable statements, contradictions with the original business requirements, missing Acceptance Criteria coverage, scope creep beyond the original story, and missing edge cases/boundary conditions/error handling. This is the downstream QA counterpart to story-spec-writer — it audits an existing spec, it does not draft or rewrite one. Trigger this for requests about spec review, spec audits, AC coverage checks, or spec-vs-story validation; not for writing a spec from scratch (that's story-spec-writer) and not for reviewing code or pull requests.
+description: Reviews a generated Story Specification artifact (e.g. docs/specifications/US-1.1-spec.md, typically produced by story-spec-writer) against its original User Story file (e.g. docs/stories/US-1.1.md, containing business context and Acceptance Criteria) to check completeness and accuracy before implementation begins. Use this whenever the user asks to "review a spec," "check a spec against the story," "audit this specification," "verify AC coverage," or wants a QA pass on a spec before handing it to engineering — even if they just paste two file paths (a story and a spec) and ask "does this spec match?" Produces a structured Markdown review report saved under docs/reviews/specifications/, checking for: ambiguous or non-verifiable statements, contradictions with the original business requirements, missing Acceptance Criteria coverage, scope creep beyond the original story, and missing edge cases/boundary conditions/error handling. This is the downstream QA counterpart to story-spec-writer — it audits an existing spec, it does not draft or rewrite one. Trigger this for requests about spec review, spec audits, AC coverage checks, or spec-vs-story validation; not for writing a spec from scratch (that's story-spec-writer) and not for reviewing code or pull requests.
 ---
 
 # Story Spec Reviewer
@@ -36,8 +36,8 @@ Output Artifacts: docs/reviews/specifications/<StoryId>-spec-review.md.
 
 Two files are required:
 
-1. **Original User Story** — contains business context and Acceptance Criteria (e.g. `docs/stories/US-001.md`). This is the source of truth for scope.
-2. **Generated Story Specification** — the artifact being reviewed (e.g. `docs/specifications/US-001-spec.md`).
+1. **Original User Story** — contains business context and Acceptance Criteria (e.g. `docs/stories/US-1.1.md`). This is the source of truth for scope.
+2. **Generated Story Specification** — the artifact being reviewed (e.g. `docs/specifications/US-1.1-spec.md`).
 
 If the user gives only one file, or only describes one verbally, ask for the other rather than guessing — a review is meaningless without both sides of the comparison. If either file can't be found at the path given, say so and stop; don't review from memory or assumption.
 
@@ -82,7 +82,7 @@ Based on the findings, assign one verdict:
 
 ### 9. Write and save the report
 
-Build the report from `assets/template.md` (read it before drafting so structure stays consistent across reviews). Save it to `docs/reviews/specifications/<story-id>-spec-review.md` (e.g. `docs/reviews/specifications/US-001-spec-review.md`), creating the directory if needed. If a review already exists at that path, treat this run as the canonical update (overwrite it), and tell the user you replaced a prior review — reviews get re-run as specs are revised.
+Build the report from `assets/template.md` (read it before drafting so structure stays consistent across reviews). Save it to `docs/reviews/specifications/<story-id>-spec-review.md` (e.g. `docs/reviews/specifications/US-1.1-spec-review.md`), creating the directory if needed. If a review already exists at that path, treat this run as the canonical update (overwrite it), and tell the user you replaced a prior review — reviews get re-run as specs are revised.
 
 ## Output Specification & Markdown Report Template
 

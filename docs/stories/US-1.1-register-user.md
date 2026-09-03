@@ -1,4 +1,4 @@
-## **US-001 Register User**
+## **US-1.1 Register User**
 
 #### **User Story**
 

@@ -1,7 +1,7 @@
 # Open Decisions: US-3.1 Manage Users
 
 **Story:** `docs/stories/US-3.1-manage-users.md` (five slices, `MU-AC` prefix)
-**Pre-existing spec:** `docs/specifications/US-011-manage-users-spec.md` (drafted 2026-08-22, Pass with Issues per `docs/reviews/specifications/US-011-spec-review.md`, predates the actual US-1.4/US-3.2 codebase now in place).
+**Pre-existing spec:** `docs/specifications/US-3.1-spec.md` (drafted 2026-08-22, Pass with Issues per `docs/reviews/specifications/US-3.1-spec-review.md`, predates the actual US-1.4/US-3.2 codebase now in place).
 **Logged:** 2026-09-02
 
 ## Resolutions (2026-09-02)
@@ -16,7 +16,7 @@ All three Open Decisions below were resolved by the user on 2026-09-02, recommen
 
 Checking the pre-existing spec's and its review's open items against the real codebase (US-1.4's `account` module and US-3.2's `roles` module, both merged since the spec was drafted) resolves four of them outright:
 
-- **Concurrent duplicate-email creation (spec review "Missing Edge Cases" item 1)** — already governed by `business-rules.md` BR-001: email uniqueness is "enforced atomically at the data layer so concurrent registrations for the same email cannot both succeed," and BR-001's own Source line already cites reuse "for admin-created accounts (`US-011-manage-users-spec.md` FR-6)." No new mechanism needed; FR-6 just needs to state the atomic-constraint enforcement explicitly rather than implying a pre-check query only.
+- **Concurrent duplicate-email creation (spec review "Missing Edge Cases" item 1)** — already governed by `business-rules.md` BR-001: email uniqueness is "enforced atomically at the data layer so concurrent registrations for the same email cannot both succeed," and BR-001's own Source line already cites reuse "for admin-created accounts (`US-3.1-manage-users-spec.md` FR-6)." No new mechanism needed; FR-6 just needs to state the atomic-constraint enforcement explicitly rather than implying a pre-check query only.
 - **Role→permission mapping source for MU-AC8/FR-8 (spec review "Missing Edge Cases" item 2)** — already built by US-3.2. `app/modules/roles/models.py`'s `Role.permissions` relationship and `RoleRepository.get_by_names()` resolve a role name list to its flattened permission-scope set, and `RoleService.replace_user_roles` (`app/modules/roles/service.py` lines 162-176) already implements the exact `requested_permissions.issubset(actor_scopes)` privilege-escalation check MU-AC8 needs, including the `authz_denied`-audit-then-raise sequence. US-3.1's create-user privilege-escalation check should call into the roles module the same way (mirroring the cross-module read pattern US-2.5 already established for `users.service` → `roles.service`), not invent a second mapping mechanism.
 - **Deactivate slice's missing "unknown user" case (spec review "Missing Edge Cases" item 4)** — resolved by precedent within this same spec: Update (MU-AC12/FR-12) and Resend-invite (MU-AC21/FR-21) both already specify a generic `404` for an unknown user id. There is no stated reason for Deactivate to diverge; recommend the identical `404`.
 - **Invitation-token shape ("same shape as US-1.2's tokens")** — confirmed accurate. `app/modules/email_verification/models.py`'s `EmailVerificationToken` (`token_hash`, `user_id`, `issued_at`, `expires_at`, `consumed_at`) and `app/modules/users/models.py`'s `PasswordResetToken` are both already built to this exact shape; a new `invitation_tokens` table following the same columns is a direct precedent match, not a new pattern.

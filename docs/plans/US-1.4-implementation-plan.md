@@ -1,0 +1,65 @@
+# Implementation Plan: US-1.4 Deactivate Account
+
+**Inputs:** spec (Pass), API design, DB design, `docs/impact-analysis/US-1.4-impact-analysis.md`.
+
+## Goal
+
+Ship `POST /v1/account/deactivate` (FR-1/FR-2/FR-3) with the revocation write-side (FR-1's `revoke_before` set, FR-10's invariant reusable by a future admin caller) and the shared read-side check in the existing auth dependency (FR-4). FR-5–FR-9 (login/refresh/reactivation/purge-job behavior) are explicitly **not** built here — they consume the signal this story writes, per `US-1.4-api-design.md`'s FR ownership table.
+
+## Dependency sign-off: APPROVED 2026-08-30
+
+User approved `redis>=5.0` (`redis.asyncio`) as the Valkey client. `pyproject.toml`'s `[project] dependencies` array may now be edited to add it as part of IMPLEMENTATION (still not a §7.9-protected config section — only the tool-config sections are). Original proposal kept below for record.
+
+## Requires explicit user sign-off before IMPLEMENTATION proceeds — RESOLVED, see above
+
+Per `AGENTS.md` §7 item 8 ("Unilateral scope or dependency changes — new dependencies... " is prohibited) and §1 ("Propose, never execute unilaterally: new or upgraded dependencies"): **this story requires adding a new runtime dependency** — no async Valkey/Redis-protocol client exists in `pyproject.toml` today (confirmed by `impact-analyzer`). Recommendation, not a decision made here:
+
+- **`redis>=5.0` (`redis.asyncio`)** — speaks the Redis protocol Valkey implements, is the most widely used async client, and is what `AGENTS.md`'s "Async client only, always injected" line most likely anticipates given no Valkey-specific client is named anywhere in the repo. Alternative: `valkey-glide`, the Valkey project's own official client — newer, less ecosystem precedent, but avoids depending on a Redis-branded package for a Valkey-only deployment.
+- Also needed (dev-only): a Valkey-capable `testcontainers` extra for `tests/conftest.py` (today's extra is `testcontainers[postgres]` only) — `testcontainers` ships a generic `DockerContainer`/Redis-container helper compatible with the Valkey image, so this may not need a new package, only a new fixture; confirm at `data-layer-builder`/`migration-manager` time.
+
+**Do not proceed to IMPLEMENTATION until the user has approved a specific package.** This is the single hard blocker on this plan.
+
+## Architectural Changes
+
+1. **New module `app/modules/account/`** — owns `POST /v1/account/deactivate`, `AccountLifecycleAuditLog`, and the Valkey write for `revoke_before:{user_id}`. New module chosen over extending `users`/`profile` per `US-1.4-db-design.md`'s recommendation (confirmed, no dissent found).
+2. **First-time Valkey infrastructure**, added generically (not account-module-specific) so `US-2.1`/`US-2.2`/`US-2.3` can reuse it without re-deriving:
+   - `app/core/config.py`: add `valkey_url: str` setting.
+   - `app/main.py` `lifespan`: create the Valkey connection pool as an app-scoped singleton (mirrors the existing `db_engine`/`db_session_factory` pattern at lines 20-27), store as `app.state.valkey_client`, close it on shutdown.
+   - `app/db/dependencies.py`: add `get_valkey_client(request: Request)` mirroring `get_db_session`'s shape (request-scoped accessor onto the app-scoped singleton — not a new connection per request, since Valkey clients are typically pool-based already; confirm against the chosen client library's connection-pooling model at implementation time).
+3. **`RevocationCache` gateway — corrected during implementation to `app/core/revocation_cache.py`, not `account/cache.py`.** The *only* place that writes/reads `revoke_before:{user_id}`, per `AGENTS.md` §3's `cache.py` layer rule ("cache keys come from documented prefix helpers and every write sets a TTL"). **Correction:** originally planned as `account/cache.py`, but implementing Architectural Change 5 below surfaced that this forces `users/dependencies.py` to import from `account` regardless of where the prefix helper lives — the gateway class itself needed to move, not just the key-name helper. `business-glossary.md` confirms `revoke_before` has three writers across three future modules (deactivation, US-2.2 logout-everywhere, US-2.4 password reset) and one reader (`users`), so it's core infrastructure, not account-owned — moved beside `app.core.security`'s other cross-cutting auth primitives. `account/cache.py` was deleted (no delegating shim). TTL choice: the key must outlive the longest-lived credential it needs to invalidate — set TTL to `access_token_ttl_seconds` is *insufficient* (a stale refresh token in `UserService` would need protection too, but FR-5's refresh-token check is out of this story's scope per the FR-ownership table) — **for this story's own scope (FR-1, FR-4), TTL = `access_token_ttl_seconds` is sufficient** since FR-4 only requires access-token rejection; document explicitly in the module that a longer TTL may be needed once US-2.3 (refresh) reads the same key, as a forward note, not a change made now.
+4. **Fail-closed on Valkey outage.** `AGENTS.md` §3: "the cache is never the source of truth: degrade to the DB on miss or outage, **except the token denylist, which fails closed.**" `revoke_before` *is* a token denylist. If the cache-read collaborator's call raises (Valkey unreachable) rather than returning `None`, `get_authenticated_user` must treat that as **rejection**, not fall through to accepting the token. This must be an explicit `try/except` in T7's implementation with a test case (T12) forcing the cache read to raise — not left implicit.
+5. **`users/service.py` extension** — `get_authenticated_user` gains a `revoke_before` read via an injected cache-read collaborator (new constructor param on `UserService`, a `Protocol` per the existing `UserRepositoryProtocol`/`VerificationTokenIssuerProtocol` style at `users/service.py:44-63`). Reject if `revoke_before` timestamp is not `None` and is `>=` the token's `issued_at`.
+   - **This is a cross-module dependency in the unusual direction**: `users` (auth) reading a key that `account` (this story) writes. Per `AGENTS.md` §3 "cross-module calls go service→service," `UserService` depends on a cache-gateway type, not on `AccountService` directly. **Decision (corrected during implementation, see Architectural Change 3):** both the prefix helper and the gateway class live in `app/core/` (`cache_keys.py`, `revocation_cache.py`) rather than `account/cache.py` — `users/dependencies.py`, `account/dependencies.py`, and `account/service.py` all import `RevocationCache` from `core`, so no module imports from another module.
+6. **`users/schemas.py`** — extend `UserStatus` with `ACTIVE = "active"` and `DEACTIVATED = "deactivated"` (currently only `PENDING_VERIFICATION` exists); `register_user`'s existing `UserStatus.PENDING_VERIFICATION.value` write is unaffected.
+7. **Exception ownership — revised per `docs/reviews/plans/US-1.4-plan-review.md` (Fail, High finding).** The original draft of this plan had `account/service.py` reuse `app.modules.users.exceptions.InvalidCredentialsError` directly. Rejected on review: `AGENTS.md` §3's layer table lists `service.py`'s allowed imports as "schemas, repository, cache gateway, models, `core.*`" — a sibling module's `exceptions.py` is none of these, and importing it bypasses the "cross-module calls go service → service" rule (§3 line 47). **Corrected decision:** `account/exceptions.py` defines its own local `InvalidPasswordError`, a `ProblemError` subclass (`type_slug = "invalid-credentials"`, `status = 401`, generic detail, no leak) — matching `US-1.4-openapi.yaml`'s declared `application/problem+json` `InvalidCredentialsProblem` response, rendered automatically by `main.py`'s existing `problem_error_handler`. **Correction to an earlier draft of this note:** `users.exceptions.InvalidCredentialsError` is *not* `ProblemError` — it's a plain `DomainError` rendered by a bespoke `{"detail": ...}` handler at `main.py:86-90`. `InvalidPasswordError` deliberately does **not** match that shape; it matches this story's own OpenAPI contract instead, which is what `service-and-router-builder` must implement from. `AlreadyDeactivatedError` (409, `type_slug = "already-deactivated"`) is the second new local exception. Both are local to `account/exceptions.py`, no cross-module import, matching the existing precedent of `profile/exceptions.py` defining its own `ReauthenticationRequiredError` instead of importing from `users`.
+
+## Files To Create
+
+Per `impact-analysis/US-1.4-impact-analysis.md` §1 "New module" table, unchanged — reproduced here for the task breakdown: `app/modules/account/{models,schemas,repository,cache,service,router,dependencies,exceptions}.py`, plus `app/core/cache_keys.py` (new, per Architectural Change 4), plus test files listed in the impact analysis §4.
+
+## Files To Modify
+
+Per impact-analysis §1 "Existing files modified" table, unchanged, plus the migration file (new, generated by `migration-manager`) and `pyproject.toml` (blocked on sign-off above).
+
+## Risks
+
+1. **Dependency sign-off blocks the critical path** — flagged above; every downstream IMPLEMENTATION task (cache.py, config, lifespan) depends on it.
+2. **Concurrency (Clarification #2).** The conditional `UPDATE ... WHERE status='active'` must be verified to actually return 0 rows (not raise) on the losing side of a race — `data-layer-builder` must confirm the chosen SQLAlchemy Core statement form surfaces "0 rows matched" distinguishably from "row not found at all," since the service needs to turn that into `409` specifically (not `404`).
+3. **Migration hazard: low.** Both changes (`ADD COLUMN ... NULL`, `CREATE TABLE`) are additive/nullable — no `CONCURRENTLY` or batched-backfill concern per `AGENTS.md` §4's stated hazard list. `migration-manager` should still run the upgrade→downgrade→upgrade proof per its standard process; nothing here should shortcut it because the change "looks safe."
+4. **Auth-path regression risk.** `get_authenticated_user` is the single funnel every existing authenticated route depends on (`profile`'s router, and this story's own). A bug in the new `revoke_before` check could lock out active users project-wide. Mitigate: the integration test suite must include a case proving an *active* user's token is unaffected (`revoke_before` absent/`None`), not just the deactivated-user rejection case.
+5. **`UserStatus` enum extension is a breaking-looking change but isn't one** — `status` was always a free-text column; adding enum members doesn't require a migration, only a Python/service-layer change. Flagged so `implementation-planner` doesn't mistakenly route it through `migration-manager`.
+
+## Validation Strategy
+
+- `pre-commit run --all-files` after each task (per `AGENTS.md` §1.4), not only at the end.
+- `mypy app tests` — new `Protocol` for the cache-read collaborator, new cache gateway types, must satisfy strict mode (no `Any`, no `# type: ignore`).
+- `lint-imports` — verify the new `app/core/cache_keys.py` doesn't create a layer violation (core → modules is fine; modules → core is fine; the risk is `users` importing `account`, which this plan's Architectural Change 4 explicitly avoids).
+- `gate-enforcer` run at the end of IMPLEMENTATION per the standard pipeline stage — not shortcut.
+
+## Testing Strategy
+
+- **Unit** (`tests/unit/modules/account/test_account_service.py`): hand-written fakes for `AccountRepositoryProtocol` and the cache gateway `Protocol` (never `MagicMock`, per `AGENTS.md` §5 "Unit"). Cover: correct-password success, wrong-password 401 (auth-before-state-check ordering per `US-1.4-api-design.md`), already-deactivated 409, cache-write TTL asserted via the fake recording its call args.
+- **Unit** (`tests/unit/modules/users/test_users_service.py`, extended): `get_authenticated_user` with a fake revoke_before reader — token issued before revoke_before → rejected; token issued after / no revoke_before set → accepted; **fake raises (simulated Valkey outage) → rejected**, proving the fail-closed rule (Architectural Change 4) is real, not just documented.
+- **Integration** (`tests/integration/modules/account/test_account_router.py`): real PG + real Valkey (per `AGENTS.md` §5 "Integration" — no mocking infra), full `POST /v1/account/deactivate` round trip including a second concurrent-looking request proving 409, and a follow-up authenticated request with the pre-deactivation token proving 401 (FR-4 observed end-to-end, even though FR-4's *login/refresh* consumers aren't built).
+- **Unit, explicit FR-1 side-effect coverage** (added per `US-1.4-plan-review.md`'s Medium test-strategy finding): the success-path unit test for `account/service.py` must assert all three of FR-1's side effects, not just two — status/`deactivated_at` update, `revoke_before` cache write with TTL, **and** that the audit-log fake recorded one `event=deactivated, actor=self` entry.
+- **Integration fixture work**: `tests/conftest.py` needs a Valkey testcontainer fixture, flushed/namespaced per test per `AGENTS.md` §5's isolation rule — this is itself a task, not incidental setup.

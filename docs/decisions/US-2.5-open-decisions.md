@@ -28,7 +28,7 @@ All decisions below are resolved by the user. Branch strategy (process decision,
 
 OD-1 is resolved: the structural blocker is gone. **Caveat carried forward, not blocking:** PR #9 is unmerged. Any US-2.5 feature branch should be based on `feat/us-3.2-manage-roles` (or created only after #9 merges) — branching from `main` today would not see the roles module at all.
 
-**See OD-7 below** — re-reading US-3.2's actual shipped spec (`docs/specifications/US-012-manage-roles-spec.md`) surfaced a second problem MF-AC6's text depends on, which OD-1's original framing didn't anticipate: the "MR-AC1" behavior MF-AC6 cites does not exist.
+**See OD-7 below** — re-reading US-3.2's actual shipped spec (`docs/specifications/US-3.2-spec.md`) surfaced a second problem MF-AC6's text depends on, which OD-1's original framing didn't anticipate: the "MR-AC1" behavior MF-AC6 cites does not exist.
 
 ---
 
@@ -108,12 +108,12 @@ OD-1 is resolved: the structural blocker is gone. **Caveat carried forward, not 
 **Question:** MF-AC6 says *"when such a role is granted to a user without MFA (US-3.2 MR-AC1), that user's next login issues a token scoped only to the enrolment endpoints until enrolment completes."* Since no such mechanism exists anywhere in US-3.2, must this "enrolment-scoped token" behavior be designed and built entirely fresh within US-2.5 (triggered from US-2.5's own login logic), or should it instead require a change to US-3.2's `PUT /v1/admin/users/{id}/roles` endpoint (e.g. a hook fired on role assignment) — which would be new scope added to an already-shipped, PR'd story?
 
 **Why it can't be inferred:**
-- Read `docs/specifications/US-012-manage-roles-spec.md` (US-3.2's actual shipped spec) in full, including its Traceability Matrix's verbatim MR-AC1 text: *"...Then respond 200 with the resulting role set And the operation is a full replacement... And perm_epoch:{target_id} is set to now in Valkey And an admin_audit_log entry is written..."* — nothing about MFA, enrolment, or a scoped token anywhere in MR-AC1, any other FR, or the NFRs.
+- Read `docs/specifications/US-3.2-spec.md` (US-3.2's actual shipped spec) in full, including its Traceability Matrix's verbatim MR-AC1 text: *"...Then respond 200 with the resulting role set And the operation is a full replacement... And perm_epoch:{target_id} is set to now in Valkey And an admin_audit_log entry is written..."* — nothing about MFA, enrolment, or a scoped token anywhere in MR-AC1, any other FR, or the NFRs.
 - Grepped `app/modules/roles/` for `mfa` (case-insensitive): zero matches.
 - The JWT carries only a `scopes` claim (`app/core/security.py`), not a role name — so "issue a token scoped only to the enrolment endpoints" cannot mean "give it the normal scopes minus some"; it must mean something new (e.g. a distinct token type/audience), which has no precedent in this codebase's token design (compare to the existing `mfa_token` concept MF-AC3 already introduces for the *login-challenge* case — a plausible reusable pattern, but the story never says so explicitly).
 - `resolve_scopes_for_user` (used by `users/service.py`) returns scopes only; nothing in `roles.service` currently exposes "does this user hold role X" by name — a new dependency surface a spec-writer would have to define explicitly rather than infer.
 
-**Impact of leaving unresolved:** Without this decision, a spec-writer risks either (a) assuming a hand-off point already exists in the `roles` module and inventing one that doesn't match how US-3.2 was actually built, or (b) silently proposing to reopen and modify the already-PR'd US-012/US-3.2 endpoint, which is out of this story's stated scope and would need separate sign-off. It also determines whether US-2.5 needs a new `roles.service` method (role names, not just scopes) as a cross-module dependency.
+**Impact of leaving unresolved:** Without this decision, a spec-writer risks either (a) assuming a hand-off point already exists in the `roles` module and inventing one that doesn't match how US-3.2 was actually built, or (b) silently proposing to reopen and modify the already-PR'd US-3.2/US-3.2 endpoint, which is out of this story's stated scope and would need separate sign-off. It also determines whether US-2.5 needs a new `roles.service` method (role names, not just scopes) as a cross-module dependency.
 
 **Likely resolution (for the user to confirm or override):** Treat this as net-new US-2.5 logic, checked at login time (alongside MF-AC3's challenge branch), not a change to US-3.2: on every successful password verification, look up the user's role names (a new read-only `roles.service` method, mirroring the existing `resolve_scopes_for_user` dependency pattern already established in `users/service.py`) and if any is `admin`/`auditor`/`support_agent` and `mfa_enabled` is false, apply the enrolment-scoped-token/grace-period behavior — no change to US-3.2's endpoints or spec.
 
@@ -125,11 +125,11 @@ OD-1 is resolved: the structural blocker is gone. **Caveat carried forward, not 
 
 ---
 
-## OD-8 — NEW (surfaced by the pre-existing US-009 spec review): `DELETE /v1/auth/mfa`'s success path (204, non-privileged disable) has zero AC/FR coverage
+## OD-8 — NEW (surfaced by the pre-existing US-2.5 spec review): `DELETE /v1/auth/mfa`'s success path (204, non-privileged disable) has zero AC/FR coverage
 
 **Question:** MF-AC6 only describes the *blocked* disable (privileged role, 409). No acceptance criterion in the story describes what happens when a non-privileged user's disable actually succeeds: does `users.mfa_enabled` become `false`? Are `mfa_secret_encrypted` and the recovery codes purged or merely orphaned? Is an `mfa_disabled` event (already listed in the story's own Data Model Notes) written to `auth_audit_log`?
 
-**Why it can't be inferred:** `docs/reviews/specifications/US-009-spec-review.md` flagged this independently as a "[High]" gap on 2026-08-22, before this pipeline's own re-clarification: *"no MF-AC narrates the success path's behavior... this looks like a genuine gap worth flagging upstream rather than silently absorbing."* The story's API Contract table documents the `204` response but no Gherkin covers it. This absorbs and supersedes the narrower **OD-6** question below (whether disable sets `revoke_before`) — OD-6 is one sub-part of this broader gap.
+**Why it can't be inferred:** `docs/reviews/specifications/US-2.5-spec-review.md` flagged this independently as a "[High]" gap on 2026-08-22, before this pipeline's own re-clarification: *"no MF-AC narrates the success path's behavior... this looks like a genuine gap worth flagging upstream rather than silently absorbing."* The story's API Contract table documents the `204` response but no Gherkin covers it. This absorbs and supersedes the narrower **OD-6** question below (whether disable sets `revoke_before`) — OD-6 is one sub-part of this broader gap.
 
 **Impact of leaving unresolved:** Without this, `story-spec-writer` has an endpoint with a documented request/response shape but no behavioral specification at all for its main success path — the single largest coverage gap in the story.
 
@@ -139,11 +139,11 @@ OD-1 is resolved: the structural blocker is gone. **Caveat carried forward, not 
 
 ---
 
-## OD-9 — NEW (surfaced by the pre-existing US-009 spec review): Recovery-code exhaustion has no defined path
+## OD-9 — NEW (surfaced by the pre-existing US-2.5 spec review): Recovery-code exhaustion has no defined path
 
 **Question:** MF-AC7 describes consuming one recovery code. What happens once a user has consumed all 10 and still cannot access their authenticator — is a support-mediated recovery path expected as part of this story, or is that deliberately out of scope (like WebAuthn/SMS)?
 
-**Why it can't be inferred:** Flagged independently by `docs/reviews/specifications/US-009-spec-review.md` ("[Medium]", Missing Edge Cases) on 2026-08-22. Neither the story's Out of Scope list nor its Open Questions mention this case.
+**Why it can't be inferred:** Flagged independently by `docs/reviews/specifications/US-2.5-spec-review.md` ("[Medium]", Missing Edge Cases) on 2026-08-22. Neither the story's Out of Scope list nor its Open Questions mention this case.
 
 **Impact of leaving unresolved:** Determines whether this story needs an admin-mediated MFA-reset flow (a new endpoint, likely gated by a `users:write`-equivalent scope) or can legitimately ship without one, deferring "locked out with zero recovery codes" to a follow-up story.
 
@@ -153,11 +153,11 @@ OD-1 is resolved: the structural blocker is gone. **Caveat carried forward, not 
 
 ---
 
-## OD-10 — NEW (surfaced by the pre-existing US-009 spec review): Do recovery-code failures count toward the MF-AC5 brute-force counter?
+## OD-10 — NEW (surfaced by the pre-existing US-2.5 spec review): Do recovery-code failures count toward the MF-AC5 brute-force counter?
 
 **Question:** MF-AC5 counts "5 failed verification attempts against the same `mfa_token`" without distinguishing a wrong TOTP code from a wrong recovery code, both submitted to the same `POST /v1/auth/mfa/verify` endpoint. Does a wrong recovery code increment the same failure counter as a wrong TOTP code?
 
-**Why it can't be inferred:** Flagged independently by `docs/reviews/specifications/US-009-spec-review.md` ("[Low]") on 2026-08-22. `business-rules.md`/`business-glossary.md` don't distinguish the two attempt types.
+**Why it can't be inferred:** Flagged independently by `docs/reviews/specifications/US-2.5-spec-review.md` ("[Low]") on 2026-08-22. `business-rules.md`/`business-glossary.md` don't distinguish the two attempt types.
 
 **Impact of leaving unresolved:** Minor but affects the verify-endpoint's implementation — whether the brute-force check is one shared counter or two independent code paths sharing the same Valkey key namespace.
 
@@ -167,11 +167,11 @@ OD-1 is resolved: the structural blocker is gone. **Caveat carried forward, not 
 
 ---
 
-## OD-11 — NEW (surfaced by the pre-existing US-009 spec, its own Open Questions): Re-enrolling while a PENDING enrolment already exists
+## OD-11 — NEW (surfaced by the pre-existing US-2.5 spec, its own Open Questions): Re-enrolling while a PENDING enrolment already exists
 
 **Question:** What happens when `POST /v1/auth/mfa/enroll` is called again for a user who already has a PENDING (not yet activated) enrolment — re-issue a new secret, return the existing pending secret, or error?
 
-**Why it can't be inferred:** `docs/specifications/US-009-mfa-totp-spec.md` (the pre-existing draft spec, 2026-08-22) lists this as its own unresolved Open Question; neither the story nor `business-rules.md`/`business-glossary.md` address it.
+**Why it can't be inferred:** `docs/specifications/US-2.5-spec.md` (the pre-existing draft spec, 2026-08-22) lists this as its own unresolved Open Question; neither the story nor `business-rules.md`/`business-glossary.md` address it.
 
 **Impact of leaving unresolved:** Affects whether `/v1/auth/mfa/enroll` needs idempotency/upsert logic or can simply always insert-and-overwrite.
 

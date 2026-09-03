@@ -1,9 +1,9 @@
 # Open Decisions: US-2.1 — Login
 
 **Story:** docs/stories/US-2.1-login.md
-**Existing spec:** docs/specifications/US-005-login-spec.md (Draft, refined 2026-08-22)
-**Existing spec review:** docs/reviews/specifications/US-005-spec-review.md (Overall Verdict: **Pass with Issues**)
-**Clarification run:** 2026-08-31 (retroactive — a spec and spec review already exist for this story, produced outside this pipeline; the CLARIFICATION stage that should have preceded them never formally ran, per the same "pre-existing, not run in this pipeline" pattern already recorded for US-004)
+**Existing spec:** docs/specifications/US-2.1-spec.md (Draft, refined 2026-08-22)
+**Existing spec review:** docs/reviews/specifications/US-2.1-spec-review.md (Overall Verdict: **Pass with Issues**)
+**Clarification run:** 2026-08-31 (retroactive — a spec and spec review already exist for this story, produced outside this pipeline; the CLARIFICATION stage that should have preceded them never formally ran, per the same "pre-existing, not run in this pipeline" pattern already recorded for US-1.4)
 **Resolution:** All 6 substantive items (OD-1–OD-6) resolved by the user on 2026-08-31, all via the recommended option in each case. OD-7 (spec-quality, not a business decision) is forwarded to `story-spec-writer` directly.
 
 ## How to read this log
@@ -42,7 +42,7 @@ This is not a fresh clarification of an unspecified story. The spec-writer's own
 
 **Question (as originally raised):** LI-AC2 (wrong password) specifies `reason=bad_password`. LI-AC3 (unknown email) requires "the same body, status and comparable timing" as LI-AC2 but is silent on whether an `auth_audit_log` entry is written at all, and if so what `reason` value distinguishes it from a genuine wrong-password attempt.
 
-**Why it can't be inferred:** The Data Model Notes' event enum (`login_succeeded` / `login_failed`) doesn't define a reason vocabulary. Recording a distinct reason (e.g. `unknown_email`) would technically leak account-existence information into the audit log — which may be intentional (audit log is staff-only) or may be considered a violation of the anti-enumeration principle (BR-005) applied to storage, not just the response. Neither `business-rules.md` nor `US-013-view-audit-information-spec.md` resolves this.
+**Why it can't be inferred:** The Data Model Notes' event enum (`login_succeeded` / `login_failed`) doesn't define a reason vocabulary. Recording a distinct reason (e.g. `unknown_email`) would technically leak account-existence information into the audit log — which may be intentional (audit log is staff-only) or may be considered a violation of the anti-enumeration principle (BR-005) applied to storage, not just the response. Neither `business-rules.md` nor `US-3.3-view-audit-information-spec.md` resolves this.
 
 **Impact if left unresolved:** A spec-writer would have to guess whether to log this path at all, and improvise a `reason` value with no stated vocabulary.
 
@@ -94,7 +94,7 @@ This is not a fresh clarification of an unspecified story. The spec-writer's own
 
 ### OD-8 — Empty-string password: 422 or 401?
 
-**Status: Resolved 2026-08-31 — treat as 422 validation-failed.** An empty-string `password` isn't a real credential attempt; it's rejected at request-schema validation, same as a missing `password` field, before it reaches credential verification or the rate-limit counter. Raised during SPEC_REVIEW (`docs/reviews/specifications/US-005-spec-review.md`, Missing Edge Cases) rather than during the original clarification pass; folded into FR-6 of `docs/specifications/US-005-login-spec.md`.
+**Status: Resolved 2026-08-31 — treat as 422 validation-failed.** An empty-string `password` isn't a real credential attempt; it's rejected at request-schema validation, same as a missing `password` field, before it reaches credential verification or the rate-limit counter. Raised during SPEC_REVIEW (`docs/reviews/specifications/US-2.1-spec-review.md`, Missing Edge Cases) rather than during the original clarification pass; folded into FR-6 of `docs/specifications/US-2.1-spec.md`.
 
 **Question (as originally raised):** Given a request body missing "password", or containing an unknown field — does LI-AC6's "missing password" also cover an empty-string password (`"password": ""`)?
 
@@ -106,9 +106,9 @@ This is not a fresh clarification of an unspecified story. The spec-writer's own
 
 ### OD-9 — Refresh-token table: build a minimal version now, or issue an opaque unbacked cookie?
 
-**Status: Resolved 2026-08-31 — build a minimal `refresh_tokens` table now.** Columns: `token_hash` (SHA-256, unique), `family_id`, `user_id`, `issued_at`, `expires_at`. `consumed_at` (rotation semantics), `ip`/`user_agent`/`last_used_at` (US-2.6's needs) are deferred to US-2.3/US-2.6, which read and extend this row later. Folded into `docs/designs/database/US-005-db-design.md` and `US-005-entity-model.md`.
+**Status: Resolved 2026-08-31 — build a minimal `refresh_tokens` table now.** Columns: `token_hash` (SHA-256, unique), `family_id`, `user_id`, `issued_at`, `expires_at`. `consumed_at` (rotation semantics), `ip`/`user_agent`/`last_used_at` (US-2.6's needs) are deferred to US-2.3/US-2.6, which read and extend this row later. Folded into `docs/designs/database/US-2.1-db-design.md` and `US-2.1-entity-model.md`.
 
-**Question (as originally raised):** Raised during PLANNING's impact-analysis pass (`docs/impact-analysis/US-005-impact-analysis.md`), not during the original clarification pass. US-2.1's own story never mentions a `refresh_tokens` table in its Data Model Notes, but US-2.3-refresh-token.md's Out of Scope section states "Initial token issuance (US-2.1)" — assigning creation of the very first refresh token to this story. No such table or token-generation code exists anywhere in the codebase.
+**Question (as originally raised):** Raised during PLANNING's impact-analysis pass (`docs/impact-analysis/US-2.1-impact-analysis.md`), not during the original clarification pass. US-2.1's own story never mentions a `refresh_tokens` table in its Data Model Notes, but US-2.3-refresh-token.md's Out of Scope section states "Initial token issuance (US-2.1)" — assigning creation of the very first refresh token to this story. No such table or token-generation code exists anywhere in the codebase.
 
 **Why it can't be inferred:** The two stories' scope statements only make sense together (US-2.1 issues, US-2.3 rotates), but neither story's own Data Model Notes section states the table shape this story needs — US-2.1 is silent, and US-2.3's shape includes columns (`consumed_at`, `ip`, `user_agent`, `last_used_at`) this story has no use for yet.
 
@@ -116,13 +116,13 @@ This is not a fresh clarification of an unspecified story. The spec-writer's own
 
 ---
 
-### OD-10 — LI-AC4's "deactivated → 403" is incomplete: US-004 assigns reactivation-on-login to this story
+### OD-10 — LI-AC4's "deactivated → 403" is incomplete: US-1.4 assigns reactivation-on-login to this story
 
-**Status: Resolved 2026-08-31 — build reactivation now.** FR-4 is amended: deactivated + correct credentials + within the 30-day grace period → reactivate (`status→active`, `deactivated_at` cleared, `account_lifecycle_audit_log` entry `event=reactivated, actor=self`, then proceed through the normal FR-1 success path) and `200`; deactivated + correct credentials + past the grace period → `403` as originally specified. Folded into `docs/specifications/US-005-login-spec.md`, `docs/designs/api/US-005-api-design.md`, `docs/impact-analysis/US-005-impact-analysis.md`, `docs/plans/US-005-implementation-plan.md`, `docs/plans/US-005-task-breakdown.md`.
+**Status: Resolved 2026-08-31 — build reactivation now.** FR-4 is amended: deactivated + correct credentials + within the 30-day grace period → reactivate (`status→active`, `deactivated_at` cleared, `account_lifecycle_audit_log` entry `event=reactivated, actor=self`, then proceed through the normal FR-1 success path) and `200`; deactivated + correct credentials + past the grace period → `403` as originally specified. Folded into `docs/specifications/US-2.1-spec.md`, `docs/designs/api/US-2.1-api-design.md`, `docs/impact-analysis/US-2.1-impact-analysis.md`, `docs/plans/US-2.1-implementation-plan.md`, `docs/plans/US-2.1-task-breakdown.md`.
 
-**Question (as originally raised):** Raised via `advisor()` consultation during PLANNING→IMPLEMENTATION handoff, cross-referencing `docs/stories/US-1.4-deactivate-account.md` DA-AC8, `docs/specifications/US-004-deactivate-account-spec.md` FR-8, and `docs/designs/api/US-004-api-design.md`'s own table ("FR-8 | Reactivation on login within 30-day grace period | **US-005 Login (extension)**"). US-004's shipped code (`app/modules/account/repository.py:deactivate_if_not_already`) never reactivates anyone — nothing in the codebase implements DA-AC8 anywhere. US-2.1's own LI-AC4 only carries the unconditional-403 half (citing DA-AC6), silently dropping the grace-period reactivation half US-004 explicitly deferred here.
+**Question (as originally raised):** Raised via `advisor()` consultation during PLANNING→IMPLEMENTATION handoff, cross-referencing `docs/stories/US-1.4-deactivate-account.md` DA-AC8, `docs/specifications/US-1.4-spec.md` FR-8, and `docs/designs/api/US-1.4-api-design.md`'s own table ("FR-8 | Reactivation on login within 30-day grace period | **US-2.1 Login (extension)**"). US-1.4's shipped code (`app/modules/account/repository.py:deactivate_if_not_already`) never reactivates anyone — nothing in the codebase implements DA-AC8 anywhere. US-2.1's own LI-AC4 only carries the unconditional-403 half (citing DA-AC6), silently dropping the grace-period reactivation half US-1.4 explicitly deferred here.
 
-**Why it can't be inferred:** `docs/stories/US-2.1-login.md`'s LI-AC4 text is genuinely silent on the grace period — a spec-writer working from the story alone, without cross-referencing US-004's design doc, would have no way to know reactivation belongs here at all.
+**Why it can't be inferred:** `docs/stories/US-2.1-login.md`'s LI-AC4 text is genuinely silent on the grace period — a spec-writer working from the story alone, without cross-referencing US-1.4's design doc, would have no way to know reactivation belongs here at all.
 
 **Impact if left unresolved:** DA-AC8 (a Pass-verdict spec's own FR-8) would have no implementation anywhere in the system — a deactivated user could never get their account back except by a mechanism nothing builds, silently breaking a committed product behavior (`personas.md`: "reactivate it within a grace period if they change their mind").
 

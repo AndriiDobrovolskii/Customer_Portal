@@ -1,6 +1,6 @@
 # Epic 1 — Users: Deactivate Account
 
-**Story ID:** US-1.3
+**Story ID:** US-1.4
 **Project:** Customer Portal
 
 ## User Story

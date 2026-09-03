@@ -1,0 +1,314 @@
+openapi: 3.0.3
+info:
+  title: Multi-Factor Authentication / TOTP (US-2.5 / spec US-2.5) — fragment
+  version: "1.0"
+paths:
+  /v1/auth/mfa/enroll:
+    post:
+      operationId: enrollMfa
+      summary: Begin (or restart) a pending TOTP enrolment
+      tags: [auth, mfa]
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/MfaEnrollRequest"
+      responses:
+        "200":
+          description: >
+            A fresh TOTP secret and its otpauth:// URI, in a PENDING state
+            (FR-1). The secret is encrypted at rest; it is never returned
+            again after this call. Calling this again while a PENDING
+            enrolment already exists overwrites it with a new secret
+            (OD-11) — MFA is not yet active either way.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MfaEnrollResponse"
+        "401":
+          description: >
+            No valid access token, OR the caller holds a valid token but
+            `current_password` doesn't match (reuses the login-endpoint
+            invalid-credential pattern — not a new slug). Cross-cutting.
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/UnauthorizedProblem"
+  /v1/auth/mfa/activate:
+    post:
+      operationId: activateMfa
+      summary: Activate a pending enrolment with a verification code
+      tags: [auth, mfa]
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/MfaActivateRequest"
+      responses:
+        "200":
+          description: >
+            10 single-use recovery codes shown exactly once (FR-2).
+            `users.mfa_enabled` becomes true; `auth_audit_log` gets
+            `event=mfa_enabled`. If the account was enrolment-scoped
+            (FR-6/FR-7 — a privileged-role grant without MFA, or a prior
+            recovery-code use), this call also clears that state and sets
+            `perm_epoch:{user_id}` (FR-2's exit condition), so the next
+            call with the old scoped token responds `401 token-stale` and
+            `/auth/refresh` then issues a normal token.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MfaActivateResponse"
+        "401":
+          description: >
+            No valid access token, OR the submitted code is invalid for
+            the pending secret. Reuses the cross-cutting unauthorized
+            shape — this endpoint has no PENDING-enrolment state to
+            distinguish "wrong code" from "no enrolment in progress"
+            (an Open Question for PLANNING, not decided here — see
+            US-2.5-api-design.md).
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/UnauthorizedProblem"
+  /v1/auth/mfa/verify:
+    post:
+      operationId: verifyMfa
+      summary: Complete a login challenge with a TOTP or recovery code
+      tags: [auth, mfa]
+      security:
+        - mfaTokenAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/MfaVerifyRequest"
+      responses:
+        "200":
+          description: >
+            Login completes exactly as US-2.1's LI-AC1 (FR-3) — same
+            response shape and `refresh_token` cookie as `POST
+            /v1/auth/login`'s own `200`. If `code` was a recovery code
+            instead of a TOTP code (FR-7), that code is consumed,
+            `users.mfa_reenrollment_required` is set, and a security
+            notification email is sent — none of that is visible in this
+            response body.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MfaVerifyResponse"
+        "401":
+          description: >
+            Wrong code, replayed code (FR-4), or an invalid/expired/
+            already-consumed `mfa_token`. Distinct type slug
+            `mfa-invalid-code` introduced by this story.
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/MfaInvalidCodeProblem"
+        "429":
+          description: >
+            5th failed attempt against the same `mfa_token` (FR-5) — the
+            token is invalidated and full re-authentication is required.
+            A wrong recovery code counts toward this same limit as a
+            wrong TOTP code (OD-10). Reuses this project's cross-cutting
+            `too-many-attempts` slug (established by US-2.1 login
+            lockout), not a new one.
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/TooManyAttemptsProblem"
+  /v1/auth/mfa:
+    delete:
+      operationId: disableMfa
+      summary: Disable MFA on the caller's own account
+      tags: [auth, mfa]
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/MfaDisableRequest"
+      responses:
+        "204":
+          description: >
+            Non-privileged disable succeeds (FR-8, not covered by any
+            source AC — see US-2.5-api-design.md). `users.mfa_enabled`
+            becomes false, the secret is nulled, all recovery codes are
+            deleted, `auth_audit_log` gets `event=mfa_disabled`, and
+            `revoke_before:{user_id}` is set (every other session ends).
+        "401":
+          description: >
+            No valid access token, OR `current_password`/`code` is wrong.
+            Cross-cutting shape, reused.
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/UnauthorizedProblem"
+        "409":
+          description: >
+            Caller holds `admin`, `auditor`, or `support_agent` — MFA
+            cannot be disabled on a privileged account (FR-6). Distinct
+            type slug `mfa-required-for-role` introduced by this story.
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/MfaRequiredForRoleProblem"
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+    mfaTokenAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: MFA-Token
+      description: >
+        The single-use `mfa_token` issued by `POST /v1/auth/login`'s
+        `mfa_required` branch (FR-3) — a distinct, narrower-scoped token
+        from the normal access token, not interchangeable with
+        `bearerAuth`.
+  schemas:
+    MfaEnrollRequest:
+      type: object
+      required: [current_password]
+      additionalProperties: false
+      properties:
+        current_password:
+          type: string
+          format: password
+    MfaEnrollResponse:
+      type: object
+      required: [secret, otpauth_uri]
+      properties:
+        secret:
+          type: string
+          description: Base32 TOTP secret. Never returned again after this call.
+        otpauth_uri:
+          type: string
+          description: >
+            otpauth:// URI (RFC 6238, SHA-1, 6 digits, 30s step). The
+            client renders this into a QR code itself (OD-3) — no
+            separate image field.
+    MfaActivateRequest:
+      type: object
+      required: [code]
+      additionalProperties: false
+      properties:
+        code:
+          type: string
+          pattern: "^[0-9]{6}$"
+    MfaActivateResponse:
+      type: object
+      required: [recovery_codes]
+      properties:
+        recovery_codes:
+          type: array
+          items:
+            type: string
+          minItems: 10
+          maxItems: 10
+          description: Shown exactly once; never retrievable again.
+    MfaVerifyRequest:
+      type: object
+      required: [mfa_token, code]
+      additionalProperties: false
+      properties:
+        mfa_token:
+          type: string
+        code:
+          type: string
+          description: A 6-digit TOTP code, or one of the account's recovery codes (FR-7).
+    MfaVerifyResponse:
+      type: object
+      required: [access_token, token_type, expires_in]
+      properties:
+        access_token:
+          type: string
+        token_type:
+          type: string
+          enum: [Bearer]
+        expires_in:
+          type: integer
+      description: Identical shape to LoginResponse (US-2.1) per LI-AC1.
+    MfaDisableRequest:
+      type: object
+      required: [current_password, code]
+      additionalProperties: false
+      properties:
+        current_password:
+          type: string
+          format: password
+        code:
+          type: string
+          description: A 6-digit TOTP code. Whether a recovery code is also accepted here is unresolved — see US-2.5-api-design.md.
+    UnauthorizedProblem:
+      allOf:
+        - $ref: "#/components/schemas/ProblemBase"
+      properties:
+        type:
+          type: string
+          example: ".../errors/unauthorized"
+        status:
+          type: integer
+          example: 401
+      description: Cross-cutting slug shared by every authenticated endpoint in this project — not new here.
+    MfaInvalidCodeProblem:
+      allOf:
+        - $ref: "#/components/schemas/ProblemBase"
+      properties:
+        type:
+          type: string
+          example: ".../errors/mfa-invalid-code"
+        status:
+          type: integer
+          example: 401
+      description: Introduced by this story (FR-4).
+    MfaRequiredForRoleProblem:
+      allOf:
+        - $ref: "#/components/schemas/ProblemBase"
+      properties:
+        type:
+          type: string
+          example: ".../errors/mfa-required-for-role"
+        status:
+          type: integer
+          example: 409
+      description: Introduced by this story (FR-6), matches the source story's Error Envelope example verbatim.
+    TooManyAttemptsProblem:
+      allOf:
+        - $ref: "#/components/schemas/ProblemBase"
+      properties:
+        type:
+          type: string
+          example: ".../errors/too-many-attempts"
+        status:
+          type: integer
+          example: 429
+      description: Reused cross-project slug, established by US-2.1 login lockout — not new here.
+    ProblemBase:
+      type: object
+      description: RFC 7807 problem body. `type` is an absolute/relative URI ending in the slug named per response.
+      required: [type, title, status, detail, instance]
+      properties:
+        type:
+          type: string
+        title:
+          type: string
+        status:
+          type: integer
+        detail:
+          type: string
+        instance:
+          type: string
+          example: /v1/auth/mfa/verify

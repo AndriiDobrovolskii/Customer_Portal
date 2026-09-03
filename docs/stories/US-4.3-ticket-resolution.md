@@ -16,7 +16,7 @@ So that the queue reflects real outstanding work and customers can still come ba
 | 3 | Who may resolve | Any actor with `tickets:write` | Assignment is not a prerequisite; the actor is audited |
 | 4 | Who may close | The requester or an agent | A customer confirming "that fixed it" should not wait 7 days |
 | 5 | Resolution note | Mandatory, non-empty | It is what the customer receives and what the next agent reads |
-| 6 | Concurrency | Conditional update scoped to the expected current status | Mirrors US-002 FR-1 and US-004 FR-1/FR-9 |
+| 6 | Concurrency | Conditional update scoped to the expected current status | Mirrors US-1.2 FR-1 and US-1.4 FR-1/FR-9 |
 | 7 | Time-window evaluation | In SQL, against the database clock, in the same statement as the write | App/DB clock skew must not decide the boundary |
 
 ## In Scope
