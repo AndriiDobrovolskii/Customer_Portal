@@ -17,10 +17,9 @@ source:
 activated_at: null
 activated_by: null
 
-status: NOT_STARTED
+status: ARCHIVED
 
 note: >
-  No Story is active. US-3.3 (View Audit Information) was delivered and merged
-  as PR #13 on 2026-09-03, the last Story delivered under the pre-migration
-  harness. Per docs/catalog/stories.yaml, US-4.1 is the next BACKLOG Story;
-  activate it with /so:start US-4.1.
+  US-3.3 (View Audit Information) was delivered (PR #13, merged 2026-09-03)
+  and archived via /so:archive on 2026-09-03. See
+  docs/evidence/US-3.3-delivery-summary.md. No Story is currently active.

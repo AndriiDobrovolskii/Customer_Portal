@@ -879,6 +879,24 @@ revision instead.
 explicit index; `DeclarativeBase` declares a `naming_convention` so constraint names are
 deterministic and therefore droppable by name in `downgrade()`.
 
+**Precedents established by US-3.3 (audit log, 2026-09-02):**
+
+* **First `JSONB` column** in this codebase (`audit_log.payload`). Use `postgresql.JSONB`, not
+  the dialect-generic `JSON` type — the latter renders as `json` on PostgreSQL, not `jsonb`.
+* **First range-partitioned table** (`audit_log`, daily partitions). Partitioning DDL, the
+  partition's covering index, and any `BEFORE INSERT` trigger on it must be hand-written
+  (`op.execute`) — no SQLAlchemy/Alembic construct models partitioning. A `DEFAULT` partition is
+  required as a safety net; without one, an insert past the last provisioned day's range fails
+  outright.
+* **Hash-chain trigger concurrency:** a `SELECT ... FOR UPDATE` on the presumed-latest row does
+  **not** serialize concurrent inserts under PostgreSQL MVCC — a blocked transaction is granted
+  the lock with no re-check of the row it read. Serialize with
+  `pg_advisory_xact_lock(hashtext('<chain-name>'))` at the start of the trigger function instead;
+  it auto-releases on commit or rollback and needs no side table for lock state.
+
+See `docs/decisions/US-3.3-open-decisions.md` (OD-6, OD-16, OD-17) for the full reasoning and
+what was tried and rejected first.
+
 ---
 
 ## 5. Testing Requirements

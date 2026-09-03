@@ -106,9 +106,9 @@ MFA (TOTP) is mandatory for the `admin`, `auditor`, and `support_agent` roles, w
 
 ## BR-014
 
-The audit log is append-only: no actor, including an administrator, can update or delete an entry through the API or at the database level (the application's DB role holds `INSERT`/`SELECT` only on audit tables). Every audit-log read is itself audited, and every authorization denial is audited even though the underlying action failed.
+The audit log is append-only: no actor, including an administrator, can update or delete an entry through the API (`405` on `PATCH`/`PUT`/`DELETE`). Database-level enforcement via restricted DB-role grants is not yet implemented — deferred to a project-wide follow-up (see US-3.3 OD-12) — so immutability today rests on the API layer only. Every audit-log read is itself audited, and every authorization denial is audited even though the underlying action failed.
 
-**Source:** `docs/specifications/US-3.3-spec.md` FR-2, FR-3, FR-4; `US-3.1-manage-users-spec.md` NFR.
+**Source:** `docs/specifications/US-3.3-spec.md` FR-2, FR-3, FR-4; `US-3.1-manage-users-spec.md` NFR; corrected 2026-09-03 during US-3.3 archive (`docs/decisions/US-3.3-open-decisions.md` OD-12) — the original text overstated DB-level enforcement that was never shipped.
 
 ---
 
