@@ -53,3 +53,75 @@ Create:
 ## Completion Criteria
 
 Complete only when: the OpenAPI contract exists and is valid YAML, every acceptance criterion in the spec maps to at least one endpoint/response, authentication and authorization requirements are stated per endpoint (not just once for the whole story), and every validation rule from the spec is represented in a request schema.
+
+---
+
+# Harness Contract
+
+This skill owns the `API_DESIGN` stage of `docs/workflow/stage-map.yaml`.
+
+## Canonical sources
+
+- Workflow / stage / loop-back keys: `docs/workflow/stage-map.yaml` (`API_DESIGN`).
+- Artifact paths: `docs/workflow/artifact-paths.yaml` - **authoritative**.
+  Resolve `specification`, `specification_review`, `open_decisions`. Any path shown elsewhere in this skill is illustrative;
+  the registry wins.
+- Status vocabularies: `docs/workflow/artifact-lifecycle.md`.
+- Front matter and the staleness contract: `docs/workflow/artifact-schema.md`.
+- Workflow state: `docs/workflow/state-schema.md`.
+
+## Inputs (registry keys)
+
+- `specification`
+- `specification_review`
+- `open_decisions`
+
+## Preconditions (harness)
+
+- Every consumed artifact is current: `status` is not `SUPERSEDED` or
+  `ARCHIVED`, and the `version` this skill records in its own `inputs` is the
+  version actually on disk. A stale input is `BLOCKED`, not a caveat.
+- No `TODO` / `TBD` / `FIXME` / unresolved blocking Open Decision in an
+  `APPROVED` input that this stage depends on.
+- `docs/workflow/active-story.yaml` and `docs/workflow/workflow-state.yaml`
+  agree on which story is active.
+
+## Result Envelope
+
+Return exactly this. `story-orchestrator` records the transition; this skill
+never writes `docs/workflow/workflow-state.yaml`.
+
+```yaml
+result:
+  verdict: PASS | BLOCKED
+  stage: API_DESIGN
+  story: <StoryId>
+  artifact_status: DRAFT
+  artifacts:
+    - docs/designs/api/<StoryId>-api-design.md
+    - docs/designs/api/<StoryId>-openapi.yaml
+  next_stage: DB_DESIGN
+  loop_back_stage: null
+  blocking_issues: []
+  non_blocking_findings: []
+```
+
+- `PASS` - every externally observable acceptance criterion maps to an
+  operation; the contract follows the existing API conventions.
+- `NOT_APPLICABLE` - the approved specification explicitly states the story
+  changes no public API behavior. Record the decision and the citation.
+- `BLOCKED` - the specification is missing or stale, or a blocking Open
+  Decision affects the contract.
+
+## Prohibited (harness)
+
+- Do not update workflow state (`workflow-state.yaml`, `active-story.yaml`,
+  `history.jsonl`) - `story-orchestrator` owns those.
+- Do not produce an artifact this skill does not own in
+  `docs/workflow/artifact-paths.yaml`.
+- Do not resolve Open Decisions.
+- Do not emit a retired verdict (`Pass`, `Fail`, `Pass with Issues`,
+  `APPROVED`, ...) - see `artifact-lifecycle.md` section 2.
+- Do not use the retired sequential story ids (`US-0NN`) or retired stage
+  identifiers (`DESIGN`, `PLANNING`, `TESTS`, `VERIFICATION`, `PR`).
+- Do not create commits, branches, or Pull Requests.

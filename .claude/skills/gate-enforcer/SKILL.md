@@ -84,3 +84,105 @@ Report the failing check verbatim, stop, and explicitly refuse to propose any of
 ## Completion Criteria
 
 Complete only when every applicable check has a real captured result, the verdict is consistent with those results, and no failing check was accompanied by a bypass suggestion.
+
+---
+
+# Harness Contract
+
+This skill owns the `QUALITY_GATE` stage of `docs/workflow/stage-map.yaml`.
+
+**This stage now writes two durable artifacts.** The Operational Contract above
+says "a chat report only" — that is superseded. `QUALITY_GATE` runs after all
+four `IMPLEMENTATION` builder sub-steps and is the only skill positioned to
+aggregate them, so the registry makes it the owner of both:
+
+- `quality_gate_report` (`docs/evidence/<StoryId>-quality-gate-report.md`) — the
+  mechanical evidence: every gate command with its **real captured output**.
+  This is the file that makes AGENTS.md §7.9 auditable after the fact, so a
+  check that could not run here is recorded as not-run with CI named as the
+  authority, never as a pass.
+- `implementation_report` (`docs/evidence/<StoryId>-implementation-report.md`) —
+  what was actually built: modules, files, endpoints, migrations, and per-task
+  status against `task_breakdown`. `implementation-verifier`,
+  `security-reviewer`, `reconciliation-reviewer`, and `pr-preparer` all consume
+  it, and `implementation-verifier` explicitly checks it for accuracy rather
+  than trusting it.
+
+This does **not** make this skill a reviewer. It still runs the gate and reports
+what happened; it does not judge architecture or security.
+
+## Canonical sources
+
+- Workflow / stage / loop-back keys: `docs/workflow/stage-map.yaml` (`QUALITY_GATE`).
+- Artifact paths: `docs/workflow/artifact-paths.yaml` - **authoritative**.
+  Resolve `story`, `implementation_plan`, `task_breakdown`, `ac_test_matrix`. Any path shown elsewhere in this skill is illustrative;
+  the registry wins.
+- Status vocabularies: `docs/workflow/artifact-lifecycle.md`.
+- Front matter and the staleness contract: `docs/workflow/artifact-schema.md`.
+- Workflow state: `docs/workflow/state-schema.md`.
+
+## Inputs (registry keys)
+
+- `story`
+- `implementation_plan`
+- `task_breakdown`
+- `ac_test_matrix`
+
+## Preconditions (harness)
+
+- Every consumed artifact is current: `status` is not `SUPERSEDED` or
+  `ARCHIVED`, and the `version` this skill records in its own `inputs` is the
+  version actually on disk. A stale input is `BLOCKED`, not a caveat.
+- No `TODO` / `TBD` / `FIXME` / unresolved blocking Open Decision in an
+  `APPROVED` input that this stage depends on.
+- `docs/workflow/active-story.yaml` and `docs/workflow/workflow-state.yaml`
+  agree on which story is active.
+
+## Result Envelope
+
+Return exactly this. `story-orchestrator` records the transition; this skill
+never writes `docs/workflow/workflow-state.yaml`.
+
+```yaml
+result:
+  verdict: PASS | CHANGES_REQUIRED | BLOCKED
+  stage: QUALITY_GATE
+  story: <StoryId>
+  artifact_status: DRAFT
+  artifacts:
+    - docs/evidence/<StoryId>-implementation-report.md
+    - docs/evidence/<StoryId>-quality-gate-report.md
+  next_stage: IMPLEMENTATION_VERIFICATION
+  loop_back_stage: null
+  blocking_issues: []
+  non_blocking_findings: []
+```
+
+Loop-back keys valid for this stage (from `stage-map.yaml`; naming any other key
+is rejected and holds the stage as `BLOCKED`):
+
+| key | `loop_back_stage` |
+|---|---|
+| `changes_required` | `IMPLEMENTATION` |
+
+- `PASS` - every gate command was actually run and its real output captured,
+  and all of them passed.
+- `CHANGES_REQUIRED` - a check failed. Report exactly which, with its output,
+  and route back to `IMPLEMENTATION`. Never propose a bypass
+  (`--no-verify`, `SKIP=`, a narrowed mypy scope, a coverage exclude) -
+  AGENTS.md section 7.9.
+- `BLOCKED` - a check could not be run in this environment. Say so
+  explicitly and name CI as the authority; never record it as a pass.
+
+## Prohibited (harness)
+
+- Do not update workflow state (`workflow-state.yaml`, `active-story.yaml`,
+  `history.jsonl`) - `story-orchestrator` owns those.
+- Do not produce an artifact this skill does not own in
+  `docs/workflow/artifact-paths.yaml`.
+- Do not resolve Open Decisions.
+- Do not emit a retired verdict (`Pass`, `Fail`, `Pass with Issues`,
+  `APPROVED`, ...) - see `artifact-lifecycle.md` section 2.
+- Do not use the retired sequential story ids (`US-0NN`) or retired stage
+  identifiers (`DESIGN`, `PLANNING`, `TESTS`, `VERIFICATION`, `PR`).
+- Do not create commits, branches, or Pull Requests.

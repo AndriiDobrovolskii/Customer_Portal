@@ -57,3 +57,76 @@ Create:
 ## Completion Criteria
 
 Complete only when every entity the story touches has fully specified columns, constraints, and relationships, sensitive data is identified with its storage requirement, and every entity is traceable to a functional requirement or acceptance criterion in the spec.
+
+---
+
+# Harness Contract
+
+This skill owns the `DB_DESIGN` stage of `docs/workflow/stage-map.yaml`.
+
+## Canonical sources
+
+- Workflow / stage / loop-back keys: `docs/workflow/stage-map.yaml` (`DB_DESIGN`).
+- Artifact paths: `docs/workflow/artifact-paths.yaml` - **authoritative**.
+  Resolve `specification`, `api_design`, `openapi`, `open_decisions`. Any path shown elsewhere in this skill is illustrative;
+  the registry wins.
+- Status vocabularies: `docs/workflow/artifact-lifecycle.md`.
+- Front matter and the staleness contract: `docs/workflow/artifact-schema.md`.
+- Workflow state: `docs/workflow/state-schema.md`.
+
+## Inputs (registry keys)
+
+- `specification`
+- `api_design`  (conditional - absent when its design stage recorded `NOT_APPLICABLE`)
+- `openapi`  (conditional - absent when its design stage recorded `NOT_APPLICABLE`)
+- `open_decisions`
+
+## Preconditions (harness)
+
+- Every consumed artifact is current: `status` is not `SUPERSEDED` or
+  `ARCHIVED`, and the `version` this skill records in its own `inputs` is the
+  version actually on disk. A stale input is `BLOCKED`, not a caveat.
+- No `TODO` / `TBD` / `FIXME` / unresolved blocking Open Decision in an
+  `APPROVED` input that this stage depends on.
+- `docs/workflow/active-story.yaml` and `docs/workflow/workflow-state.yaml`
+  agree on which story is active.
+
+## Result Envelope
+
+Return exactly this. `story-orchestrator` records the transition; this skill
+never writes `docs/workflow/workflow-state.yaml`.
+
+```yaml
+result:
+  verdict: PASS | BLOCKED
+  stage: DB_DESIGN
+  story: <StoryId>
+  artifact_status: DRAFT
+  artifacts:
+    - docs/designs/database/<StoryId>-db-design.md
+    - docs/designs/database/<StoryId>-entity-model.md
+  next_stage: DESIGN_REVIEW
+  loop_back_stage: null
+  blocking_issues: []
+  non_blocking_findings: []
+```
+
+- `PASS` - the persistence design is complete: explicit types, nullability,
+  uniqueness, indexes, and a named eager-loading strategy per relationship.
+- `NOT_APPLICABLE` - the approved specification explicitly states the story
+  changes no persistence behavior. Record the decision and the citation.
+- `BLOCKED` - the specification or API design is missing or stale, or a
+  blocking Open Decision affects the schema.
+
+## Prohibited (harness)
+
+- Do not update workflow state (`workflow-state.yaml`, `active-story.yaml`,
+  `history.jsonl`) - `story-orchestrator` owns those.
+- Do not produce an artifact this skill does not own in
+  `docs/workflow/artifact-paths.yaml`.
+- Do not resolve Open Decisions.
+- Do not emit a retired verdict (`Pass`, `Fail`, `Pass with Issues`,
+  `APPROVED`, ...) - see `artifact-lifecycle.md` section 2.
+- Do not use the retired sequential story ids (`US-0NN`) or retired stage
+  identifiers (`DESIGN`, `PLANNING`, `TESTS`, `VERIFICATION`, `PR`).
+- Do not create commits, branches, or Pull Requests.

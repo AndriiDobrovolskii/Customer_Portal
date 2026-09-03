@@ -13,7 +13,7 @@ This skill is the quality gate between "a plan exists" and "implementation start
 
 ```
 Precondition: planner's implementation plan and implementation-planner's task breakdown both exist for the story.
-Input Artifacts: docs/plans/<StoryId>-implementation-plan.md; docs/plans/<StoryId>-task-breakdown.md; docs/impact-analysis/<StoryId>-impact-analysis.md; docs/specifications/<StoryId>-*-spec.md; docs/designs/api/<StoryId>-openapi.yaml, docs/designs/api/<StoryId>-api-design.md; docs/designs/database/<StoryId>-db-design.md, docs/designs/database/<StoryId>-entity-model.md.
+Input Artifacts: docs/plans/<StoryId>-implementation-plan.md; docs/plans/<StoryId>-task-breakdown.md; docs/impact-analysis/<StoryId>-impact-analysis.md; docs/specifications/<StoryId>-spec.md; docs/designs/api/<StoryId>-openapi.yaml, docs/designs/api/<StoryId>-api-design.md; docs/designs/database/<StoryId>-db-design.md, docs/designs/database/<StoryId>-entity-model.md.
 Output Artifacts: docs/reviews/plans/<StoryId>-plan-review.md.
 ```
 
@@ -62,3 +62,89 @@ Both `docs/plans/<StoryId>-implementation-plan.md` and `docs/plans/<StoryId>-tas
 ## Completion Criteria
 
 Complete only when every impact-analysis item has a coverage status in the plan, the task breakdown's ordering has been checked against AGENTS.md §3, and the verdict is consistent with all findings.
+
+---
+
+# Harness Contract
+
+This skill owns the `PLAN_REVIEW` stage of `docs/workflow/stage-map.yaml`.
+
+## Canonical sources
+
+- Workflow / stage / loop-back keys: `docs/workflow/stage-map.yaml` (`PLAN_REVIEW`).
+- Artifact paths: `docs/workflow/artifact-paths.yaml` - **authoritative**.
+  Resolve `story`, `specification`, `specification_review`, `impact_analysis`, `implementation_plan`, `task_breakdown`, `api_design`, `openapi`, `database_design`, `entity_model`, `open_decisions`. Any path shown elsewhere in this skill is illustrative;
+  the registry wins.
+- Status vocabularies: `docs/workflow/artifact-lifecycle.md`.
+- Front matter and the staleness contract: `docs/workflow/artifact-schema.md`.
+- Workflow state: `docs/workflow/state-schema.md`.
+
+## Inputs (registry keys)
+
+- `story`
+- `specification`
+- `specification_review`
+- `impact_analysis`
+- `implementation_plan`
+- `task_breakdown`
+- `api_design`  (conditional - absent when its design stage recorded `NOT_APPLICABLE`)
+- `openapi`  (conditional - absent when its design stage recorded `NOT_APPLICABLE`)
+- `database_design`  (conditional - absent when its design stage recorded `NOT_APPLICABLE`)
+- `entity_model`  (conditional - absent when its design stage recorded `NOT_APPLICABLE`)
+- `open_decisions`
+
+## Preconditions (harness)
+
+- Every consumed artifact is current: `status` is not `SUPERSEDED` or
+  `ARCHIVED`, and the `version` this skill records in its own `inputs` is the
+  version actually on disk. A stale input is `BLOCKED`, not a caveat.
+- No `TODO` / `TBD` / `FIXME` / unresolved blocking Open Decision in an
+  `APPROVED` input that this stage depends on.
+- `docs/workflow/active-story.yaml` and `docs/workflow/workflow-state.yaml`
+  agree on which story is active.
+
+## Result Envelope
+
+Return exactly this. `story-orchestrator` records the transition; this skill
+never writes `docs/workflow/workflow-state.yaml`.
+
+```yaml
+result:
+  verdict: PASS | CHANGES_REQUIRED | BLOCKED
+  stage: PLAN_REVIEW
+  story: <StoryId>
+  artifact_status: DRAFT
+  artifacts:
+    - docs/reviews/plans/<StoryId>-plan-review.md
+  next_stage: HUMAN_PLAN_APPROVAL
+  loop_back_stage: null
+  blocking_issues: []
+  non_blocking_findings: []
+```
+
+Loop-back keys valid for this stage (from `stage-map.yaml`; naming any other key
+is rejected and holds the stage as `BLOCKED`):
+
+| key | `loop_back_stage` |
+|---|---|
+| `changes_required` | `ARCHITECTURE_PLANNING` |
+| `changes_required_sequencing` | `IMPLEMENTATION_PLANNING` |
+
+- `PASS` - no Critical or Major findings; the plan delivers the specification
+  within the layering rules.
+- `CHANGES_REQUIRED` - use `changes_required_sequencing` when only the task
+  order is wrong, `changes_required` when the architecture itself is.
+- `BLOCKED` - a mandatory input is missing or stale.
+
+## Prohibited (harness)
+
+- Do not update workflow state (`workflow-state.yaml`, `active-story.yaml`,
+  `history.jsonl`) - `story-orchestrator` owns those.
+- Do not produce an artifact this skill does not own in
+  `docs/workflow/artifact-paths.yaml`.
+- Do not resolve Open Decisions.
+- Do not emit a retired verdict (`Pass`, `Fail`, `Pass with Issues`,
+  `APPROVED`, ...) - see `artifact-lifecycle.md` section 2.
+- Do not use the retired sequential story ids (`US-0NN`) or retired stage
+  identifiers (`DESIGN`, `PLANNING`, `TESTS`, `VERIFICATION`, `PR`).
+- Do not create commits, branches, or Pull Requests.

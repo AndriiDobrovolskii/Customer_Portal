@@ -87,3 +87,90 @@ Read, in order:
 ## Completion Criteria
 
 Complete only when the checklist above is fully satisfied and the real `upgrade → downgrade → upgrade` output has been captured and quoted — never asserted without having run it.
+
+---
+
+# Harness Contract
+
+This skill is a sub-step of the `IMPLEMENTATION` stage
+(`docs/workflow/stage-map.yaml`, `type: composite_skill`). It produces
+the Alembic revision - source code, not a registry artifact. `story-orchestrator`
+records its progress in `pipeline_status`
+(`docs/catalog/<StoryId>-pipeline-status.md`) and sets
+`implementation_substep` in `workflow-state.yaml`.
+
+## Canonical sources
+
+- Workflow / stage / loop-back keys: `docs/workflow/stage-map.yaml` (`IMPLEMENTATION`).
+- Artifact paths: `docs/workflow/artifact-paths.yaml` - **authoritative**.
+  Resolve `story`, `open_decisions`, `specification`, `specification_review`, `impact_analysis`, `implementation_plan`, `task_breakdown`, `plan_review`, `api_design`, `openapi`, `database_design`, `entity_model`, `test_strategy`, `ac_test_matrix`. Any path shown elsewhere in this skill is illustrative;
+  the registry wins.
+- Status vocabularies: `docs/workflow/artifact-lifecycle.md`.
+- Front matter and the staleness contract: `docs/workflow/artifact-schema.md`.
+- Workflow state: `docs/workflow/state-schema.md`.
+
+## Inputs (registry keys)
+
+- `story`
+- `open_decisions`
+- `specification`
+- `specification_review`
+- `impact_analysis`
+- `implementation_plan`
+- `task_breakdown`
+- `plan_review`
+- `api_design`  (conditional - absent when its design stage recorded `NOT_APPLICABLE`)
+- `openapi`  (conditional - absent when its design stage recorded `NOT_APPLICABLE`)
+- `database_design`  (conditional - absent when its design stage recorded `NOT_APPLICABLE`)
+- `entity_model`  (conditional - absent when its design stage recorded `NOT_APPLICABLE`)
+- `test_strategy`
+- `ac_test_matrix`
+
+## Preconditions (harness)
+
+- Every consumed artifact is current: `status` is not `SUPERSEDED` or
+  `ARCHIVED`, and the `version` this skill records in its own `inputs` is the
+  version actually on disk. A stale input is `BLOCKED`, not a caveat.
+- No `TODO` / `TBD` / `FIXME` / unresolved blocking Open Decision in an
+  `APPROVED` input that this stage depends on.
+- `docs/workflow/active-story.yaml` and `docs/workflow/workflow-state.yaml`
+  agree on which story is active.
+
+## Result Envelope
+
+Return exactly this. The orchestrator aggregates the sub-steps; only when all
+four have returned `PASS` does the `IMPLEMENTATION` stage advance.
+
+```yaml
+result:
+  verdict: PASS | CHANGES_REQUIRED | BLOCKED
+  stage: IMPLEMENTATION
+  substep: migration-manager
+  story: <StoryId>
+  artifacts: []          # source files, listed by path
+  next_substep: <the next builder, or null>
+  loop_back_stage: null
+  blocking_issues: []
+  non_blocking_findings: []
+```
+
+Loop-back keys valid for `IMPLEMENTATION`:
+
+| key | `loop_back_stage` |
+|---|---|
+| `partial` | `IMPLEMENTATION` |
+| `blocked_by_plan` | `IMPLEMENTATION_PLANNING` |
+| `blocked_by_architecture` | `ARCHITECTURE_PLANNING` |
+
+## Prohibited (harness)
+
+- Do not update workflow state (`workflow-state.yaml`, `active-story.yaml`,
+  `history.jsonl`) - `story-orchestrator` owns those.
+- Do not produce an artifact this skill does not own in
+  `docs/workflow/artifact-paths.yaml`.
+- Do not resolve Open Decisions.
+- Do not emit a retired verdict (`Pass`, `Fail`, `Pass with Issues`,
+  `APPROVED`, ...) - see `artifact-lifecycle.md` section 2.
+- Do not use the retired sequential story ids (`US-0NN`) or retired stage
+  identifiers (`DESIGN`, `PLANNING`, `TESTS`, `VERIFICATION`, `PR`).
+- Do not create commits, branches, or Pull Requests.

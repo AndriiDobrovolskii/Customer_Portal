@@ -14,7 +14,7 @@ Audit implemented code against the specific, binding security invariants AGENTS.
 ```
 Precondition: implementation-verifier has passed for the story.
 Input Artifacts: the story's implemented models.py, schemas.py, service.py, router.py; AGENTS.md §7's closing security paragraph; AGENTS.md §4's extra="forbid"+privilege-field rule; AGENTS.md §3's Async I/O forbidden list; AGENTS.md §4's no-logging rule.
-Output Artifacts: docs/security/<StoryId>-security-review.md.
+Output Artifacts: docs/reviews/security/<StoryId>-security-review.md.
 ```
 
 ## Required Context
@@ -41,7 +41,7 @@ Check each item below with cited file:line evidence — no blanket assertion:
 5. **Parameterized SQL only.** Confirm every SQL statement (repository queries, hand-written migration `op.execute()` calls) uses SQLAlchemy constructs with bound parameters — no f-string/`.format()`/`%`-interpolated SQL anywhere, including inside a migration's raw `op.execute()`.
 6. **Uniform auth-failure response.** Confirm every authentication failure path (wrong password, unknown email, expired/malformed/revoked token) returns the same status/response shape without differentiating which specific check failed — cite the code path that guarantees this (e.g. checking password before the verification-status gate, as `UserService.authenticate_user` does).
 7. Assign a verdict: **Pass** (all six checks clean) / **Fail** (any one violated — non-§7 hardening suggestions, if any, are noted as advisory and do not by themselves force a Fail). There is no "Pass with Issues" outcome for this skill.
-8. Write the report to `docs/security/<StoryId>-security-review.md` using `assets/template.md`.
+8. Write the report to `docs/reviews/security/<StoryId>-security-review.md` using `assets/template.md`.
 
 ## Constraints
 
@@ -61,8 +61,99 @@ Check each item below with cited file:line evidence — no blanket assertion:
 
 ## Outputs
 
-- `docs/security/<StoryId>-security-review.md`.
+- `docs/reviews/security/<StoryId>-security-review.md`.
 
 ## Completion Criteria
 
 Complete only when all six checks have cited evidence and the verdict follows strictly from them — any single violation forces Fail regardless of how minor it otherwise seems.
+
+---
+
+# Harness Contract
+
+This skill owns the `SECURITY_REVIEW` stage of `docs/workflow/stage-map.yaml`.
+
+## Canonical sources
+
+- Workflow / stage / loop-back keys: `docs/workflow/stage-map.yaml` (`SECURITY_REVIEW`).
+- Artifact paths: `docs/workflow/artifact-paths.yaml` - **authoritative**.
+  Resolve `story`, `specification`, `specification_review`, `impact_analysis`, `implementation_plan`, `plan_review`, `implementation_report`, `implementation_verification`, `api_design`, `openapi`, `database_design`, `entity_model`, `test_strategy`, `ac_test_matrix`, `open_decisions`. Any path shown elsewhere in this skill is illustrative;
+  the registry wins.
+- Status vocabularies: `docs/workflow/artifact-lifecycle.md`.
+- Front matter and the staleness contract: `docs/workflow/artifact-schema.md`.
+- Workflow state: `docs/workflow/state-schema.md`.
+
+## Inputs (registry keys)
+
+- `story`
+- `specification`
+- `specification_review`
+- `impact_analysis`
+- `implementation_plan`
+- `plan_review`
+- `implementation_report`
+- `implementation_verification`
+- `api_design`  (conditional - absent when its design stage recorded `NOT_APPLICABLE`)
+- `openapi`  (conditional - absent when its design stage recorded `NOT_APPLICABLE`)
+- `database_design`  (conditional - absent when its design stage recorded `NOT_APPLICABLE`)
+- `entity_model`  (conditional - absent when its design stage recorded `NOT_APPLICABLE`)
+- `test_strategy`
+- `ac_test_matrix`
+- `open_decisions`
+
+## Preconditions (harness)
+
+- Every consumed artifact is current: `status` is not `SUPERSEDED` or
+  `ARCHIVED`, and the `version` this skill records in its own `inputs` is the
+  version actually on disk. A stale input is `BLOCKED`, not a caveat.
+- No `TODO` / `TBD` / `FIXME` / unresolved blocking Open Decision in an
+  `APPROVED` input that this stage depends on.
+- `docs/workflow/active-story.yaml` and `docs/workflow/workflow-state.yaml`
+  agree on which story is active.
+
+## Result Envelope
+
+Return exactly this. `story-orchestrator` records the transition; this skill
+never writes `docs/workflow/workflow-state.yaml`.
+
+```yaml
+result:
+  verdict: PASS | CHANGES_REQUIRED | BLOCKED
+  stage: SECURITY_REVIEW
+  story: <StoryId>
+  artifact_status: DRAFT
+  artifacts:
+    - docs/reviews/security/<StoryId>-security-review.md
+  next_stage: RECONCILIATION
+  loop_back_stage: null
+  blocking_issues: []
+  non_blocking_findings: []
+```
+
+Loop-back keys valid for this stage (from `stage-map.yaml`; naming any other key
+is rejected and holds the stage as `BLOCKED`):
+
+| key | `loop_back_stage` |
+|---|---|
+| `changes_required` | `IMPLEMENTATION` |
+| `invalid_security_design` | `API_DESIGN` |
+
+- `PASS` - no Critical or Major security findings. Low findings may be carried
+  forward in `non_blocking_findings`, and must then be repeated by the next
+  stage that consumes this review.
+- `CHANGES_REQUIRED` - use `invalid_security_design` when the flaw is in the
+  contract rather than the code.
+- `BLOCKED` - a mandatory input is missing or stale.
+
+## Prohibited (harness)
+
+- Do not update workflow state (`workflow-state.yaml`, `active-story.yaml`,
+  `history.jsonl`) - `story-orchestrator` owns those.
+- Do not produce an artifact this skill does not own in
+  `docs/workflow/artifact-paths.yaml`.
+- Do not resolve Open Decisions.
+- Do not emit a retired verdict (`Pass`, `Fail`, `Pass with Issues`,
+  `APPROVED`, ...) - see `artifact-lifecycle.md` section 2.
+- Do not use the retired sequential story ids (`US-0NN`) or retired stage
+  identifiers (`DESIGN`, `PLANNING`, `TESTS`, `VERIFICATION`, `PR`).
+- Do not create commits, branches, or Pull Requests.

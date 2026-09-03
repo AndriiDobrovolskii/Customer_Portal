@@ -61,6 +61,18 @@ RETIRED_ID_DOC_ALLOWLIST = {
 SEQ_ID = re.compile(r"US-0\d\d")
 DOC_PATH = re.compile(r"docs/[A-Za-z0-9_./-]+\.(?:md|yaml|yml|jsonl)")
 
+# Retired path shapes, as they appear with a placeholder rather than a real
+# story id - the DOC_PATH resolution check cannot see these because a
+# placeholder path never resolves either way.
+RETIRED_PATH_STEMS = (
+    "-verification-report.md",
+    "-reconciliation-report.md",
+    "-traceability-matrix.md",
+    "-pr-description.md",
+    "docs/security/",
+    "docs/reviews/specifications/US-0",
+)
+
 
 def load(path: Path) -> dict[str, Any]:
     with open(path, encoding="utf-8") as fh:
@@ -90,6 +102,16 @@ def scanned_files() -> list[Path]:
                 continue
             out.append(p)
     return out
+
+
+def _is_live_harness(posix: str) -> bool:
+    """True for files that drive future runs, as opposed to delivered history."""
+    return (
+        posix.startswith(
+            (".claude/", "docs/workflow/", "app/", "tests/", "migrations/", "scripts/")
+        )
+        or posix == "docs/catalog/stories.yaml"
+    )
 
 
 def read(path: Path) -> str:
@@ -163,53 +185,19 @@ def check_skill_contracts(stage_map: dict[str, Any], errors: list[str]) -> None:
             continue
         if f"stage: {stage}" not in text:
             errors.append(f"{skill}: Result Envelope does not declare 'stage: {stage}'")
-        # Any stage id the skill names must be real.
-        for named in set(re.findall(r"\b[A-Z][A-Z_]{4,}\b", text)):
-            if named in order or named in {
-                "PASS",
-                "CHANGES_REQUIRED",
-                "BLOCKED",
-                "NOT_APPLICABLE",
-                "DRAFT",
-                "IN_REVIEW",
-                "APPROVED",
-                "SUPERSEDED",
-                "ARCHIVED",
-                "NOT_STARTED",
-                "IN_PROGRESS",
-                "WAITING_FOR_HUMAN",
-                "COMPLETED",
-                "PENDING",
-                "REJECTED",
-                "HIGH",
-                "MEDIUM",
-                "LOW",
-                "TODO",
-                "TBD",
-                "FIXME",
-                "AGENTS",
-                "SKILL",
-                "README",
-                "AAA",
-                "API",
-                "HTTP",
-                "SQL",
-                "ORM",
-                "DTO",
-                "TTL",
-                "URL",
-                "JSON",
-                "YAML",
-                "PATCH",
-                "BACKLOG",
-                "READY",
-                "CRITICAL",
-                "MAJOR",
-                "MINOR",
-            }:
-                continue
-            if named in (stage_map.get("retired_identifiers") or {}):
-                errors.append(f"{skill}: names retired stage identifier {named}")
+        # A retired identifier is only a defect in a stage POSITION. Skills are
+        # expected to name the retired ids in prose - the Prohibited section
+        # exists precisely to list them - so matching bare words would flag the
+        # rule itself as a violation of the rule.
+        retired = set(stage_map.get("retired_identifiers") or {})
+        for field, named in re.findall(
+            r"\b(stage|next_stage|loop_back_stage|current_stage|substep_stage):\s*([A-Z_]+)",
+            text,
+        ):
+            if named in retired:
+                errors.append(f"{skill}: {field} uses retired identifier {named}")
+            elif named not in order and named != "NULL":
+                errors.append(f"{skill}: {field} names unknown stage {named}")
 
         for key in re.findall(r"loop_back_stage:\s*([A-Z_]+)", text):
             if key not in order and key != "NULL":
@@ -229,6 +217,14 @@ def check_no_retired(stage_map: dict[str, Any], errors: list[str]) -> None:
             continue
         if SEQ_ID.search(text) and posix not in RETIRED_ID_DOC_ALLOWLIST:
             errors.append(f"{posix}: retired sequential story id (US-0NN)")
+        # The retired-path-shape check applies to files that DRIVE future runs -
+        # skills, commands, workflow definitions, and source. A delivered
+        # artifact under docs/ may legitimately narrate what a file was called
+        # at the time it was written; rewriting that would falsify the record.
+        if _is_live_harness(posix):
+            for stem in RETIRED_PATH_STEMS:
+                if stem in text:
+                    errors.append(f"{posix}: retired artifact path shape '{stem}'")
         if posix.startswith("docs/workflow/") or posix.startswith(".claude/"):
             for stage in retired_stages:
                 if re.search(rf"current_stage:\s*{stage}\b", text):
