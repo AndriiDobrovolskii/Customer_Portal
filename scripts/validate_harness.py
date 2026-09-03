@@ -176,6 +176,24 @@ def check_skill_contracts(stage_map: dict[str, Any], errors: list[str]) -> None:
         if st.get("skill"):
             stage_of[st["skill"]] = name
 
+    # Skills that own an artifact but are not any stage's `skill` (notably
+    # story-orchestrator) would otherwise never be opened by this check.
+    registry = load(WORKFLOW / "artifact-paths.yaml")
+    unstaged_owners = {
+        spec["owner"]
+        for spec in registry["artifacts"].values()
+        if spec.get("owner") and spec["owner"] not in stage_of
+    }
+    for owner in sorted(unstaged_owners):
+        text = read(SKILLS / owner / "SKILL.md")
+        for field, named in re.findall(
+            r"\b(stage|next_stage|loop_back_stage|current_stage):\s*([A-Z_]+)", text
+        ):
+            if named in (stage_map.get("retired_identifiers") or {}):
+                errors.append(f"{owner}: {field} uses retired identifier {named}")
+            elif named not in order and named != "NULL":
+                errors.append(f"{owner}: {field} names unknown stage {named}")
+
     for skill, stage in sorted(stage_of.items()):
         text = read(SKILLS / skill / "SKILL.md")
         if not text:
@@ -225,6 +243,29 @@ def check_no_retired(stage_map: dict[str, Any], errors: list[str]) -> None:
             for stem in RETIRED_PATH_STEMS:
                 if stem in text:
                     errors.append(f"{posix}: retired artifact path shape '{stem}'")
+
+        # A retired stage id anywhere in a skill or command - a prose sentence,
+        # a table cell - not just in `current_stage:` position. Lines that are
+        # *about* the retired ids (a Prohibited list, a retired_identifiers
+        # note) are exempt, or the rule would flag itself.
+        if posix.startswith(".claude/"):
+            # "PR" is excluded: it is an ordinary English abbreviation as well
+            # as a retired stage id, so a bare-word match is pure noise here.
+            # It is still caught in stage position by check_skill_contracts.
+            watched = sorted(retired_stages - {"PR"})
+            lines = text.splitlines()
+            for lineno, line in enumerate(lines, 1):
+                # The exemption keyword often sits on the previous line, since
+                # the id list wraps: "...retired stage\n identifiers (`DESIGN`,".
+                window = (lines[lineno - 2] if lineno > 1 else "") + " " + line
+                if any(
+                    w in window.lower()
+                    for w in ("retired", "do not use", "prohibited", "deprecated")
+                ):
+                    continue
+                for stage in watched:
+                    if re.search(rf"(?<![A-Z_]){stage}(?![A-Z_])", line):
+                        errors.append(f"{posix}:{lineno}: retired stage identifier {stage}")
         if posix.startswith("docs/workflow/") or posix.startswith(".claude/"):
             for stage in retired_stages:
                 if re.search(rf"current_stage:\s*{stage}\b", text):
