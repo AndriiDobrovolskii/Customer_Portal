@@ -15,23 +15,23 @@ version: 1
 story: US-3.3
 workflow: story-delivery
 
-current_stage: COMPLETED
-previous_stage: READY_FOR_PR
-last_completed_stage: PR_PREPARATION
+current_stage: ARCHIVED
+previous_stage: COMPLETED
+last_completed_stage: COMPLETED
 
-status: COMPLETED
+status: ARCHIVED
 attempt: 1
 
-last_invoked_skill: pr-preparer
+last_invoked_skill: story-orchestrator
 
 last_result:
-  verdict: PASS
-  stage: PR_PREPARATION
-  recorded_at: "2026-09-03T02:00:00Z"
+  verdict: ARCHIVED
+  stage: ARCHIVED
+  recorded_at: "2026-09-03T06:00:00Z"
 
 last_artifacts:
-  - type: pr_summary
-    path: docs/pr/US-3.3-pr-summary.md
+  - type: delivery_summary
+    path: docs/evidence/US-3.3-delivery-summary.md
     version: 1
 
 pending_human_gate: null
@@ -47,15 +47,14 @@ non_blocking_findings:
     the gap.
 
 started_at: "2026-09-02T00:00:00Z"
-updated_at: "2026-09-03T02:00:00Z"
+updated_at: "2026-09-03T06:00:00Z"
 completed_at: "2026-09-03T05:46:47Z"
-archived_at: null
+archived_at: "2026-09-03T06:00:00Z"
 
 implementation_substep: null
 
 # US-3.3 reached PR_PREPARATION under the pre-migration 11-stage vocabulary
 # (its final recorded stage was the retired identifier `PR`, which maps to
-# PR_PREPARATION). PR #13 merged 2026-09-03T05:46:47Z, so COMPLETED is the
-# correct stage under the current stage map. It was never taken through
-# /so:archive, so archived_at is null and its catalog state is COMPLETED,
-# not ARCHIVED.
+# PR_PREPARATION). PR #13 merged 2026-09-03T05:46:47Z. Archived 2026-09-03 via
+# /so:archive — see docs/evidence/US-3.3-delivery-summary.md. No Story is
+# currently active; docs/workflow/active-story.yaml.active_story is null.

@@ -139,7 +139,7 @@ stories:
     path: docs/stories/US-3.3-view-audit-information.md
     epic: EPIC-3
     title: View Audit Information
-    state: COMPLETED
+    state: ARCHIVED
     delivered_by: { pr: 13, note: "Last story delivered under the pre-migration harness vocabulary" }
 
   # --- EPIC-4: Feedback / Support ------------------------------------------
