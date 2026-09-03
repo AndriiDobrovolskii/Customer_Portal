@@ -5,7 +5,7 @@ from pydantic import BaseModel, ConfigDict
 
 
 class AuditLogEntry(BaseModel):
-    """AU-AC1's field list verbatim (US-013-openapi.yaml `AuditLogEntry`).
+    """AU-AC1's field list verbatim (US-3.3-openapi.yaml `AuditLogEntry`).
     Outbound-only: no inbound `*Create`/`*Update` schema exists anywhere in
     this module, which structurally enforces AU-AC4's API-layer
     immutability. `id`/`category`/`payload` are real `audit_log` columns

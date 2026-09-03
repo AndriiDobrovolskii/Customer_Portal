@@ -85,7 +85,7 @@ def verify_chain(rows: Sequence[ChainRow]) -> ChainBreak | None:
     Doing so would need a checkpoint the chain doesn't currently have (a
     recorded expected-tail hash, or a monotonic sequence column), which is
     new schema beyond this story's scope. Disclosed, not silently absent —
-    see US-013-traceability-matrix.md's AU-AC7 rows.
+    see US-3.3-traceability-matrix.md's AU-AC7 rows.
     """
     expected_previous_hash = GENESIS_SENTINEL
     for row in rows:

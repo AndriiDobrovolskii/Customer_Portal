@@ -24,10 +24,10 @@ def upgrade() -> None:
     """Upgrade schema.
 
     `users` is written on every registration/login/profile-update
-    (US-011-db-design.md) - a plain `CREATE INDEX` would lock the table
+    (US-3.1-db-design.md) - a plain `CREATE INDEX` would lock the table
     against those writes for the build duration. `CONCURRENTLY` cannot
     run inside a transaction, so this migration is deliberately alone
-    (plan-review finding, US-011-plan-review.md), wrapped in
+    (plan-review finding, US-3.1-plan-review.md), wrapped in
     `autocommit_block()` per AGENTS.md §4, mirroring
     db8cbd5e3697_add_refresh_tokens_family_lookup_index_.py's identical
     precedent. `CREATE EXTENSION IF NOT EXISTS` is already idempotent at

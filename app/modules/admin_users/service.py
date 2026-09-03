@@ -105,7 +105,7 @@ class AdminUserRepositoryProtocol(Protocol):
 
 
 class RoleServiceProtocol(Protocol):
-    """Cross-module collaborator (US-3.2/spec US-012's roles.service),
+    """Cross-module collaborator (US-3.2/spec US-3.2's roles.service),
     mirroring users/service.py's own RoleServiceProtocol pattern — the
     sanctioned "depend on the other module's service, never its
     repository/router" shape (AGENTS.md §3).

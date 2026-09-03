@@ -69,7 +69,7 @@ class AuthAuditLog(Base):
     # US-2.6: set only on session_revoked/session_evicted rows. Neither
     # `reason` nor `scope` fits - both are String(32), too short for a
     # UUID, and each already carries an established, different meaning
-    # elsewhere in this table (see docs/designs/database/US-010-db-design.md).
+    # elsewhere in this table (see docs/designs/database/US-2.6-db-design.md).
     target_family: Mapped[uuid.UUID | None] = mapped_column()
     # Deliberately no FK: the row must survive the eventual 30-day-grace-
     # period account deletion/anonymization (BR-007), matching every other
@@ -104,7 +104,7 @@ class RefreshToken(Base):
         # US-2.6: supports the per-user "current-state row per family"
         # (DISTINCT ON) and "family created_at" (MIN(issued_at) GROUP BY
         # family_id) queries as an index-only scan - see
-        # docs/designs/database/US-010-db-design.md.
+        # docs/designs/database/US-2.6-db-design.md.
         Index(
             "ix_refresh_tokens_user_id_family_id_issued_at",
             "user_id",

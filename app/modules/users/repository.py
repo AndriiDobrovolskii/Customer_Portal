@@ -194,7 +194,7 @@ class UserRepository:
 
     async def consume_password_reset_token(self, *, token_hash: str) -> PasswordResetToken | None:
         """Atomic check-and-consume, same pattern as `consume_refresh_token`
-        (RT-AC7) and required by the US-008 spec review's accepted Missing
+        (RT-AC7) and required by the US-2.4 spec review's accepted Missing
         Edge Cases finding: a conditional UPDATE guarded by `consumed_at IS
         NULL` so two concurrent `confirm` calls against the same token can
         never both succeed. Returns `None` when the token was already
@@ -272,7 +272,7 @@ class UserRepository:
     async def list_unconsumed_recovery_codes(self, *, user_id: uuid.UUID) -> list[MfaRecoveryCode]:
         """FR-7: each stored hash is independently salted, so a submitted
         recovery code can't be looked up by hash equality - the caller
-        must verify it against every unconsumed row (per US-009-db-
+        must verify it against every unconsumed row (per US-2.5-db-
         design.md's documented one-of-N pattern).
         """
         result = await self._session.execute(
@@ -350,7 +350,7 @@ class UserRepository:
         un-expired row is "live" per family at a time). PostgreSQL's
         DISTINCT ON, not a Python-side reduction, keeps this a single
         indexed query against `ix_refresh_tokens_user_id_family_id_issued_at`
-        (see docs/designs/database/US-010-db-design.md).
+        (see docs/designs/database/US-2.6-db-design.md).
         """
         result = await self._session.execute(
             select(RefreshToken)
@@ -369,7 +369,7 @@ class UserRepository:
     ) -> dict[uuid.UUID, datetime]:
         """FR-1's `created_at` (per family) is `MIN(issued_at)` across that
         family's rotation chain, not the current row's own `issued_at` -
-        see US-010-db-design.md. Also doubles as FR-7's oldest-family
+        see US-2.6-db-design.md. Also doubles as FR-7's oldest-family
         lookup: the caller picks the minimum value from the returned map
         rather than a second, near-duplicate query (at most 20 live
         families per user, so this is cheap in Python).

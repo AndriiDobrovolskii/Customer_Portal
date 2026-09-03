@@ -912,7 +912,7 @@ async def _seed_user(
 
 async def _login(service: UserService, payload: LoginRequest) -> tuple[LoginResponse, str]:
     """Existing call sites all expect a normal (non-MFA) login — asserts
-    and narrows accordingly. US-009 tests exercising the MFA-challenge
+    and narrows accordingly. US-2.5 tests exercising the MFA-challenge
     branch call `service.authenticate_user` directly instead.
     """
     response, raw_refresh_token = await service.authenticate_user(
@@ -1202,7 +1202,7 @@ async def test_authenticate_user_unknown_email_records_only_ip_counter() -> None
     assert throttle_cache.ip_failures_recorded == [_IP]
 
 
-# --- DA-AC4 (US-004): revoke_before check in the shared auth dependency -------
+# --- DA-AC4 (US-1.4): revoke_before check in the shared auth dependency -------
 
 
 async def _seed_session(
@@ -1327,7 +1327,7 @@ async def test_get_authenticated_user_perm_epoch_absent_accepted() -> None:
     assert result.user_id == user_id
 
 
-# --- US-2.2 (spec US-006): logout / logout-all -------------------------------
+# --- US-2.2 (spec US-2.2): logout / logout-all -------------------------------
 
 
 async def _seed_refresh_token(
@@ -1501,7 +1501,7 @@ async def test_get_authenticated_user_allow_revoked_resolves_revoked_session() -
 async def test_get_authenticated_user_allow_revoked_rejects_unknown_jti() -> None:
     # Arrange: a well-formed token whose jti has no session row at all —
     # "revoked" and "never existed" are different failure modes (Open
-    # Question #2, US-006-api-design.md).
+    # Question #2, US-2.2-api-design.md).
     repository = FakeUserRepository()
     token = encode_access_token(user_id=uuid.uuid4(), jti=uuid.uuid4(), scopes=[])
     service, _, _ = _make_service(repository)
@@ -1513,7 +1513,7 @@ async def test_get_authenticated_user_allow_revoked_rejects_unknown_jti() -> Non
     assert result is None
 
 
-# --- US-2.3 (spec US-007): refresh token rotation ----------------------------
+# --- US-2.3 (spec US-2.3): refresh token rotation ----------------------------
 
 
 async def _seed_rotatable_token(
@@ -1973,7 +1973,7 @@ async def test_rotate_refresh_token_rate_limit_exceeded_raises_too_many_attempts
     assert repository.refresh_tokens_by_hash[hash_refresh_token(raw_token)].consumed_at is None
 
 
-# --- US-2.4 (spec US-008): password reset ------------------------------------
+# --- US-2.4 (spec US-2.4): password reset ------------------------------------
 
 
 async def _seed_reset_token(
@@ -2455,7 +2455,7 @@ async def test_confirm_password_reset_concurrent_requests_only_one_succeeds() ->
 
 
 # ============================================================================
-# US-2.5 / spec US-009: Multi-Factor Authentication (TOTP)
+# US-2.5 / spec US-2.5: Multi-Factor Authentication (TOTP)
 # ============================================================================
 
 _MFA_PASSWORD = "Str0ng!Pass"
@@ -3168,7 +3168,7 @@ async def test_get_authenticated_user_allow_enrollment_scoped_accepts_scoped_tok
     assert result.mfa_enrollment_required is True
 
 
-# --- US-2.6 (spec US-010): Active Session Management -------------------------
+# --- US-2.6 (spec US-2.6): Active Session Management -------------------------
 
 
 def _seed_family(

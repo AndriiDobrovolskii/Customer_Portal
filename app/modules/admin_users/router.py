@@ -126,7 +126,7 @@ async def delete_user_not_allowed(id: UUID, current_user: CurrentUserDep) -> Non
     retention job. `current_user` is declared (not just relied on via a
     `dependencies=[...]` scope check) so an anonymous caller still gets
     401 via the shared CurrentUserDep, per MU-AC3 (resolved reading, see
-    US-011-api-design.md).
+    US-3.1-api-design.md).
     """
     return None
 

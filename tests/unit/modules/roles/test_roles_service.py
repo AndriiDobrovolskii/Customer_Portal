@@ -332,7 +332,7 @@ async def test_replace_user_roles_allows_removing_admin_when_another_admin_remai
     assert len(user_role_repository.replaced) == 1
 
 
-# --- US-009 FR-6: get_role_grants_for_user --------------------------------
+# --- US-2.5 FR-6: get_role_grants_for_user --------------------------------
 
 
 async def test_get_role_grants_for_user_returns_names_and_timestamps() -> None:
@@ -461,7 +461,7 @@ async def test_raise_if_last_admin_non_admin_target_skips_count_query() -> None:
 
 
 # --- Plan-review regression guard: raise_if_last_admin is NOT wired into
-# replace_user_roles (US-011-plan-review.md Risk Realism finding) --------
+# replace_user_roles (US-3.1-plan-review.md Risk Realism finding) --------
 
 
 async def test_replace_user_roles_admin_to_admin_plus_auditor_still_succeeds() -> None:

@@ -45,7 +45,7 @@ class RevocationCache:
 class PermissionEpochCache:
     """The single read/write surface for `perm_epoch:{user_id}`.
 
-    Sibling to `RevocationCache` for the same reason (US-3.2/spec US-012's
+    Sibling to `RevocationCache` for the same reason (US-3.2/spec US-3.2's
     Non-Functional Requirements): `roles.service` writes it on every role
     change, `users.service` reads it on every authenticated request — no
     single module owns this. Deliberately a separate key/class from

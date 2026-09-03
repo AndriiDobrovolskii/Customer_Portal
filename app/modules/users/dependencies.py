@@ -104,7 +104,7 @@ CurrentUserAllowRevokedDep = Annotated[AuthenticatedUser, Depends(get_current_us
 async def get_current_user_allow_enrollment_scoped(
     token: Annotated[str, Depends(_oauth2_scheme)], service: UserServiceDep
 ) -> AuthenticatedUser:
-    """US-009 FR-6/FR-7: the narrow opt-in for the two MFA enrolment
+    """US-2.5 FR-6/FR-7: the narrow opt-in for the two MFA enrolment
     endpoints (`POST /v1/auth/mfa/enroll`, `/activate`) - the only routes
     that accept an enrolment-scoped access token. Mirrors
     `get_current_user_allow_revoked`'s exact same shape (a separate

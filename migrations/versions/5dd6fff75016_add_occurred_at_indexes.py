@@ -16,7 +16,7 @@ down_revision: str | Sequence[str] | None = "57a978462b74"  # pragma: allowlist 
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 
-# US-013-entity-model.md: required for `audit_log_history`'s `occurred_at
+# US-3.3-entity-model.md: required for `audit_log_history`'s `occurred_at
 # DESC` keyset pagination (FR-1) to produce a merge-append instead of
 # sorting the full union — none of these 4 tables' existing indexes lead
 # with `occurred_at` (verified against the live models). All 4 tables are

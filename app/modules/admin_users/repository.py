@@ -19,7 +19,7 @@ from app.modules.users.models import User
 # write need (efficient search+filter SQL, and — for create — writing a
 # new user's initial roles in the same transaction it's created in), not
 # a business-logic decision, which stays in RoleService (service ->
-# service) per US-011-implementation-plan.md's Architectural Change #2.
+# service) per US-3.1-implementation-plan.md's Architectural Change #2.
 
 
 class UserListPage(NamedTuple):

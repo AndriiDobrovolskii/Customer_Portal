@@ -19,7 +19,7 @@ class GeoLocation(NamedTuple):
 @lru_cache
 def _get_reader() -> geoip2.database.Reader | None:
     """US-2.6/OD-4: the .mmdb file is fetched at build/deploy time, not
-    committed to this repo (see docs/plans/US-010-implementation-plan.md
+    committed to this repo (see docs/plans/US-2.6-implementation-plan.md
     Risks) - its absence in local dev/CI is expected, not an error.
     """
     settings = get_settings()

@@ -626,7 +626,7 @@ async def test_login_malformed_request_does_not_increment_throttle_counter(
     assert await app.state.valkey_client.get(ip_key) is None
 
 
-# --- US-2.2 (spec US-006): logout / logout-all -------------------------------
+# --- US-2.2 (spec US-2.2): logout / logout-all -------------------------------
 
 
 _LOGOUT_TEST_PASSWORD = "Str0ng!Pass1"  # pragma: allowlist secret
@@ -922,7 +922,7 @@ async def test_logout_all_does_not_share_logout_leniency_rejects_revoked_token(
     assert response.status_code == 401
 
 
-# --- US-2.3 (spec US-007): refresh token rotation ----------------------------
+# --- US-2.3 (spec US-2.3): refresh token rotation ----------------------------
 
 _REFRESH_TEST_PASSWORD = "Str0ng!Pass1"  # pragma: allowlist secret
 
@@ -1321,7 +1321,7 @@ async def test_refresh_rate_limit_exceeded_returns_429(
     assert int(response.headers["retry-after"]) > 0
 
 
-# --- US-2.4 (spec US-008): password reset ------------------------------------
+# --- US-2.4 (spec US-2.4): password reset ------------------------------------
 
 _RESET_TEST_PASSWORD = "OldStr0ng!Pass1"  # pragma: allowlist secret
 _RESET_NEW_PASSWORD = "BrandNewStr0ngPass1!"  # pragma: allowlist secret
@@ -1714,7 +1714,7 @@ async def test_password_reset_confirm_concurrent_same_token_exactly_one_succeeds
     assert result.scalar_one().consumed_at is not None
 
 
-# --- MR-AC2 (US-3.2/spec US-012): login/refresh carry the scopes claim,
+# --- MR-AC2 (US-3.2/spec US-3.2): login/refresh carry the scopes claim,
 # stale access tokens after a role change ------------------------------------
 
 
@@ -1807,7 +1807,7 @@ async def test_stale_access_token_after_role_change_returns_401_then_refresh_car
     assert new_claims.scopes == ["audit:read"]
 
 
-# --- US-2.6 (spec US-010): Active Session Management -------------------------
+# --- US-2.6 (spec US-2.6): Active Session Management -------------------------
 
 
 async def _seed_refresh_token(

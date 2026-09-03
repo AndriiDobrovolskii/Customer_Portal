@@ -56,14 +56,14 @@ class RoleServiceProtocol(Protocol):
     `get_role_grants_for_user` (not `list_role_names_for_user`, which is a
     repository-protocol-only method `RoleService` doesn't itself expose)
     is this project's public, service-layer way to read a user's role
-    names, already used cross-module by `users.service` (US-009 FR-6).
+    names, already used cross-module by `users.service` (US-2.5 FR-6).
     """
 
     async def get_role_grants_for_user(self, user_id: uuid.UUID) -> list[RoleGrant]: ...
 
 
 async def _resolve_actor_role(role_service: RoleServiceProtocol, actor_id: uuid.UUID) -> str | None:
-    """`actor_role` (US-013-entity-model.md) is a single, nullable
+    """`actor_role` (US-3.3-entity-model.md) is a single, nullable
     `String(32)` column, but a user may hold more than one role. Not
     decided by any design/planning artifact for this story (a genuinely
     minor, purely-informational modeling detail — this field is never used

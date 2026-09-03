@@ -30,7 +30,7 @@ class RoleRepositoryProtocol(Protocol):
 
 
 class RoleGrant(NamedTuple):
-    """US-009 FR-6: a role name plus the moment it was granted, used to
+    """US-2.5 FR-6: a role name plus the moment it was granted, used to
     compute the 14-day MFA-enrolment grace period. A superset of what
     `resolve_scopes_for_user` needs (names only), so it's a separate
     method/return type rather than changing that one's signature.
@@ -94,7 +94,7 @@ class RoleService:
     async def resolve_scopes_for_user(self, user_id: uuid.UUID) -> list[str]:
         """The cross-module read `users.service` calls at token issuance
         (login, refresh) to populate the JWT `scopes` claim (T6). Not part
-        of the original US-012 DB/API design — added here because that
+        of the original US-3.2 DB/API design — added here because that
         integration point needs a single method returning the flattened,
         deduplicated permission set for a user's current roles.
         """
@@ -105,7 +105,7 @@ class RoleService:
         return sorted({permission.scope for role in roles for permission in role.permissions})
 
     async def get_role_grants_for_user(self, user_id: uuid.UUID) -> list[RoleGrant]:
-        """US-009 FR-6: the cross-module read `users.service` calls at
+        """US-2.5 FR-6: the cross-module read `users.service` calls at
         login/refresh to check privileged-role membership and the 14-day
         grace-period clock. Same `users` -> `roles` direction
         `resolve_scopes_for_user` already established.
@@ -125,7 +125,7 @@ class RoleService:
         """FR-1, guarded by FR-4-FR-7.
 
         Check order (plan-review finding, not stated by the spec — see
-        docs/plans/US-012-task-breakdown.md's Notes): self-target (FR-5,
+        docs/plans/US-3.2-task-breakdown.md's Notes): self-target (FR-5,
         cheapest, no query needed) -> structural validation of the
         requested set (empty/duplicate/unknown role names, FR-4 plus the
         plan-review-resolved empty/duplicate default) -> privilege
@@ -225,7 +225,7 @@ class RoleService:
         replacement-specific concerns (self-target, last-admin-on-removal)
         this call site has no equivalent for, and touching an already-
         shipped, already-tested method for a same-day feature carries
-        needless regression risk (see US-011-plan-review.md's finding on
+        needless regression risk (see US-3.1-plan-review.md's finding on
         the sibling `raise_if_last_admin` method below).
 
         Any name in `role_names` that doesn't match a real role is
@@ -233,7 +233,7 @@ class RoleService:
         story's spec has no FR/AC for an unknown-role-name case at
         creation (unlike US-3.2's FR-4 for role replacement). Documented
         limitation, not a fabricated requirement — flagged in
-        US-011-implementation-plan.md's follow-ups.
+        US-3.1-implementation-plan.md's follow-ups.
         """
         matched_roles = await self._role_repository.get_by_names(role_names)
         requested_permissions = {
@@ -266,7 +266,7 @@ class RoleService:
         would incorrectly reject a replacement that keeps `admin` in the
         set (e.g. `{admin}` -> `{admin, auditor}` for the sole admin) —
         caught during `plan-reviewer`'s advisor cross-check 2026-09-01,
-        see US-011-plan-review.md's Risk Realism finding.
+        see US-3.1-plan-review.md's Risk Realism finding.
         """
         old_role_names = await self._user_role_repository.list_role_names_for_user(target_user_id)
         if _ADMIN_ROLE_NAME not in old_role_names:

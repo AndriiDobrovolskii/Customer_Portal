@@ -221,7 +221,7 @@ async def test_replace_user_roles_sets_granted_at_to_recent_value(
 ) -> None:
     # Arrange: US-2.5 reconciliation gap #1 - no test proved
     # replace_for_user's explicit granted_at write (app/modules/roles/
-    # repository.py), which US-009 FR-6's 14-day grace-period clock reads
+    # repository.py), which US-2.5 FR-6's 14-day grace-period clock reads
     # from. Seed the target already holding the role with a stale
     # granted_at; a full-replacement call deletes+reinserts every row on
     # every call, so re-granting the same role must overwrite the stale
