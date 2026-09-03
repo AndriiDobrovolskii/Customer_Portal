@@ -142,6 +142,53 @@ async def test_list_audit_logs_filtered_query_returns_200_newest_first(
     assert body["items"][1]["event"] == "login_failed"
 
 
+async def test_list_audit_logs_response_entry_includes_all_nine_fields(
+    client: AsyncClient, db_session: AsyncSession
+) -> None:
+    # Arrange: AU-AC1's own field-list clause — "each entry contains
+    # occurred_at, actor_id, actor_role, event, target_id, request_id, ip,
+    # user_agent, and an outcome". Insert one audit_log-native row with
+    # every field populated (unlike the historical-table tests, which
+    # exercise NULL-padding for fields those tables don't store), so this
+    # test proves the full 9-field shape is actually present and correctly
+    # mapped, not just that the endpoint returns 200/ordering.
+    actor_id = uuid.uuid4()
+    target_id = uuid.uuid4()
+    row_id = uuid.uuid4()
+    await db_session.execute(
+        text(
+            "INSERT INTO audit_log "
+            "(id, occurred_at, category, actor_id, actor_role, event, target_id, "
+            "outcome, request_id, ip, user_agent) "
+            "VALUES (:id, now() - interval '1 second', 'audit', :actor_id, 'auditor', "
+            "'field_shape_test', :target_id, 'success', 'req-shape', '10.9.9.9', 'pytest-ua')"
+        ),
+        {"id": row_id, "actor_id": actor_id, "target_id": target_id},
+    )
+    admin = await _seed_user(db_session, email="fieldshapechecker@example.com")
+    token = await _seed_session_and_token(db_session, user_id=admin.id, scopes=_READ)
+
+    # Act
+    response = await client.get(
+        "/api/v1/admin/audit-logs",
+        params={**_window(), "event": "field_shape_test"},
+        headers=_auth_headers(token),
+    )
+
+    # Assert
+    assert response.status_code == 200
+    entry = response.json()["items"][0]
+    assert entry["actor_id"] == str(actor_id)
+    assert entry["actor_role"] == "auditor"
+    assert entry["event"] == "field_shape_test"
+    assert entry["target_id"] == str(target_id)
+    assert entry["request_id"] == "req-shape"
+    assert entry["ip"] == "10.9.9.9"
+    assert entry["user_agent"] == "pytest-ua"
+    assert entry["outcome"] == "success"
+    assert "occurred_at" in entry and entry["occurred_at"] is not None
+
+
 async def test_list_audit_logs_historical_rows_null_pad_unavailable_fields(
     client: AsyncClient, db_session: AsyncSession
 ) -> None:
@@ -237,16 +284,30 @@ async def test_list_audit_logs_invalid_cursor_returns_422(
 async def test_list_audit_logs_success_writes_self_audit_entry(
     client: AsyncClient, db_session: AsyncSession
 ) -> None:
-    # Arrange
+    # Arrange: AU-AC2's own clause is "the exact filter parameters used" —
+    # every one of the 7 keys the service writes into `payload`
+    # (actor_id, event, target_id, from, to, cursor, limit; service.py:
+    # 142-150), so this request supplies a real, non-null value for every
+    # filterable param (cursor is the one exception: a well-formed request
+    # naturally has none on a first page, so `null` is itself the correct,
+    # asserted value for that key — not a gap in what's checked).
     admin = await _seed_user(db_session, email="selfauditor@example.com")
     await _assign_role(db_session, user_id=admin.id, role_name="auditor")
     token = await _seed_session_and_token(db_session, user_id=admin.id, scopes=_READ)
     window = _window()
+    actor_filter = uuid.uuid4()
+    target_filter = uuid.uuid4()
 
     # Act
     response = await client.get(
         "/api/v1/admin/audit-logs",
-        params={**window, "event": "login_failed"},
+        params={
+            **window,
+            "event": "login_failed",
+            "actor_id": str(actor_filter),
+            "target_id": str(target_filter),
+            "limit": 25,
+        },
         headers=_auth_headers(token),
     )
 
@@ -262,7 +323,14 @@ async def test_list_audit_logs_success_writes_self_audit_entry(
     assert row["actor_id"] == admin.id
     assert row["actor_role"] == "auditor"
     assert row["outcome"] == "success"
-    assert row["payload"]["event"] == "login_failed"
+    payload = row["payload"]
+    assert payload["actor_id"] == str(actor_filter)
+    assert payload["event"] == "login_failed"
+    assert payload["target_id"] == str(target_filter)
+    assert payload["from"] == window["from"]
+    assert payload["to"] == window["to"]
+    assert payload["cursor"] is None
+    assert payload["limit"] == 25
 
 
 # --- AU-AC3/FR-3 + cross-cutting AGENTS.md §5 security cases ------------
@@ -422,7 +490,13 @@ async def test_list_audit_logs_both_bounds_omitted_returns_422_range_too_wide(
 
     # Assert
     assert response.status_code == 422
-    assert response.json()["type"].endswith("/range-too-wide")
+    body = response.json()
+    assert body["type"].endswith("/range-too-wide")
+    # AU-AC5's own text: "the message states the maximum window and
+    # suggests the asynchronous export instead" — not just the status
+    # code/type slug, the message content itself.
+    assert "90 days" in body["detail"]
+    assert "export" in body["detail"].lower()
 
 
 async def test_list_audit_logs_single_missing_bound_returns_422(
