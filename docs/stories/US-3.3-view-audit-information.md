@@ -2,6 +2,7 @@
 
 **Story ID:** US-3.3
 **Project:** Customer Portal
+**Revised:** 2026-09-02 — AU-AC4 split into this story's API-level scope and a deferred DB-grant follow-up (OD-12), and the Data Model Notes' partition-granularity line corrected to match the story's own Assumption #4/AU-AC7 (OD-11). Both were found self-contradictory/under-scoped by `us-clarifier` and `story-spec-reviewer` against the real, now-current codebase; full detail and rationale in `docs/decisions/US-3.3-open-decisions.md` (OD-11, OD-12) and `docs/reviews/specifications/US-013-spec-review.md`. No other AC changed.
 
 ## User Story
 As an auditor or administrator,
@@ -38,7 +39,7 @@ So that I can investigate a security incident or answer a compliance request wit
 ## Data Model Notes
 - `audit_log`: `id`, `category`, `occurred_at`, `actor_id`, `actor_role`, `event`, `target_id`, `outcome`, `request_id`, `ip`, `user_agent`, `payload` (JSONB), `previous_hash`, `row_hash`
 - Union view over `auth_audit_log`, `profile_audit_log`, `account_lifecycle_audit_log`, `admin_audit_log`, `ticket_audit_log`
-- Covering index on `(occurred_at DESC, actor_id, event)`; monthly partitions; keyset (not `OFFSET`) pagination
+- Covering index on `(occurred_at DESC, actor_id, event)`; daily partitions (corrected 2026-09-02, OD-11 — matches Assumption #4 and AU-AC7, which this line originally contradicted); keyset (not `OFFSET`) pagination
 
 ## Acceptance Criteria
 
@@ -67,13 +68,13 @@ Then respond 403 with type ".../errors/insufficient-permission"
 And the denied attempt is itself recorded in the audit log
 ```
 
-**AU-AC4 — The log is immutable**
+**AU-AC4 — The log is immutable (API layer)**
 ```gherkin
 Given any actor, including an administrator
 When PATCH, PUT or DELETE is attempted on /v1/admin/audit-logs or any entry
 Then respond 405 Method Not Allowed
-And the application's database role holds INSERT and SELECT grants only on audit tables
 ```
+*Database-grant enforcement (the application's DB role holding INSERT/SELECT-only on audit tables) is a separate, project-wide invariant, not unique to this story — it applies equally to every audit table already shipped (`auth_audit_log`, `admin_audit_log`, `profile_audit_log`, `account_lifecycle_audit_log`) and requires provisioning a non-superuser, non-owner database role plus grant migrations, none of which exist yet anywhere in this codebase (OD-12). Tracked as a separate infrastructure follow-up; this story's own AC is the API-level `405` only.*
 
 ### Query bounds and content
 **AU-AC5 — Query window too wide**
@@ -135,8 +136,8 @@ Error `type` slugs introduced by this story: `range-too-wide`.
 
 ## Non-Functional / Security Requirements
 - `request_id` ties an audit entry to the application log line and the trace — this is what makes an investigation tractable.
-- Immutability MUST be enforced by database grants (AU-AC4), not by application code alone.
-- Anyone permitted may read; nobody may edit — including the operators.
+- Immutability MUST be enforced at the API layer for every actor (AU-AC4); database-grant enforcement is a separate, project-wide follow-up (see AU-AC4's note), not application code convention alone once it ships.
+- Anyone permitted may read; nobody may edit — including the operators, at the API layer.
 - **Performance:** target p95 ≤ 500 ms for a 50-row page over a 30-day window.
 
 ## Enforcement Matrix
@@ -144,7 +145,8 @@ Error `type` slugs introduced by this story: `range-too-wide`.
 |---|---|---|
 | AU-AC1–2 | Integration test suite | `[gate]` |
 | AU-AC3 | Integration test asserting both the 403 and the resulting audit entry | `[gate]` |
-| AU-AC4 | Test executing an UPDATE/DELETE as the application role and asserting a permission error | `[gate]` |
+| AU-AC4 | Integration test asserting `405` on PATCH/PUT/DELETE | `[gate]` |
+| Database-grant enforcement (project-wide, not this story's AC — see AU-AC4's note) | Test executing an UPDATE/DELETE as the application role and asserting a permission error, once the follow-up provisions a non-superuser role | `[manual]` pending infrastructure follow-up (OD-12) |
 | AU-AC5–6 | Integration test suite; AU-AC6 additionally by a CI grep over audit-write call sites | `[gate]` |
 | AU-AC7 | Test that mutates a row via a privileged connection and asserts the verifier reports the break | `[gate]` |
 | AU-AC8 | Integration test running the US-1.4 erasure job and re-querying | `[gate]` |

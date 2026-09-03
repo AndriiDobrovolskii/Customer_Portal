@@ -22,8 +22,13 @@ class EmailVerificationToken(Base):
     consumed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
 
-class AuditLog(Base):
-    __tablename__ = "audit_log"
+class UnverifiedAccountPurgeLog(Base):
+    """Renamed from AuditLog/audit_log (US-3.3 OD-1): frees `audit_log` for
+    that story's own security/admin audit trail, an unrelated table that
+    happened to collide on the same name. No column or behavior change.
+    """
+
+    __tablename__ = "unverified_account_purge_log"
 
     id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=uuid.uuid4)
     event: Mapped[str] = mapped_column(String(64), nullable=False)

@@ -13,6 +13,7 @@ from app.core.config import get_settings
 from app.db.base import Base
 from app.modules.account import models as account_models  # noqa: F401  # registers models
 from app.modules.admin_users import models as admin_users_models  # noqa: F401  # registers models
+from app.modules.audit import models as audit_models  # noqa: F401  # registers models
 from app.modules.email_verification import (  # noqa: F401  # registers models with Base
     models as email_verification_models,
 )

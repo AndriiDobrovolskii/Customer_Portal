@@ -4,7 +4,10 @@ from datetime import datetime
 from sqlalchemy import delete, func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.modules.email_verification.models import AuditLog, EmailVerificationToken
+from app.modules.email_verification.models import (
+    EmailVerificationToken,
+    UnverifiedAccountPurgeLog,
+)
 from app.modules.users.models import User
 
 
@@ -73,7 +76,9 @@ class EmailVerificationRepository:
     async def create_audit_log(
         self, *, event: str, subject_user_id: uuid.UUID, detail: str
     ) -> None:
-        self._session.add(AuditLog(event=event, subject_user_id=subject_user_id, detail=detail))
+        self._session.add(
+            UnverifiedAccountPurgeLog(event=event, subject_user_id=subject_user_id, detail=detail)
+        )
 
     async def commit(self) -> None:
         await self._session.commit()

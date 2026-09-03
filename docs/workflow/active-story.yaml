@@ -1,5 +1,19 @@
-active_story: US-3.1
+active_story: US-3.3
 
+# US-3.3 (View Audit Information, Epic 3) started 2026-09-02: US-3.1
+# (Manage Users) reached PR #12, confirmed MERGED to main (`gh pr list`).
+# US-3.3 depends on US-3.2's audit:read permission scope (merged, PR #9)
+# and references "US-1.4 DA-AC9 retention job" for AU-AC8 (audit
+# survives account erasure) - DA-AC9 exists in the US-004 spec (FR-9,
+# Permanent Deletion After Grace Period Expiry) but its own Enforcement
+# Matrix marks it `[manual]` with an open DPO sign-off question on
+# anonymization vs. hard-deletion, so whether an actual scheduled job
+# exists in code (as opposed to spec) needs verification during
+# CLARIFICATION rather than being assumed. A pre-existing draft spec
+# (docs/specifications/US-013-view-audit-information-spec.md) already
+# exists, predating this session. Starting fresh CLARIFICATION.
+
+# --- prior story: US-3.1 (DONE, reached PR, merged) ---
 # US-3.1 (Manage Users, Epic 3) started 2026-09-02: US-2.6 (Active
 # Sessions) reached PR #11, confirmed MERGED to main (`gh pr view 11`).
 # US-3.1 is split into 5 independently shippable slices (3.1.1 Read ...
