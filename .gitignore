@@ -36,3 +36,13 @@ dev-gui/
 
 # Hook logs (local dev artifacts, not part of the product)
 docs/hooks/
+
+# .graphifyignore
+node_modules/
+dist/
+*.generated.py
+
+# only index src/, ignore everything else
+*
+!src/
+!src/**
