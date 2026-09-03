@@ -1,0 +1,173 @@
+# =============================================================================
+# CANONICAL STORY LIFECYCLE STATUS REGISTRY
+# =============================================================================
+# Authoritative source for each Story's lifecycle status.
+# Owner: backlog-sync (updates this file atomically with
+#        docs/workflow/active-story.yaml). story-orchestrator updates the active
+#        Story's `state` on activation, COMPLETED, and ARCHIVED.
+#
+# Story Markdown files under docs/stories/ do NOT carry a mutable status field.
+#
+# state enum: BACKLOG | READY | IN_PROGRESS | COMPLETED | ARCHIVED
+#
+# `retired_id` records the pre-migration sequential identifier. It exists so
+# historical artifacts and docs/workflow/history.jsonl remain traceable. It is
+# NOT an alternative identifier: nothing new may use it.
+# =============================================================================
+version: 1
+
+source_default:
+  type: github_issue
+  repository: AndriiDobrovolskii/Customer_Portal
+
+stories:
+
+  # --- EPIC-1: Users --------------------------------------------------------
+  - id: US-1.1
+    retired_id: US-001
+    slug: register-user
+    path: docs/stories/US-1.1-register-user.md
+    epic: EPIC-1
+    title: Register User
+    state: COMPLETED
+    delivered_by: { pr: null, note: "Implemented before pipeline tracking (commits b6dc29e, ed6e2a9)" }
+
+  - id: US-1.2
+    retired_id: US-002
+    slug: verify-email
+    path: docs/stories/US-1.2-verify-email.md
+    epic: EPIC-1
+    title: Verify Email
+    state: COMPLETED
+    delivered_by: { pr: null, note: "Implemented before pipeline tracking (commit 90a612b)" }
+
+  - id: US-1.3
+    retired_id: US-003
+    slug: update-profile
+    path: docs/stories/US-1.3-update-profile.md
+    epic: EPIC-1
+    title: Update Profile
+    state: COMPLETED
+    delivered_by: { pr: null, note: "Implemented before pipeline tracking (commits 1f8d2a5, 1ee7dc5)" }
+
+  - id: US-1.4
+    retired_id: US-004
+    slug: deactivate-account
+    path: docs/stories/US-1.4-deactivate-account.md
+    epic: EPIC-1
+    title: Deactivate Account
+    state: COMPLETED
+    delivered_by: { pr: 1, note: "First story delivered through the full pipeline" }
+
+  # --- EPIC-2: Authentication ----------------------------------------------
+  - id: US-2.1
+    retired_id: US-005
+    slug: login
+    path: docs/stories/US-2.1-login.md
+    epic: EPIC-2
+    title: Login
+    state: COMPLETED
+    delivered_by: { pr: 2, note: null }
+
+  - id: US-2.2
+    retired_id: US-006
+    slug: logout
+    path: docs/stories/US-2.2-logout.md
+    epic: EPIC-2
+    title: Logout
+    state: COMPLETED
+    delivered_by: { pr: 5, note: "Includes a post-PR IDOR fix" }
+
+  - id: US-2.3
+    retired_id: US-007
+    slug: refresh-token
+    path: docs/stories/US-2.3-refresh-token.md
+    epic: EPIC-2
+    title: Refresh Token
+    state: COMPLETED
+    delivered_by: { pr: 6, note: null }
+
+  - id: US-2.4
+    retired_id: US-008
+    slug: password-reset
+    path: docs/stories/US-2.4-password-reset.md
+    epic: EPIC-2
+    title: Password Reset
+    state: COMPLETED
+    delivered_by: { pr: 8, note: "PR #7 auto-closed by #6's merge; delivered as #8" }
+
+  - id: US-2.5
+    retired_id: US-009
+    slug: mfa-totp
+    path: docs/stories/US-2.5-mfa-totp.md
+    epic: EPIC-2
+    title: Multi-Factor Authentication (TOTP)
+    state: COMPLETED
+    delivered_by: { pr: 10, note: "Paused mid-story for the US-3.2 role/scope dependency, then resumed" }
+
+  - id: US-2.6
+    retired_id: US-010
+    slug: active-sessions
+    path: docs/stories/US-2.6-active-sessions.md
+    epic: EPIC-2
+    title: Active Session Management
+    state: COMPLETED
+    delivered_by: { pr: 11, note: null }
+
+  # --- EPIC-3: Administration ----------------------------------------------
+  - id: US-3.1
+    retired_id: US-011
+    slug: manage-users
+    path: docs/stories/US-3.1-manage-users.md
+    epic: EPIC-3
+    title: Manage Users
+    state: COMPLETED
+    delivered_by: { pr: 12, note: "Story defines five slices US-3.1.1..US-3.1.5; delivered as one PR" }
+
+  - id: US-3.2
+    retired_id: US-012
+    slug: manage-roles
+    path: docs/stories/US-3.2-manage-roles.md
+    epic: EPIC-3
+    title: Manage Roles
+    state: COMPLETED
+    delivered_by: { pr: 9, note: "Built ahead of US-2.5 because everything downstream checks its scopes" }
+
+  - id: US-3.3
+    retired_id: US-013
+    slug: view-audit-information
+    path: docs/stories/US-3.3-view-audit-information.md
+    epic: EPIC-3
+    title: View Audit Information
+    state: COMPLETED
+    delivered_by: { pr: 13, note: "Last story delivered under the pre-migration harness vocabulary" }
+
+  # --- EPIC-4: Feedback / Support ------------------------------------------
+  - id: US-4.1
+    retired_id: US-014
+    slug: create-ticket
+    path: docs/stories/US-4.1-create-ticket.md
+    epic: EPIC-4
+    title: Support Tickets (Create)
+    state: BACKLOG
+    note: >
+      A draft specification and spec review exist but predate the current
+      codebase. CLARIFICATION runs fresh when this Story is activated.
+
+  - id: US-4.2
+    retired_id: US-015
+    slug: ticket-replies
+    path: docs/stories/US-4.2-ticket-replies.md
+    epic: EPIC-4
+    title: Ticket Replies
+    state: BACKLOG
+    note: "Draft specification predates the current codebase; depends on US-4.1."
+
+  - id: US-4.3
+    retired_id: US-016
+    slug: ticket-resolution
+    path: docs/stories/US-4.3-ticket-resolution.md
+    epic: EPIC-4
+    title: Ticket Resolution
+    state: BACKLOG
+    note: "Draft specification predates the current codebase; depends on US-4.2."

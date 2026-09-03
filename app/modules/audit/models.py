@@ -10,7 +10,7 @@ from app.db.base import Base
 
 
 class AuditLog(Base):
-    """New table (US-013-db-design.md), write target for this story's own
+    """New table (US-3.3-db-design.md), write target for this story's own
     two new event types only, per staged OD-14. No FK on `actor_id`/
     `target_id` — must survive account erasure (BR-007/AU-AC8), matching
     every existing audit table's precedent.

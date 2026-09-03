@@ -533,7 +533,7 @@ async def test_list_audit_logs_response_contains_no_named_secrets(
 ) -> None:
     # Arrange: this story's own 2 event types carry none of the 5 named
     # secret-shaped values — real AU-AC6 coverage is the CI grep over
-    # audit-write call sites (docs/tests/US-013-traceability-matrix.md),
+    # audit-write call sites (docs/tests/US-3.3-ac-test-matrix.md),
     # not this test; kept as a regression guard.
     admin = await _seed_user(db_session, email="secretchecker@example.com")
     token = await _seed_session_and_token(db_session, user_id=admin.id, scopes=_READ)

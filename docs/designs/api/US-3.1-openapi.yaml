@@ -1,0 +1,692 @@
+openapi: 3.0.3
+info:
+  title: Manage Users (US-3.1 / spec US-3.1) — fragment
+  version: "1.0"
+paths:
+  /v1/admin/users:
+    get:
+      operationId: listUsers
+      summary: Search and page through the user directory
+      tags: [admin, users]
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: q
+          in: query
+          required: false
+          schema:
+            type: string
+          description: Prefix/substring search term (FR-1). Matched field(s) not stated by the spec — see Open Questions.
+        - name: status
+          in: query
+          required: false
+          schema:
+            type: string
+            enum: [invited, active, deactivated]
+        - name: role
+          in: query
+          required: false
+          schema:
+            type: string
+          description: Filter by role name (source story's example query string includes it implicitly via the API Contract's `role` column reference; not exercised by any AC).
+        - name: cursor
+          in: query
+          required: false
+          schema:
+            type: string
+          description: Opaque pagination cursor from a previous response's `next_cursor` (FR-1). Encoding not stated by the spec — see Open Questions.
+        - name: limit
+          in: query
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+          description: >
+            Upper bound not stated by the spec beyond "limit=5000" being
+            explicitly rejected (FR-4). 100 is this contract's own choice,
+            not derived from the story — see Open Questions.
+      responses:
+        "200":
+          description: Cursor-paginated, filtered list (FR-1).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/UserListResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          description: Caller lacks `users:read` (FR-2).
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/InsufficientPermissionProblem"
+        "422":
+          description: "`limit` out of range, unknown `status`, or malformed `cursor` (FR-4)."
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ValidationFailedProblem"
+    post:
+      operationId: createUser
+      summary: Provision a new colleague's account by email invitation
+      tags: [admin, users]
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateUserRequest"
+      responses:
+        "201":
+          description: Account created in `invited` status; invitation token emailed (FR-5).
+          headers:
+            ETag:
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/UserRead"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          description: >
+            Caller lacks `users:write` (cross-cutting `insufficient-
+            permission`, same pattern as FR-2) or requests a role granting a
+            permission the caller doesn't hold (`privilege-escalation`,
+            FR-8, mechanism reused from US-3.2's `RoleService`).
+          content:
+            application/problem+json:
+              schema:
+                oneOf:
+                  - $ref: "#/components/schemas/InsufficientPermissionProblem"
+                  - $ref: "#/components/schemas/PrivilegeEscalationProblem"
+        "409":
+          description: An account already exists with that email, case-insensitive (FR-6, BR-001 atomic enforcement).
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/EmailAlreadyRegisteredProblem"
+        "422":
+          description: >
+            A `password` field (or any field outside `CreateUserRequest`'s
+            declared shape) was supplied (FR-7), or `email`/`display_name`/
+            `roles` fail their own type/format checks.
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ValidationFailedProblem"
+  /v1/admin/users/{id}:
+    get:
+      operationId: getUser
+      summary: Fetch a single user by id
+      tags: [admin, users]
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/UserId"
+      responses:
+        "200":
+          description: >
+            Same item shape `GET /v1/admin/users` returns for one entry,
+            plus an `ETag` header (FR-22; Open Decision OD-3, no source AC).
+          headers:
+            ETag:
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/UserRead"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          description: Caller lacks `users:read` (FR-23, mirrors FR-2).
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/InsufficientPermissionProblem"
+        "404":
+          description: Unknown user id (FR-23, mirrors FR-12).
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/NotFoundProblem"
+    patch:
+      operationId: updateUser
+      summary: Correct a user's whitelisted profile fields
+      tags: [admin, users]
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/UserId"
+        - name: If-Match
+          in: header
+          required: true
+          schema:
+            type: string
+          description: >
+            The target user's current ETag (FR-9). Computed over the
+            editable field set only (`display_name`, `locale`, `timezone`,
+            `avatar_url`) — the same mechanism and field set
+            `app/core/etag.py`'s `compute_profile_etag` already uses for
+            US-1.3's self-service profile update, minus `email`/
+            `pending_email` (out of scope for this endpoint).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateUserRequest"
+      responses:
+        "200":
+          description: Updated resource; one `admin_audit_log` row per changed field (FR-9, OD-1 columns).
+          headers:
+            ETag:
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/UserRead"
+        "400":
+          description: "`If-Match` header absent (FR-10)."
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/PreconditionRequiredProblem"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          description: Caller lacks `users:write` (mirrors FR-2's cross-cutting pattern).
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/InsufficientPermissionProblem"
+        "404":
+          description: Unknown user id (FR-12).
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/NotFoundProblem"
+        "412":
+          description: >
+            `If-Match` does not match the target's current ETag (FR-10).
+            Type slug `precondition-failed` reused from
+            `app/modules/profile/exceptions.py`'s identical precedent — not
+            named explicitly by the source story's Error Envelope slug
+            list, which only names `precondition-required` for the 400
+            case.
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/PreconditionFailedProblem"
+        "422":
+          description: >
+            Request body contains `id`, `created_at`, `email_verified`, or
+            `roles` (`immutable-field`, checked before schema validation,
+            mirroring `app/modules/profile/service.py`'s precedent) — or an
+            unknown/malformed field, including `email` (`validation-
+            failed`, since `email` is not in this endpoint's declared
+            request shape) (FR-11).
+          content:
+            application/problem+json:
+              schema:
+                oneOf:
+                  - $ref: "#/components/schemas/ImmutableFieldProblem"
+                  - $ref: "#/components/schemas/ValidationFailedProblem"
+  /v1/admin/users/{id}/deactivate:
+    post:
+      operationId: deactivateUser
+      summary: Deactivate an account and revoke its active sessions
+      tags: [admin, users]
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/UserId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/DeactivateUserRequest"
+      responses:
+        "200":
+          description: >
+            Deactivated; `revoke_before` set; `account_lifecycle_audit_log`
+            entry written including `reason` (FR-13, OD-2 column).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/UserRead"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          description: Caller lacks `users:write` (mirrors FR-2's cross-cutting pattern).
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/InsufficientPermissionProblem"
+        "404":
+          description: Unknown user id (FR-17b; no source AC, resolved by precedent with FR-12/FR-21).
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/NotFoundProblem"
+        "409":
+          description: >
+            Three distinct causes share this status, each its own `type`
+            slug: target already deactivated (`already-deactivated`, FR-14);
+            caller targets their own account (`cannot-target-self`, FR-15);
+            target is the sole remaining active admin (`last-admin`, FR-16,
+            mechanism reused from US-3.2's `RoleService`).
+          content:
+            application/problem+json:
+              schema:
+                oneOf:
+                  - $ref: "#/components/schemas/AlreadyDeactivatedProblem"
+                  - $ref: "#/components/schemas/CannotTargetSelfProblem"
+                  - $ref: "#/components/schemas/LastAdminProblem"
+        "422":
+          description: "`reason` field missing or empty (FR-13's `required {reason}`)."
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ValidationFailedProblem"
+    delete:
+      operationId: deleteUserNotAllowed
+      summary: Permanently deleting a user is never exposed
+      tags: [admin, users]
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/UserId"
+      responses:
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "405":
+          description: >
+            Returned for any authenticated caller regardless of role or
+            permission scope — erasure belongs only to the US-1.4 DA-AC9
+            retention job (FR-17). MU-AC17's "any actor" is read as "any
+            authenticated actor, regardless of permission," not as
+            overriding MU-AC3's blanket 401-for-anonymous rule (resolved
+            2026-09-02, see US-3.1-api-design.md).
+  /v1/admin/users/{id}/resend-invite:
+    post:
+      operationId: resendInvite
+      summary: Reissue an invitation whose link expired
+      tags: [admin, users]
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/UserId"
+      responses:
+        "202":
+          description: Fresh 24-hour token emailed; prior unconsumed token invalidated (FR-18).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ResendInviteResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          description: Caller lacks `users:write`, denied attempt audited (FR-21).
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/InsufficientPermissionProblem"
+        "404":
+          description: Unknown user id (FR-21).
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/NotFoundProblem"
+        "409":
+          description: Target status is `active` or `deactivated`, not `invited` (FR-19).
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/InvalidStateTransitionProblem"
+        "429":
+          description: >
+            Resent within the last 60 seconds, or the per-account 5/hour
+            cap exceeded (FR-20). `Retry-After` mechanism reused from
+            `app/modules/email_verification/exceptions.py`'s
+            `TooManyAttemptsError` precedent.
+          headers:
+            Retry-After:
+              schema:
+                type: integer
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/TooManyRequestsProblem"
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+  parameters:
+    UserId:
+      name: id
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+  responses:
+    Unauthorized:
+      description: No valid access token — cross-cutting for every `/v1/admin/*` endpoint (FR-3).
+      content:
+        application/problem+json:
+          schema:
+            $ref: "#/components/schemas/UnauthorizedProblem"
+  schemas:
+    UserRead:
+      type: object
+      required: [id, email, display_name, status, roles, created_at, last_login_at]
+      properties:
+        id:
+          type: string
+          format: uuid
+        email:
+          type: string
+        display_name:
+          type: string
+          nullable: true
+        status:
+          type: string
+          enum: [invited, active, deactivated]
+        roles:
+          type: array
+          items:
+            type: string
+        created_at:
+          type: string
+          format: date-time
+        last_login_at:
+          type: string
+          format: date-time
+          nullable: true
+      description: >
+        Shared item shape for list entries (FR-1), single-fetch (FR-22),
+        create response (FR-5), update response (FR-9), and deactivate
+        response (FR-13). No password hash, token, or credential material,
+        per FR-1's explicit statement and NFR-012.
+    UserListResponse:
+      type: object
+      required: [items]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/UserRead"
+        next_cursor:
+          type: string
+          nullable: true
+          description: >
+            Present when another page exists. Envelope field names are this
+            contract's own choice, not stated by the spec — see Open
+            Questions in US-3.1-api-design.md.
+    CreateUserRequest:
+      type: object
+      required: [email, display_name, roles]
+      additionalProperties: false
+      properties:
+        email:
+          type: string
+          format: email
+        display_name:
+          type: string
+        roles:
+          type: array
+          items:
+            type: string
+          description: Role names the caller must already hold every granted permission of (FR-8).
+      description: >
+        Deliberately has no `password` property — any request body
+        containing one is rejected as an unknown field under this schema's
+        `additionalProperties: false` (FR-7), with no separate check
+        needed.
+    UpdateUserRequest:
+      type: object
+      required: [reason]
+      additionalProperties: false
+      properties:
+        display_name:
+          type: string
+          nullable: true
+        locale:
+          type: string
+          nullable: true
+        timezone:
+          type: string
+          nullable: true
+        avatar_url:
+          type: string
+          nullable: true
+        reason:
+          type: string
+          minLength: 1
+          description: >
+            Required (planner resolution 2026-09-02, see
+            US-3.1-implementation-plan.md Architectural Change #4):
+            MU-AC9 requires each admin_audit_log row to carry a reason
+            (OD-1's new column); leaving this optional would make that
+            column silently always-NULL in practice.
+      description: >
+        Editable whitelist reused verbatim from US-1.3's `ProfileUpdate`
+        schema, minus `email`/`current_password` (email change is out of
+        scope for this endpoint — see Out of Scope), plus `reason`. `id`,
+        `created_at`, `email_verified`, and `roles` are deliberately not
+        declared here; submitting them is checked against the raw request
+        body before Pydantic validation (mirroring
+        `app/modules/profile/service.py`'s `_IMMUTABLE_FIELD_NAMES` check)
+        so they resolve to `immutable-field` rather than
+        `validation-failed`.
+    DeactivateUserRequest:
+      type: object
+      required: [reason]
+      additionalProperties: false
+      properties:
+        reason:
+          type: string
+          minLength: 1
+    ResendInviteResponse:
+      type: object
+      properties: {}
+      description: Generic body per FR-18 — no fields specified by the story beyond "a generic body".
+    UnauthorizedProblem:
+      allOf:
+        - $ref: "#/components/schemas/ProblemBase"
+      properties:
+        type:
+          type: string
+          example: ".../errors/unauthorized"
+        status:
+          type: integer
+          example: 401
+      description: Cross-cutting slug shared by every authenticated endpoint in this project.
+    InsufficientPermissionProblem:
+      allOf:
+        - $ref: "#/components/schemas/ProblemBase"
+      properties:
+        type:
+          type: string
+          example: ".../errors/insufficient-permission"
+        status:
+          type: integer
+          example: 403
+      description: Introduced by this story (FR-2), reused across every admin-gated endpoint including US-3.2's.
+    PrivilegeEscalationProblem:
+      allOf:
+        - $ref: "#/components/schemas/ProblemBase"
+      properties:
+        type:
+          type: string
+          example: ".../errors/privilege-escalation"
+        status:
+          type: integer
+          example: 403
+      description: Introduced by this story (FR-8).
+    EmailAlreadyRegisteredProblem:
+      allOf:
+        - $ref: "#/components/schemas/ProblemBase"
+      properties:
+        type:
+          type: string
+          example: ".../errors/email-already-registered"
+        status:
+          type: integer
+          example: 409
+      description: Introduced by this story (FR-6); slug shared with US-1.1 FR-2's registration path per BR-001.
+    CannotTargetSelfProblem:
+      allOf:
+        - $ref: "#/components/schemas/ProblemBase"
+      properties:
+        type:
+          type: string
+          example: ".../errors/cannot-target-self"
+        status:
+          type: integer
+          example: 409
+      description: Introduced by this story (FR-15); same slug US-3.2 uses for its own self-target check (FR-15/US-3.2's cannot-target-self), reused here.
+    LastAdminProblem:
+      allOf:
+        - $ref: "#/components/schemas/ProblemBase"
+      properties:
+        type:
+          type: string
+          example: ".../errors/last-admin"
+        status:
+          type: integer
+          example: 409
+      description: Introduced by this story (FR-16), matches the source story's Error Envelope example verbatim; slug shared with US-3.2's identical check.
+    AlreadyDeactivatedProblem:
+      allOf:
+        - $ref: "#/components/schemas/ProblemBase"
+      properties:
+        type:
+          type: string
+          example: ".../errors/already-deactivated"
+        status:
+          type: integer
+          example: 409
+      description: Introduced by this story (FR-14).
+    InvalidStateTransitionProblem:
+      allOf:
+        - $ref: "#/components/schemas/ProblemBase"
+      properties:
+        type:
+          type: string
+          example: ".../errors/invalid-state-transition"
+        status:
+          type: integer
+          example: 409
+      description: Introduced by this story (FR-19).
+    NotFoundProblem:
+      allOf:
+        - $ref: "#/components/schemas/ProblemBase"
+      properties:
+        type:
+          type: string
+          example: ".../errors/not-found"
+        status:
+          type: integer
+          example: 404
+      description: Introduced by this story (FR-12), reused for FR-17b/FR-21/FR-23.
+    ValidationFailedProblem:
+      allOf:
+        - $ref: "#/components/schemas/ProblemBase"
+      properties:
+        type:
+          type: string
+          example: ".../errors/validation-failed"
+        status:
+          type: integer
+          example: 422
+        errors:
+          type: array
+          items:
+            type: object
+            required: [field, message, code]
+            properties:
+              field:
+                type: string
+              message:
+                type: string
+              code:
+                type: string
+      description: Reused cross-project slug and shape (`app/core/exceptions.py`'s `FieldError`), not new here.
+    ImmutableFieldProblem:
+      allOf:
+        - $ref: "#/components/schemas/ProblemBase"
+      properties:
+        type:
+          type: string
+          example: ".../errors/immutable-field"
+        status:
+          type: integer
+          example: 422
+      description: Introduced by this story (FR-11); mechanism reused from `app/modules/profile/exceptions.py`'s `ImmutableFieldError`.
+    PreconditionRequiredProblem:
+      allOf:
+        - $ref: "#/components/schemas/ProblemBase"
+      properties:
+        type:
+          type: string
+          example: ".../errors/precondition-required"
+        status:
+          type: integer
+          example: 400
+      description: Introduced by this story (FR-10); slug and mechanism reused verbatim from `app/modules/profile/exceptions.py`'s `PreconditionRequiredError`.
+    PreconditionFailedProblem:
+      allOf:
+        - $ref: "#/components/schemas/ProblemBase"
+      properties:
+        type:
+          type: string
+          example: ".../errors/precondition-failed"
+        status:
+          type: integer
+          example: 412
+      description: >
+        FR-10 (no source AC slug name — see the 412 response description
+        above); mechanism reused verbatim from
+        `app/modules/profile/exceptions.py`'s `PreconditionFailedError`.
+    TooManyRequestsProblem:
+      allOf:
+        - $ref: "#/components/schemas/ProblemBase"
+      properties:
+        type:
+          type: string
+          example: ".../errors/too-many-requests"
+        status:
+          type: integer
+          example: 429
+      description: >
+        FR-20 (no source AC slug name — the story's Error Envelope slug
+        list does not include a 429 slug); mechanism reused from
+        `app/modules/email_verification/exceptions.py`'s
+        `TooManyAttemptsError`.
+    ProblemBase:
+      type: object
+      description: RFC 7807 problem body. `type` is an absolute/relative URI ending in the slug named per response.
+      required: [type, title, status, detail, instance]
+      properties:
+        type:
+          type: string
+        title:
+          type: string
+        status:
+          type: integer
+        detail:
+          type: string
+        instance:
+          type: string
+          example: /v1/admin/users/{id}

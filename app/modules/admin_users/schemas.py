@@ -6,7 +6,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 class UserRead(BaseModel):
     """Shared item shape for list entries, single-fetch, create/update/
-    deactivate responses (US-011-openapi.yaml `UserRead`). No password
+    deactivate responses (US-3.1-openapi.yaml `UserRead`). No password
     hash, token, or credential material, per FR-1/NFR-012.
     """
 

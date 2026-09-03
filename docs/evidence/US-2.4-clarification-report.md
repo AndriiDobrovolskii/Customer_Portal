@@ -12,10 +12,10 @@ A Customer who forgot their password requests a reset link by email, then submit
 
 - Token shape, TTL (30 min), single-use, hash-only storage, and invalidation of any prior unconsumed token: fully specified, explicitly modeled on `email_verification_tokens` (US-1.2).
 - Anti-enumeration requirement (PR-AC3) is a direct extension of the already-established `BR-005` pattern (login, email-verification resend, and now password-reset request all share this discipline).
-- Post-reset session/refresh revocation (PR-AC2) reuses the existing `revoke_before:{user_id}` mechanism verbatim — already documented as one of its triggers in `docs/product/business-glossary.md`'s **Revocation** entry, citing this story by its pre-existing spec ID (`US-008` FR-2).
+- Post-reset session/refresh revocation (PR-AC2) reuses the existing `revoke_before:{user_id}` mechanism verbatim — already documented as one of its triggers in `docs/product/business-glossary.md`'s **Revocation** entry, citing this story by its pre-existing spec ID (`US-2.4` FR-2).
 - Password policy (12 chars, breached-list rejection, not-equal-to-current) and its 422 handling, including "don't consume the token on a policy failure," are unambiguous.
 - Error envelope and `type_slugs` follow the same RFC 7807 pattern used throughout Epic 2.
-- A pre-existing spec (`docs/specifications/US-008-password-reset-spec.md`, 2026-08-22) already covers this story in detail, drafted before US-2.1/2.2/2.3 were actually implemented — same situation as those three stories' own clarification rounds. Re-reading it against the now-real codebase resolved both of its own unresolved Open Questions by precedent (see below) and surfaced 3 new items the original draft couldn't have anticipated, since the infrastructure it would reuse didn't exist yet in August.
+- A pre-existing spec (`docs/specifications/US-2.4-spec.md`, 2026-08-22) already covers this story in detail, drafted before US-2.1/2.2/2.3 were actually implemented — same situation as those three stories' own clarification rounds. Re-reading it against the now-real codebase resolved both of its own unresolved Open Questions by precedent (see below) and surfaced 3 new items the original draft couldn't have anticipated, since the infrastructure it would reuse didn't exist yet in August.
 
 ## Resolved by Precedent (no Open Decision needed)
 
@@ -34,4 +34,4 @@ All three resolved by the user 2026-09-01, recommended option accepted throughou
 
 ## Verdict
 
-**Ready for Specification.** All Open Decisions resolved 2026-09-01 — see `docs/decisions/US-2.4-open-decisions.md`. Advancing to SPECIFICATION: `story-spec-writer` revising the existing `US-008-password-reset-spec.md` to incorporate OD-1–3 plus the two precedent-resolved items above.
+**Ready for Specification.** All Open Decisions resolved 2026-09-01 — see `docs/decisions/US-2.4-open-decisions.md`. Advancing to SPECIFICATION: `story-spec-writer` revising the existing `US-2.4-password-reset-spec.md` to incorporate OD-1–3 plus the two precedent-resolved items above.

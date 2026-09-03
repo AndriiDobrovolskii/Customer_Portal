@@ -14,7 +14,7 @@ Create executable evidence that an implementation satisfies a story's Acceptance
 ```
 Precondition: spec review, API design, and DB design are approved for the story.
 Input Artifacts: docs/specifications/<StoryId>-spec.md, docs/designs/api/<StoryId>-openapi.yaml, docs/designs/database/<StoryId>-entity-model.md, docs/plans/<StoryId>-implementation-plan.md (if it exists).
-Output Artifacts: tests/unit/modules/<module>/*, tests/integration/modules/<module>/*, docs/tests/<StoryId>-traceability-matrix.md.
+Output Artifacts: tests/unit/modules/<module>/*, tests/integration/modules/<module>/*, docs/tests/<StoryId>-ac-test-matrix.md.
 ```
 
 ## Required Context
@@ -49,7 +49,7 @@ Spec review, API design, and DB design should be approved before writing tests a
 ## Output Artifacts
 
 - Test source files under `tests/unit/modules/<module>/` and `tests/integration/modules/<module>/`, following this project's existing naming: `test_<unit>_<scenario>_<expected>`.
-- `docs/tests/<StoryId>-traceability-matrix.md` — AC ID → test function(s), plus which are unit vs. integration.
+- `docs/tests/<StoryId>-ac-test-matrix.md` — AC ID → test function(s), plus which are unit vs. integration.
 
 ## Constraints
 
@@ -59,3 +59,107 @@ Spec review, API design, and DB design should be approved before writing tests a
 ## Completion Criteria
 
 Complete only when every AC has at least one passing-shaped test (happy path, negative, boundary as applicable), every protected endpoint has the four security cases from `AGENTS.md` §5, the traceability matrix is written, and no integration test uses a forbidden mock.
+
+---
+
+# Harness Contract
+
+This skill owns the `TEST_WRITING` stage of `docs/workflow/stage-map.yaml`.
+
+**This stage now produces three artifacts.** The single traceability matrix
+described above is split, and an evidence report is added:
+
+- `test_strategy` (`docs/tests/<StoryId>-test-strategy.md`) — what will be
+  tested at which level and why: unit vs integration split, the fakes needed,
+  the fixtures, and any statement-count ceiling per `AGENTS.md` §5.
+- `ac_test_matrix` (`docs/tests/<StoryId>-ac-test-matrix.md`) — the AC ID →
+  test function mapping. This is the migrated home of the old traceability
+  matrix; historical stories have only this one.
+- `test_generation_report` (`docs/evidence/<StoryId>-test-generation-report.md`)
+  — what was actually generated: files written, tests added, anything an AC
+  needed that could not be tested yet and why.
+
+All three carry front matter per `artifact-schema.md`.
+
+## Canonical sources
+
+- Workflow / stage / loop-back keys: `docs/workflow/stage-map.yaml` (`TEST_WRITING`).
+- Artifact paths: `docs/workflow/artifact-paths.yaml` - **authoritative**.
+  Resolve `story`, `specification`, `api_design`, `openapi`, `database_design`, `entity_model`, `impact_analysis`, `implementation_plan`, `task_breakdown`, `plan_review`. Any path shown elsewhere in this skill is illustrative;
+  the registry wins.
+- Status vocabularies: `docs/workflow/artifact-lifecycle.md`.
+- Front matter and the staleness contract: `docs/workflow/artifact-schema.md`.
+- Workflow state: `docs/workflow/state-schema.md`.
+
+## Inputs (registry keys)
+
+- `story`
+- `specification`
+- `api_design`  (conditional - absent when its design stage recorded `NOT_APPLICABLE`)
+- `openapi`  (conditional - absent when its design stage recorded `NOT_APPLICABLE`)
+- `database_design`  (conditional - absent when its design stage recorded `NOT_APPLICABLE`)
+- `entity_model`  (conditional - absent when its design stage recorded `NOT_APPLICABLE`)
+- `impact_analysis`
+- `implementation_plan`
+- `task_breakdown`
+- `plan_review`
+
+## Preconditions (harness)
+
+- Every consumed artifact is current: `status` is not `SUPERSEDED` or
+  `ARCHIVED`, and the `version` this skill records in its own `inputs` is the
+  version actually on disk. A stale input is `BLOCKED`, not a caveat.
+- No `TODO` / `TBD` / `FIXME` / unresolved blocking Open Decision in an
+  `APPROVED` input that this stage depends on.
+- `docs/workflow/active-story.yaml` and `docs/workflow/workflow-state.yaml`
+  agree on which story is active.
+
+## Result Envelope
+
+Return exactly this. `story-orchestrator` records the transition; this skill
+never writes `docs/workflow/workflow-state.yaml`.
+
+```yaml
+result:
+  verdict: PASS | CHANGES_REQUIRED | BLOCKED
+  stage: TEST_WRITING
+  story: <StoryId>
+  artifact_status: DRAFT
+  artifacts:
+    - docs/tests/<StoryId>-test-strategy.md
+    - docs/tests/<StoryId>-ac-test-matrix.md
+    - docs/evidence/<StoryId>-test-generation-report.md
+  next_stage: IMPLEMENTATION
+  loop_back_stage: null
+  blocking_issues: []
+  non_blocking_findings: []
+```
+
+Loop-back keys valid for this stage (from `stage-map.yaml`; naming any other key
+is rejected and holds the stage as `BLOCKED`):
+
+| key | `loop_back_stage` |
+|---|---|
+| `changes_required_tests` | `TEST_WRITING` |
+| `invalid_specification` | `SPECIFICATION` |
+| `invalid_api_design` | `API_DESIGN` |
+| `invalid_database_design` | `DB_DESIGN` |
+
+- `PASS` - every acceptance criterion has at least one test that asserts its
+  stated behavior, and the matrix rows name test functions that exist.
+- `CHANGES_REQUIRED` - use the `invalid_*` keys when an upstream artifact is
+  untestable as written; `changes_required_tests` when only the tests are.
+- `BLOCKED` - a mandatory input is missing or stale.
+
+## Prohibited (harness)
+
+- Do not update workflow state (`workflow-state.yaml`, `active-story.yaml`,
+  `history.jsonl`) - `story-orchestrator` owns those.
+- Do not produce an artifact this skill does not own in
+  `docs/workflow/artifact-paths.yaml`.
+- Do not resolve Open Decisions.
+- Do not emit a retired verdict (`Pass`, `Fail`, `Pass with Issues`,
+  `APPROVED`, ...) - see `artifact-lifecycle.md` section 2.
+- Do not use the retired sequential story ids (`US-0NN`) or retired stage
+  identifiers (`DESIGN`, `PLANNING`, `TESTS`, `VERIFICATION`, `PR`).
+- Do not create commits, branches, or Pull Requests.

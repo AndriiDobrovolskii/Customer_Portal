@@ -33,7 +33,7 @@ class UserRoleRepository:
     deliberate, narrow exception to "cross-module calls go service ->
     service" (AGENTS.md SS3), justified by FR-7's explicit requirement
     that the last-admin check and the role-set update run in one
-    transaction. See docs/impact-analysis/US-012-impact-analysis.md's
+    transaction. See docs/impact-analysis/US-3.2-impact-analysis.md's
     2026-09-01 resolution. Do not copy this pattern elsewhere without the
     same justification.
     """
@@ -97,7 +97,7 @@ class UserRoleRepository:
         await self._session.flush()
 
     async def list_role_grants_for_user(self, user_id: uuid.UUID) -> list[tuple[str, datetime]]:
-        """US-009 FR-6: role name + granted_at pairs, a superset of
+        """US-2.5 FR-6: role name + granted_at pairs, a superset of
         list_role_names_for_user (which resolve_scopes_for_user still uses
         and doesn't need timestamps for).
         """

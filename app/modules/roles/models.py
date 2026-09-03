@@ -49,8 +49,8 @@ class UserRole(Base):
     role_id: Mapped[uuid.UUID] = mapped_column(
         ForeignKey("roles.id", ondelete="CASCADE"), primary_key=True, index=True
     )
-    # US-2.5 spec-review resolution (not part of the original US-012
-    # design): the 14-day MFA-enrolment grace period (US-009 FR-6) needs a
+    # US-2.5 spec-review resolution (not part of the original US-3.2
+    # design): the 14-day MFA-enrolment grace period (US-2.5 FR-6) needs a
     # data source for "since the role was granted". Set explicitly by
     # `replace_for_user` on every written row, not left to rely solely on
     # the server default.
@@ -60,7 +60,7 @@ class UserRole(Base):
 
 
 class AdminAuditLog(Base):
-    """Not in the original US-012 DB design — added during T4 (service)
+    """Not in the original US-3.2 DB design — added during T4 (service)
     because MR-AC1/MR-AC6 explicitly require an `admin_audit_log` entry,
     and `docs/product/business-glossary.md`'s "Audit Log" entry already
     documents `admin_audit_log` as one of this system's five domain audit

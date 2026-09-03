@@ -1,6 +1,6 @@
 ---
 name: story-spec-reviewer
-description: Reviews a generated Story Specification artifact (e.g. docs/specifications/US-001-spec.md, typically produced by story-spec-writer) against its original User Story file (e.g. docs/stories/US-001.md, containing business context and Acceptance Criteria) to check completeness and accuracy before implementation begins. Use this whenever the user asks to "review a spec," "check a spec against the story," "audit this specification," "verify AC coverage," or wants a QA pass on a spec before handing it to engineering — even if they just paste two file paths (a story and a spec) and ask "does this spec match?" Produces a structured Markdown review report saved under docs/reviews/specifications/, checking for: ambiguous or non-verifiable statements, contradictions with the original business requirements, missing Acceptance Criteria coverage, scope creep beyond the original story, and missing edge cases/boundary conditions/error handling. This is the downstream QA counterpart to story-spec-writer — it audits an existing spec, it does not draft or rewrite one. Trigger this for requests about spec review, spec audits, AC coverage checks, or spec-vs-story validation; not for writing a spec from scratch (that's story-spec-writer) and not for reviewing code or pull requests.
+description: Reviews a generated Story Specification artifact (e.g. docs/specifications/US-1.1-spec.md, typically produced by story-spec-writer) against its original User Story file (e.g. docs/stories/<StoryId>-<slug>.md, containing business context and Acceptance Criteria) to check completeness and accuracy before implementation begins. Use this whenever the user asks to "review a spec," "check a spec against the story," "audit this specification," "verify AC coverage," or wants a QA pass on a spec before handing it to engineering — even if they just paste two file paths (a story and a spec) and ask "does this spec match?" Produces a structured Markdown review report saved under docs/reviews/specifications/, checking for: ambiguous or non-verifiable statements, contradictions with the original business requirements, missing Acceptance Criteria coverage, scope creep beyond the original story, and missing edge cases/boundary conditions/error handling. This is the downstream QA counterpart to story-spec-writer — it audits an existing spec, it does not draft or rewrite one. Trigger this for requests about spec review, spec audits, AC coverage checks, or spec-vs-story validation; not for writing a spec from scratch (that's story-spec-writer) and not for reviewing code or pull requests.
 ---
 
 # Story Spec Reviewer
@@ -36,8 +36,8 @@ Output Artifacts: docs/reviews/specifications/<StoryId>-spec-review.md.
 
 Two files are required:
 
-1. **Original User Story** — contains business context and Acceptance Criteria (e.g. `docs/stories/US-001.md`). This is the source of truth for scope.
-2. **Generated Story Specification** — the artifact being reviewed (e.g. `docs/specifications/US-001-spec.md`).
+1. **Original User Story** — contains business context and Acceptance Criteria (e.g. `docs/stories/<StoryId>-<slug>.md`). This is the source of truth for scope.
+2. **Generated Story Specification** — the artifact being reviewed (e.g. `docs/specifications/US-1.1-spec.md`).
 
 If the user gives only one file, or only describes one verbally, ask for the other rather than guessing — a review is meaningless without both sides of the comparison. If either file can't be found at the path given, say so and stop; don't review from memory or assumption.
 
@@ -82,7 +82,7 @@ Based on the findings, assign one verdict:
 
 ### 9. Write and save the report
 
-Build the report from `assets/template.md` (read it before drafting so structure stays consistent across reviews). Save it to `docs/reviews/specifications/<story-id>-spec-review.md` (e.g. `docs/reviews/specifications/US-001-spec-review.md`), creating the directory if needed. If a review already exists at that path, treat this run as the canonical update (overwrite it), and tell the user you replaced a prior review — reviews get re-run as specs are revised.
+Build the report from `assets/template.md` (read it before drafting so structure stays consistent across reviews). Save it to `docs/reviews/specifications/<story-id>-spec-review.md` (e.g. `docs/reviews/specifications/US-1.1-spec-review.md`), creating the directory if needed. If a review already exists at that path, treat this run as the canonical update (overwrite it), and tell the user you replaced a prior review — reviews get re-run as specs are revised.
 
 ## Output Specification & Markdown Report Template
 
@@ -109,3 +109,82 @@ Before considering the review complete, confirm:
 - [ ] The overall verdict (Pass / Pass with Issues / Fail) is consistent with the findings (any Missing/Partially Covered AC or contradiction forces Fail).
 - [ ] The report was saved to `docs/reviews/specifications/<story-id>-spec-review.md`, not only shown in chat.
 - [ ] The chat reply summarizes the verdict and points to the saved file path.
+
+---
+
+# Harness Contract
+
+This skill owns the `SPEC_REVIEW` stage of `docs/workflow/stage-map.yaml`.
+
+## Canonical sources
+
+- Workflow / stage / loop-back keys: `docs/workflow/stage-map.yaml` (`SPEC_REVIEW`).
+- Artifact paths: `docs/workflow/artifact-paths.yaml` - **authoritative**.
+  Resolve `story`, `specification`, `open_decisions`. Any path shown elsewhere in this skill is illustrative;
+  the registry wins.
+- Status vocabularies: `docs/workflow/artifact-lifecycle.md`.
+- Front matter and the staleness contract: `docs/workflow/artifact-schema.md`.
+- Workflow state: `docs/workflow/state-schema.md`.
+
+## Inputs (registry keys)
+
+- `story`
+- `specification`
+- `open_decisions`
+
+## Preconditions (harness)
+
+- Every consumed artifact is current: `status` is not `SUPERSEDED` or
+  `ARCHIVED`, and the `version` this skill records in its own `inputs` is the
+  version actually on disk. A stale input is `BLOCKED`, not a caveat.
+- No `TODO` / `TBD` / `FIXME` / unresolved blocking Open Decision in an
+  `APPROVED` input that this stage depends on.
+- `docs/workflow/active-story.yaml` and `docs/workflow/workflow-state.yaml`
+  agree on which story is active.
+
+## Result Envelope
+
+Return exactly this. `story-orchestrator` records the transition; this skill
+never writes `docs/workflow/workflow-state.yaml`.
+
+```yaml
+result:
+  verdict: PASS | CHANGES_REQUIRED | BLOCKED
+  stage: SPEC_REVIEW
+  story: <StoryId>
+  artifact_status: DRAFT
+  artifacts:
+    - docs/reviews/specifications/<StoryId>-spec-review.md
+  next_stage: HUMAN_SPEC_APPROVAL
+  loop_back_stage: null
+  blocking_issues: []
+  non_blocking_findings: []
+```
+
+Loop-back keys valid for this stage (from `stage-map.yaml`; naming any other key
+is rejected and holds the stage as `BLOCKED`):
+
+| key | `loop_back_stage` |
+|---|---|
+| `changes_required` | `SPECIFICATION` |
+| `changes_required_clarification` | `CLARIFICATION` |
+
+- `PASS` - no Critical or Major findings; the specification is complete,
+  testable, and free of invented requirements.
+- `CHANGES_REQUIRED` - Critical or Major findings. Use
+  `changes_required_clarification` when the gap is upstream of the spec (the
+  story itself is ambiguous), `changes_required` otherwise.
+- `BLOCKED` - a mandatory input is missing or stale.
+
+## Prohibited (harness)
+
+- Do not update workflow state (`workflow-state.yaml`, `active-story.yaml`,
+  `history.jsonl`) - `story-orchestrator` owns those.
+- Do not produce an artifact this skill does not own in
+  `docs/workflow/artifact-paths.yaml`.
+- Do not resolve Open Decisions.
+- Do not emit a retired verdict (`Pass`, `Fail`, `Pass with Issues`,
+  `APPROVED`, ...) - see `artifact-lifecycle.md` section 2.
+- Do not use the retired sequential story ids (`US-0NN`) or retired stage
+  identifiers (`DESIGN`, `PLANNING`, `TESTS`, `VERIFICATION`, `PR`).
+- Do not create commits, branches, or Pull Requests.

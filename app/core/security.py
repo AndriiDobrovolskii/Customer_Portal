@@ -100,7 +100,7 @@ class AccessTokenClaims:
     jti: uuid.UUID
     exp: datetime
     scopes: list[str]
-    # US-009 FR-6/FR-7: true only while the account must complete MFA
+    # US-2.5 FR-6/FR-7: true only while the account must complete MFA
     # enrolment before reaching any endpoint other than enroll/activate.
     mfa_enrollment_required: bool = False
 
@@ -154,7 +154,7 @@ def generate_mfa_token() -> tuple[str, str]:
     """Returns (raw_token, token_hash), same shape as
     generate_refresh_token() - the raw value is returned to the caller
     once (in the login-challenge response body), only the SHA-256 hash is
-    ever persisted (as a Valkey key, per US-009 FR-3/OD resolution).
+    ever persisted (as a Valkey key, per US-2.5 FR-3/OD resolution).
     """
     raw_token = secrets.token_urlsafe(32)
     return raw_token, hash_mfa_token(raw_token)
@@ -191,7 +191,7 @@ def encode_totp_secret(secret: bytes) -> str:
 def build_otpauth_uri(*, secret: bytes, account_email: str) -> str:
     """otpauth:// URI encoding the RFC 6238 params explicitly (algorithm,
     digits, period) rather than relying on a client's defaults (spec-
-    review Medium finding, US-009 FR-1) - the client renders this into a
+    review Medium finding, US-2.5 FR-1) - the client renders this into a
     QR code itself (OD-3), no separate image field.
     """
     encoded_secret = encode_totp_secret(secret)

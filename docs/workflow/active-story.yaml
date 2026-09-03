@@ -1,81 +1,26 @@
-active_story: US-3.3
+# Identity and activation metadata of the active Story.
+# Schema: docs/workflow/state-schema.md
+# Written by backlog-sync (directly, or delegated by story-orchestrator during
+# activation). Stage skills never write this file.
 
-# US-3.3 (View Audit Information, Epic 3) started 2026-09-02: US-3.1
-# (Manage Users) reached PR #12, confirmed MERGED to main (`gh pr list`).
-# US-3.3 depends on US-3.2's audit:read permission scope (merged, PR #9)
-# and references "US-1.4 DA-AC9 retention job" for AU-AC8 (audit
-# survives account erasure) - DA-AC9 exists in the US-004 spec (FR-9,
-# Permanent Deletion After Grace Period Expiry) but its own Enforcement
-# Matrix marks it `[manual]` with an open DPO sign-off question on
-# anonymization vs. hard-deletion, so whether an actual scheduled job
-# exists in code (as opposed to spec) needs verification during
-# CLARIFICATION rather than being assumed. A pre-existing draft spec
-# (docs/specifications/US-013-view-audit-information-spec.md) already
-# exists, predating this session. Starting fresh CLARIFICATION.
+version: 1
 
-# --- prior story: US-3.1 (DONE, reached PR, merged) ---
-# US-3.1 (Manage Users, Epic 3) started 2026-09-02: US-2.6 (Active
-# Sessions) reached PR #11, confirmed MERGED to main (`gh pr view 11`).
-# US-3.1 is split into 5 independently shippable slices (3.1.1 Read ...
-# 3.1.5 Resend invite) per its story file; it depends on US-1.4 (DA-AC10
-# invariant) and US-3.2's permission-scope system (users:read/
-# users:write), both already merged to main. A pre-existing draft spec
-# (US-011, drafted 2026-08-22) and review already exist, predating the
-# real US-1.4/US-3.2 codebase. Starting fresh CLARIFICATION.
+active_story: null
+story_path: null
 
-# --- prior story: US-2.6 (DONE, reached PR, merged) ---
-# US-2.6 (Active Sessions, Epic 2) started 2026-09-02: US-2.5 (MFA/TOTP)
-# reached PR #10, confirmed MERGED to main (`gh pr view 10`). US-2.6
-# depends only on US-2.3's refresh-token family_id concept (already on
-# main) and US-2.2's revocation path - no dependency on US-2.5's MFA
-# work. Starting fresh CLARIFICATION.
+source:
+  type: local_only
+  repository: null
+  issue_number: null
+  issue_url: null
 
-# --- prior story: US-2.5 (DONE, reached PR, merged) ---
-# US-2.5 (MFA/TOTP, Epic 2) resumed 2026-09-01: US-3.2 (Manage Roles)
-# reached PR (GitHub PR #9, open, mergeable_state clean, not yet merged)
-# with every pipeline stage Pass (see docs/catalog/US-012-pipeline-status.md
-# and workflow-state.yaml history). Per the resume condition recorded
-# below, US-2.5's CLARIFICATION is being re-run against the
-# now-current codebase (checked out on feat/us-3.2-manage-roles, which
-# has the role/scope system US-3.2 actually shipped) before trusting
-# MF-AC6's assumptions, since PR #9 is not yet merged to main.
+activated_at: null
+activated_by: null
 
-# --- prior story: US-3.2 (DONE, reached PR) ---
-# US-3.2 (Manage Roles, Epic 3) reached PR (see docs/pr/US-012-pr-description.md,
-# every stage Pass). US-2.5 (MFA/TOTP)'s us-clarifier run on 2026-09-01
-# found a BLOCKING dependency (OD-1 in docs/decisions/US-2.5-open-decisions.md):
-# US-2.5 needs a role/permission-scope system that didn't exist in the
-# codebase yet, and this project's own docs/stories/README.md documents
-# US-3.2 as the prerequisite ("US-3.2 first - everything else checks its
-# scopes"). User chose 2026-09-01 to pause US-2.5 and build US-3.2 first.
+status: NOT_STARTED
 
-# --- prior story history retained for context ---
-# US-2.5 (MFA/TOTP, Epic 2) - CLARIFICATION ran 2026-09-01, verdict Not
-# Ready, blocked on US-3.2 dependency (see above). Story parked, not
-# abandoned; docs/decisions/US-2.5-open-decisions.md and
-# docs/evidence/US-2.5-clarification-report.md preserved for when work
-# resumes.
-# US-2.4 (Password Reset, Epic 2) reached PR with every stage Pass (see
-# docs/catalog/US-2.4-pipeline-status.md), was committed (c973548) and
-# merged as PR #8 (800a405) after #7 was auto-closed by #6's merge -
-# confirmed via `git log`, 2026-09-01.
-# US-2.3 (Refresh Token, Epic 2) reached PR with every stage Pass (see
-# docs/catalog/US-2.3-pipeline-status.md), was committed (c0fc4d8) and
-# opened as GitHub PR #6 (state: OPEN, unmerged) - confirmed via `gh pr
-# list` and `git log`, 2026-09-01. workflow-state.yaml/history.jsonl were
-# stale (never updated when the story actually completed in a prior
-# session) and were backfilled 2026-09-01 before advancing to US-2.4.
-# US-2.2 (Logout, Epic 2) reached PR with every stage Pass (post-PR IDOR
-# fix included), was committed and merged as PR #5 on GitHub (commit
-# 157fa36, merge 76e70e8) - confirmed via git log on main, 2026-09-01.
-
-# --- older history retained for context ---
-# US-001, US-002, US-003 are implemented per git history (commits b6dc29e,
-# ed6e2a9, 90a612b, 1f8d2a5, 1ee7dc5), though not tracked through this
-# pipeline. US-004 (Deactivate Account, Epic 1 / "1.4") completed the full
-# pipeline through PR, was committed (e3b42c4) and merged as PR #1 on
-# GitHub (confirmed via `gh pr view 1`, state: MERGED, 2026-08-31).
-# US-2.1 (Login, Epic 2) completed the full pipeline through PR (see
-# docs/catalog/US-2.1-pipeline-status.md, all stages Pass), was committed
-# and merged as PR #2 on GitHub (commit 1ecedb0, merge d14a51b "Merge pull
-# request #2 from AndriiDobrovolskii/feat/us-2.1-login").
+note: >
+  No Story is active. US-3.3 (View Audit Information) was delivered and merged
+  as PR #13 on 2026-09-03, the last Story delivered under the pre-migration
+  harness. Per docs/catalog/stories.yaml, US-4.1 is the next BACKLOG Story;
+  activate it with /so:start US-4.1.

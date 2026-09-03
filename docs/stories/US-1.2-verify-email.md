@@ -1,6 +1,6 @@
 # Epic 1 — Users: Verify Email
 
-**Story ID:** US-1.1
+**Story ID:** US-1.2
 **Project:** Customer Portal
 
 ## User Story

@@ -13,7 +13,7 @@ Turn an approved OpenAPI contract and DB design into the Pydantic v2 schemas tha
 
 ```
 Precondition: openapi-designer and db-designer have both produced approved artifacts for the story.
-Input Artifacts: docs/specifications/<StoryId>-*-spec.md; docs/designs/api/<StoryId>-openapi.yaml, docs/designs/api/<StoryId>-api-design.md; docs/designs/database/<StoryId>-db-design.md, docs/designs/database/<StoryId>-entity-model.md; existing app/modules/<module>/schemas.py if any.
+Input Artifacts: docs/specifications/<StoryId>-spec.md; docs/designs/api/<StoryId>-openapi.yaml, docs/designs/api/<StoryId>-api-design.md; docs/designs/database/<StoryId>-db-design.md, docs/designs/database/<StoryId>-entity-model.md; existing app/modules/<module>/schemas.py if any.
 Output Artifacts: app/modules/<module>/schemas.py (created or extended).
 ```
 
@@ -21,7 +21,7 @@ Output Artifacts: app/modules/<module>/schemas.py (created or extended).
 
 Read, in order:
 
-1. `docs/specifications/<StoryId>-*-spec.md` — functional requirements and validation rules.
+1. `docs/specifications/<StoryId>-spec.md` — functional requirements and validation rules.
 2. `docs/designs/api/<StoryId>-openapi.yaml` and `-api-design.md` — the exact request/response shapes to implement. If only the `.gitignore` stub exists at this path, stop and tell the user `openapi-designer` needs to run first.
 3. `docs/designs/database/<StoryId>-db-design.md` and `-entity-model.md` — which columns exist, which are sensitive. If only the stub exists, stop and name `db-designer`.
 4. The target module's existing `schemas.py`, if any — mirror its structure and import order rather than reformatting it.
@@ -66,3 +66,90 @@ Both upstream designs are approved (Pass or Pass with Issues from `story-spec-re
 ## Completion Criteria
 
 Complete only when the checklist above is fully satisfied and every request/response shape the OpenAPI contract defines for this story is representable by an emitted schema class.
+
+---
+
+# Harness Contract
+
+This skill is a sub-step of the `IMPLEMENTATION` stage
+(`docs/workflow/stage-map.yaml`, `type: composite_skill`). It produces
+schemas.py - source code, not a registry artifact. `story-orchestrator`
+records its progress in `pipeline_status`
+(`docs/catalog/<StoryId>-pipeline-status.md`) and sets
+`implementation_substep` in `workflow-state.yaml`.
+
+## Canonical sources
+
+- Workflow / stage / loop-back keys: `docs/workflow/stage-map.yaml` (`IMPLEMENTATION`).
+- Artifact paths: `docs/workflow/artifact-paths.yaml` - **authoritative**.
+  Resolve `story`, `open_decisions`, `specification`, `specification_review`, `impact_analysis`, `implementation_plan`, `task_breakdown`, `plan_review`, `api_design`, `openapi`, `database_design`, `entity_model`, `test_strategy`, `ac_test_matrix`. Any path shown elsewhere in this skill is illustrative;
+  the registry wins.
+- Status vocabularies: `docs/workflow/artifact-lifecycle.md`.
+- Front matter and the staleness contract: `docs/workflow/artifact-schema.md`.
+- Workflow state: `docs/workflow/state-schema.md`.
+
+## Inputs (registry keys)
+
+- `story`
+- `open_decisions`
+- `specification`
+- `specification_review`
+- `impact_analysis`
+- `implementation_plan`
+- `task_breakdown`
+- `plan_review`
+- `api_design`  (conditional - absent when its design stage recorded `NOT_APPLICABLE`)
+- `openapi`  (conditional - absent when its design stage recorded `NOT_APPLICABLE`)
+- `database_design`  (conditional - absent when its design stage recorded `NOT_APPLICABLE`)
+- `entity_model`  (conditional - absent when its design stage recorded `NOT_APPLICABLE`)
+- `test_strategy`
+- `ac_test_matrix`
+
+## Preconditions (harness)
+
+- Every consumed artifact is current: `status` is not `SUPERSEDED` or
+  `ARCHIVED`, and the `version` this skill records in its own `inputs` is the
+  version actually on disk. A stale input is `BLOCKED`, not a caveat.
+- No `TODO` / `TBD` / `FIXME` / unresolved blocking Open Decision in an
+  `APPROVED` input that this stage depends on.
+- `docs/workflow/active-story.yaml` and `docs/workflow/workflow-state.yaml`
+  agree on which story is active.
+
+## Result Envelope
+
+Return exactly this. The orchestrator aggregates the sub-steps; only when all
+four have returned `PASS` does the `IMPLEMENTATION` stage advance.
+
+```yaml
+result:
+  verdict: PASS | CHANGES_REQUIRED | BLOCKED
+  stage: IMPLEMENTATION
+  substep: schema-builder
+  story: <StoryId>
+  artifacts: []          # source files, listed by path
+  next_substep: <the next builder, or null>
+  loop_back_stage: null
+  blocking_issues: []
+  non_blocking_findings: []
+```
+
+Loop-back keys valid for `IMPLEMENTATION`:
+
+| key | `loop_back_stage` |
+|---|---|
+| `partial` | `IMPLEMENTATION` |
+| `blocked_by_plan` | `IMPLEMENTATION_PLANNING` |
+| `blocked_by_architecture` | `ARCHITECTURE_PLANNING` |
+
+## Prohibited (harness)
+
+- Do not update workflow state (`workflow-state.yaml`, `active-story.yaml`,
+  `history.jsonl`) - `story-orchestrator` owns those.
+- Do not produce an artifact this skill does not own in
+  `docs/workflow/artifact-paths.yaml`.
+- Do not resolve Open Decisions.
+- Do not emit a retired verdict (`Pass`, `Fail`, `Pass with Issues`,
+  `APPROVED`, ...) - see `artifact-lifecycle.md` section 2.
+- Do not use the retired sequential story ids (`US-0NN`) or retired stage
+  identifiers (`DESIGN`, `PLANNING`, `TESTS`, `VERIFICATION`, `PR`).
+- Do not create commits, branches, or Pull Requests.

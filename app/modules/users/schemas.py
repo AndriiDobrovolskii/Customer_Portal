@@ -135,7 +135,7 @@ class MfaDisableRequest(BaseModel):
 
     current_password: SecretStr = Field(min_length=1)
     # A 6-digit TOTP code only - whether a recovery code is also accepted
-    # here is an open question (US-009-api-design.md Open Questions #2),
+    # here is an open question (US-2.5-api-design.md Open Questions #2),
     # not decided by this schema.
     code: str = Field(pattern=r"^\d{6}$")
 
@@ -147,7 +147,7 @@ class SessionLocation(BaseModel):
 
 class SessionEntry(BaseModel):
     """FR-1: one live refresh-token family. Composed by the service from a
-    repository row plus the geo-IP/device-label lookups (US-010-db-design.md
+    repository row plus the geo-IP/device-label lookups (US-2.6-db-design.md
     - "current-state row" + "created_at" per family) - not a direct
     `from_attributes` passthrough of any single ORM row, so no ConfigDict
     is set here.

@@ -1,7 +1,7 @@
 # Open Decisions: US-2.6 Active Session Management
 
 **Story:** `docs/stories/US-2.6-active-sessions.md`
-**Pre-existing spec:** `docs/specifications/US-010-active-session-management-spec.md` (drafted 2026-08-22, Pass with Issues, predates the actual US-2.1/US-2.2/US-2.3 codebase now in place).
+**Pre-existing spec:** `docs/specifications/US-2.6-spec.md` (drafted 2026-08-22, Pass with Issues, predates the actual US-2.1/US-2.2/US-2.3 codebase now in place).
 **Logged:** 2026-09-02
 
 ## Resolutions (2026-09-02)

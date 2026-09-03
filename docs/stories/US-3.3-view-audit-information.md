@@ -2,7 +2,7 @@
 
 **Story ID:** US-3.3
 **Project:** Customer Portal
-**Revised:** 2026-09-02 — AU-AC4 split into this story's API-level scope and a deferred DB-grant follow-up (OD-12), and the Data Model Notes' partition-granularity line corrected to match the story's own Assumption #4/AU-AC7 (OD-11). Both were found self-contradictory/under-scoped by `us-clarifier` and `story-spec-reviewer` against the real, now-current codebase; full detail and rationale in `docs/decisions/US-3.3-open-decisions.md` (OD-11, OD-12) and `docs/reviews/specifications/US-013-spec-review.md`. No other AC changed.
+**Revised:** 2026-09-02 — AU-AC4 split into this story's API-level scope and a deferred DB-grant follow-up (OD-12), and the Data Model Notes' partition-granularity line corrected to match the story's own Assumption #4/AU-AC7 (OD-11). Both were found self-contradictory/under-scoped by `us-clarifier` and `story-spec-reviewer` against the real, now-current codebase; full detail and rationale in `docs/decisions/US-3.3-open-decisions.md` (OD-11, OD-12) and `docs/reviews/specifications/US-3.3-spec-review.md`. No other AC changed.
 
 ## User Story
 As an auditor or administrator,

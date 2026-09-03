@@ -72,7 +72,7 @@ def upgrade() -> None:
     # (and its index) here. That is a false positive caused by a pre-existing
     # gap in migrations/env.py: it never imports app.modules.account.models,
     # so that table has been invisible to Base.metadata (and therefore to
-    # autogenerate's diff) since US-004 added it. Removed by hand — this
+    # autogenerate's diff) since US-1.4 added it. Removed by hand — this
     # story's models.py never touched that table, and migrations/env.py is
     # protected (AGENTS.md §7.9), so the real fix needs explicit user
     # sign-off rather than being made here.

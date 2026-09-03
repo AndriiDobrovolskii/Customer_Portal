@@ -23,10 +23,10 @@ def upgrade() -> None:
     """Upgrade schema.
 
     `refresh_tokens` is written on every login and every refresh-token
-    rotation (US-010-db-design.md) - a plain `CREATE INDEX` would lock the
+    rotation (US-2.6-db-design.md) - a plain `CREATE INDEX` would lock the
     table against those writes for the build duration. `CONCURRENTLY`
     cannot run inside a transaction, so this migration is deliberately
-    alone (plan-review finding, US-010-plan-review.md), wrapped in
+    alone (plan-review finding, US-2.6-plan-review.md), wrapped in
     `autocommit_block()` per AGENTS.md §4 / migration-manager's
     postgres-hazards.md (a).
     """

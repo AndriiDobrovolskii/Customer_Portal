@@ -51,7 +51,7 @@ async def list_audit_logs(
 
 
 # No PATCH/PUT/DELETE handler is registered here (AU-AC4/FR-4,
-# US-013-api-design.md): Starlette returns its default 405 for any other
+# US-3.3-api-design.md): Starlette returns its default 405 for any other
 # method on a path that has at least one method registered — verified
 # against app/main.py's actual exception handlers during PLANNING
 # (impact-analysis.md), none of which intercept it.

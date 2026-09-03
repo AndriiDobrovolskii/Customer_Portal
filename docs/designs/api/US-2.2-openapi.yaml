@@ -1,0 +1,117 @@
+openapi: 3.0.3
+info:
+  title: Logout (US-2.2 / spec US-2.2) — fragment
+  version: "1.0"
+paths:
+  /v1/auth/logout:
+    post:
+      operationId: logout
+      summary: End the session on the current device
+      tags: [auth]
+      security:
+        - bearerAuth: []
+      responses:
+        "204":
+          description: >
+            Session terminated (FR-1): the presented access token's jti is
+            revoked (`user_sessions.revoked_at`, resolved OD-1), and — if a
+            refresh cookie was present — its whole rotation family is
+            revoked (`refresh_tokens.revoked_at`, resolved OD-3) and the
+            cookie is cleared. If the refresh cookie's value matched no
+            `refresh_tokens` row (stale/tampered/already-deleted), the
+            family-revocation step is silently skipped but every other
+            effect (jti revocation, cookie clear, audit entry, `204`)
+            still occurs identically — no response-level signal
+            distinguishes a matched from an unmatched cookie
+            (spec-review finding, resolved 2026-08-31).
+            Also covers FR-4 (idempotent repeat call, resolved OD-2): a
+            request whose jti is already revoked still reaches this
+            handler and still returns `204` — this leniency applies to
+            this endpoint only, not to `/v1/auth/logout-all` or any other
+            endpoint.
+          headers:
+            Set-Cookie:
+              schema:
+                type: string
+                example: refresh_token=; Path=/api/v1/auth; Max-Age=0
+              description: >
+                Present only when a refresh cookie was present on the
+                request (FR-1). Absent when no refresh cookie was sent
+                (resolved OD-6) — there is nothing to clear.
+        "401":
+          description: >
+            No access token, or one that is expired/malformed (FR-3).
+            Unlike every other authenticated endpoint in this project,
+            this route does NOT reject a token whose jti is already
+            revoked (resolved OD-2) — an already-revoked-but-otherwise-
+            well-formed token still resolves the caller and returns
+            `204`, not `401`, so this response is reached only when the
+            token itself cannot be authenticated at all (missing,
+            malformed, or expired by its own `exp` claim).
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/UnauthenticatedProblem"
+  /v1/auth/logout-all:
+    post:
+      operationId: logoutAll
+      summary: End every session for the account
+      tags: [auth]
+      security:
+        - bearerAuth: []
+      responses:
+        "204":
+          description: >
+            Every session terminated (FR-2): `revoke_before:{user_id}` is
+            set to now in Valkey (existing `RevocationCache` mechanism
+            from US-1.4/US-2.1, unchanged by this story); every access and
+            refresh token issued before this moment is rejected with
+            `401` on its next use.
+        "401":
+          description: >
+            No access token, or one that is expired/invalid/already-
+            revoked. Unlike `/v1/auth/logout`, this endpoint has no
+            idempotency carve-out (resolved OD-2) — an already-revoked
+            jti is rejected here exactly as it is on any other
+            endpoint (FR-5).
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/UnauthenticatedProblem"
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+  schemas:
+    UnauthenticatedProblem:
+      allOf:
+        - $ref: "#/components/schemas/ProblemBase"
+      properties:
+        type:
+          type: string
+          example: ".../errors/unauthenticated"
+        status:
+          type: integer
+          example: 401
+      description: >
+        Type slug is the project's existing shared unauthenticated
+        envelope (`UnauthenticatedError`, `app/modules/users/exceptions.py`)
+        — this story introduces no new error type slugs (spec NFR).
+    ProblemBase:
+      type: object
+      description: RFC 7807 problem body. `type` is an absolute/relative URI ending in the slug named per response.
+      required: [type, title, status, detail, instance]
+      properties:
+        type:
+          type: string
+        title:
+          type: string
+        status:
+          type: integer
+        detail:
+          type: string
+        instance:
+          type: string
+          example: /v1/auth/logout

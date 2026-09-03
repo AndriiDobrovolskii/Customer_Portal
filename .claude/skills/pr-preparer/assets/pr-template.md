@@ -17,8 +17,8 @@
 - [ ] Integration tests: {{summary, e.g. "4 new cases in test_<module>_router.py, real Postgres/Valkey"}}
 - [ ] Coverage: {{result from gate-enforcer's report}}
 - [ ] Migration cycle: {{upgrade/downgrade/upgrade result, if applicable}}
-- [ ] Security review: {{docs/security/<StoryId>-security-review.md verdict}}
-- [ ] AC reconciliation: {{docs/reconciliation/<StoryId>-reconciliation-report.md verdict}}
+- [ ] Security review: {{docs/reviews/security/<StoryId>-security-review.md verdict}}
+- [ ] AC reconciliation: {{docs/reviews/reconciliation/<StoryId>-reconciliation.md verdict}}
 
 ## Risk / Rollback
 

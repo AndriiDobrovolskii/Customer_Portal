@@ -8,8 +8,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.modules.audit.models import AuditLog
 
-# `audit_log_history` is a raw SQL UNION ALL view (US-013-db-design.md,
-# US-013-entity-model.md), deliberately not an ORM-mapped entity — a view
+# `audit_log_history` is a raw SQL UNION ALL view (US-3.3-db-design.md,
+# US-3.3-entity-model.md), deliberately not an ORM-mapped entity — a view
 # has no single underlying table for SQLAlchemy to reflect a PK/relationship
 # against, and mapping it to `Base` would make Alembic autogenerate treat it
 # as a missing table. Query it via Core `text()`, matching db-design.md's

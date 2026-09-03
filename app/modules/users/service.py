@@ -89,7 +89,7 @@ _REFRESH_RATE_LIMIT_WINDOW_SECONDS = 3600
 _PASSWORD_RESET_TOKEN_BYTES = 32
 _PASSWORD_RESET_HOURLY_WINDOW_SECONDS = 3600
 _MIN_RESET_PASSWORD_LENGTH = 12
-# US-009 FR-6/FR-8: the fixed role catalogue names (US-3.2) MFA is
+# US-2.5 FR-6/FR-8: the fixed role catalogue names (US-3.2) MFA is
 # mandatory for. Duplicated here rather than imported from roles.models
 # (a models-layer import a service must never make cross-module, per
 # AGENTS.md §3) - these three names are also the spec's own literal text.
@@ -252,7 +252,7 @@ class PermissionEpochCacheProtocol(Protocol):
 
 
 class RoleServiceProtocol(Protocol):
-    """Cross-module collaborator (US-3.2/spec US-012): resolves the
+    """Cross-module collaborator (US-3.2/spec US-3.2): resolves the
     permission scopes a JWT `scopes` claim carries at token issuance,
     called here via `roles.service`, never its router/repository —
     mirrors `AccountServiceProtocol`'s existing cross-module pattern.
@@ -439,7 +439,7 @@ class UserService:
         return UserRead.model_validate(user)
 
     async def _resolve_enrollment_scoping(self, user: User) -> tuple[bool, datetime | None]:
-        """US-009 FR-6/FR-7: whether the next-issued access token should be
+        """US-2.5 FR-6/FR-7: whether the next-issued access token should be
         enrolment-scoped, and (only for the FR-6 grace-period case) the
         deadline to surface in the login response (OD-4).
 
@@ -523,7 +523,7 @@ class UserService:
         not a JSON field), so the router receives it separately to build the
         cookie, mirroring profile/service.py's own tuple-return pattern for
         a value the router needs beyond the response schema. When
-        `mfa_enabled` is true (US-009 MF-AC3), returns an MfaRequiredResponse
+        `mfa_enabled` is true (US-2.5 MF-AC3), returns an MfaRequiredResponse
         and `None` instead — no session/refresh token is issued at this
         point, so there is nothing for the router to set a cookie with.
         """
@@ -697,13 +697,13 @@ class UserService:
         jti with no session row at all is never resolved, regardless of this
         flag: "revoked" and "never existed" are different failure modes.
 
-        `allow_enrollment_scoped` (US-009 FR-6/FR-7) is the single
+        `allow_enrollment_scoped` (US-2.5 FR-6/FR-7) is the single
         default-deny choke point for the enrolment-scoped-token mechanism:
         every route rejects such a token with `403 mfa-enrollment-required`
         by default, and only `POST /v1/auth/mfa/enroll`/`activate` pass
         `True` (via `get_current_user_allow_enrollment_scoped`, mirroring
         `allow_revoked`'s exact same narrow-opt-in shape) — see
-        docs/plans/US-009-implementation-plan.md Architectural Change #2.
+        docs/plans/US-2.5-implementation-plan.md Architectural Change #2.
         """
         try:
             claims = decode_access_token(token)
@@ -909,7 +909,7 @@ class UserService:
 
         # FR-2 writes the audit entry only when a live token was actually
         # revoked; FR-4's already-revoked/expired path is a silent no-op
-        # (per US-010-api-design.md) - `revoke_refresh_token_family` itself
+        # (per US-2.6-api-design.md) - `revoke_refresh_token_family` itself
         # is unconditionally idempotent either way.
         was_live = owned.revoked_at is None and owned.expires_at > datetime.now(UTC)
         await self._repository.revoke_refresh_token_family(family_id=family_id)
@@ -1031,7 +1031,7 @@ class UserService:
         await self._repository.commit()
 
         # Re-evaluates the enrolment-scoping condition on every refresh, not
-        # only at login (spec-review resolution, US-009 FR-6): an
+        # only at login (spec-review resolution, US-2.5 FR-6): an
         # enrolment-scoped account stays scoped across a refresh, and an
         # account that has since completed enrolment gets an unscoped token
         # back without needing to log in again.

@@ -13,19 +13,19 @@ Draft the PR a human will actually submit — title, description, and test-plan 
 
 ```
 Precondition: gate-enforcer, implementation-verifier, reconciliation-reviewer, and security-reviewer all report Pass for the story.
-Input Artifacts: docs/verification/<StoryId>-verification-report.md; docs/reconciliation/<StoryId>-reconciliation-report.md; docs/security/<StoryId>-security-review.md; gate-enforcer's reported result (chat report — gate-enforcer writes no docs/ file).
-Output Artifacts: docs/pr/<StoryId>-pr-description.md, echoed in chat.
+Input Artifacts: docs/verification/<StoryId>-implementation-verification.md; docs/reviews/reconciliation/<StoryId>-reconciliation.md; docs/reviews/security/<StoryId>-security-review.md; gate-enforcer's reported result (chat report — gate-enforcer writes no docs/ file).
+Output Artifacts: docs/pr/<StoryId>-pr-summary.md, echoed in chat.
 ```
 
 ## Required Context
 
 Read, in order:
 
-1. `docs/verification/<StoryId>-verification-report.md` — confirm `implementation-verifier`'s verdict is Pass.
-2. `docs/reconciliation/<StoryId>-reconciliation-report.md` — confirm `reconciliation-reviewer`'s verdict is Pass.
-3. `docs/security/<StoryId>-security-review.md` — confirm `security-reviewer`'s verdict is Pass.
+1. `docs/verification/<StoryId>-implementation-verification.md` — confirm `implementation-verifier`'s verdict is Pass.
+2. `docs/reviews/reconciliation/<StoryId>-reconciliation.md` — confirm `reconciliation-reviewer`'s verdict is Pass.
+3. `docs/reviews/security/<StoryId>-security-review.md` — confirm `security-reviewer`'s verdict is Pass.
 4. `gate-enforcer`'s most recent report for this story (chat transcript or wherever the user has it) — confirm its verdict.
-5. `docs/specifications/<StoryId>-*-spec.md` and `docs/plans/<StoryId>-implementation-plan.md` — for the summary and linked-story content.
+5. `docs/specifications/<StoryId>-spec.md` and `docs/plans/<StoryId>-implementation-plan.md` — for the summary and linked-story content.
 6. `.env.example` and the story's changed settings (if any) — confirm alignment.
 
 ## Preconditions
@@ -41,7 +41,7 @@ All four gates — `gate-enforcer`, `implementation-verifier`, `reconciliation-r
 5. Note any risk/rollback considerations `planner`'s Risks section flagged.
 6. Confirm `.env.example` reflects any new settings the story introduced (per `AGENTS.md` §4's "Config & secrets" rule) — flag a mismatch rather than silently including or omitting it.
 7. Confirm commit hygiene: no unrelated files in scope, no drive-by refactor beyond the story (`AGENTS.md` §7.8) — flag anything that looks out of scope rather than silently drafting around it.
-8. Write `docs/pr/<StoryId>-pr-description.md` and echo the same content in chat.
+8. Write `docs/pr/<StoryId>-pr-summary.md` and echo the same content in chat.
 9. State explicitly at the end: this is drafted content only — pushing the branch or opening the PR requires an explicit user instruction to run `git push`/`gh pr create`.
 
 ## Constraints
@@ -62,8 +62,92 @@ All four gates — `gate-enforcer`, `implementation-verifier`, `reconciliation-r
 
 ## Outputs
 
-- `docs/pr/<StoryId>-pr-description.md`, echoed in chat.
+- `docs/pr/<StoryId>-pr-summary.md`, echoed in chat.
 
 ## Completion Criteria
 
 Complete only when all four gate verdicts are confirmed Pass, the draft is written to both the doc file and chat, and the "this is drafted content, not submitted" statement is present.
+
+---
+
+# Harness Contract
+
+This skill owns the `PR_PREPARATION` stage of `docs/workflow/stage-map.yaml`.
+
+## Canonical sources
+
+- Workflow / stage / loop-back keys: `docs/workflow/stage-map.yaml` (`PR_PREPARATION`).
+- Artifact paths: `docs/workflow/artifact-paths.yaml` - **authoritative**.
+  Resolve `story`, `specification`, `impact_analysis`, `implementation_plan`, `implementation_report`, `implementation_verification`, `security_review`, `reconciliation`, `traceability`. Any path shown elsewhere in this skill is illustrative;
+  the registry wins.
+- Status vocabularies: `docs/workflow/artifact-lifecycle.md`.
+- Front matter and the staleness contract: `docs/workflow/artifact-schema.md`.
+- Workflow state: `docs/workflow/state-schema.md`.
+
+## Inputs (registry keys)
+
+- `story`
+- `specification`
+- `impact_analysis`
+- `implementation_plan`
+- `implementation_report`
+- `implementation_verification`
+- `security_review`
+- `reconciliation`
+- `traceability`
+
+## Preconditions (harness)
+
+- Every consumed artifact is current: `status` is not `SUPERSEDED` or
+  `ARCHIVED`, and the `version` this skill records in its own `inputs` is the
+  version actually on disk. A stale input is `BLOCKED`, not a caveat.
+- No `TODO` / `TBD` / `FIXME` / unresolved blocking Open Decision in an
+  `APPROVED` input that this stage depends on.
+- `docs/workflow/active-story.yaml` and `docs/workflow/workflow-state.yaml`
+  agree on which story is active.
+
+## Result Envelope
+
+Return exactly this. `story-orchestrator` records the transition; this skill
+never writes `docs/workflow/workflow-state.yaml`.
+
+```yaml
+result:
+  verdict: PASS | CHANGES_REQUIRED | BLOCKED
+  stage: PR_PREPARATION
+  story: <StoryId>
+  artifact_status: DRAFT
+  artifacts:
+    - docs/pr/<StoryId>-pr-summary.md
+  next_stage: READY_FOR_PR
+  loop_back_stage: null
+  blocking_issues: []
+  non_blocking_findings: []
+```
+
+Loop-back keys valid for this stage (from `stage-map.yaml`; naming any other key
+is rejected and holds the stage as `BLOCKED`):
+
+| key | `loop_back_stage` |
+|---|---|
+| `stale_reconciliation` | `RECONCILIATION` |
+
+- `PASS` - all four upstream reviews passed, the PR title, description, and
+  test-plan checklist are drafted, `.env.example` is current if settings
+  changed, and commit hygiene is confirmed.
+- `CHANGES_REQUIRED` - `stale_reconciliation`: the working tree moved after
+  RECONCILIATION ran, so its verdict no longer describes what would ship.
+- `BLOCKED` - an upstream review is missing, stale, or did not pass.
+
+## Prohibited (harness)
+
+- Do not update workflow state (`workflow-state.yaml`, `active-story.yaml`,
+  `history.jsonl`) - `story-orchestrator` owns those.
+- Do not produce an artifact this skill does not own in
+  `docs/workflow/artifact-paths.yaml`.
+- Do not resolve Open Decisions.
+- Do not emit a retired verdict (`Pass`, `Fail`, `Pass with Issues`,
+  `APPROVED`, ...) - see `artifact-lifecycle.md` section 2.
+- Do not use the retired sequential story ids (`US-0NN`) or retired stage
+  identifiers (`DESIGN`, `PLANNING`, `TESTS`, `VERIFICATION`, `PR`).
+- Do not create commits, branches, or Pull Requests.

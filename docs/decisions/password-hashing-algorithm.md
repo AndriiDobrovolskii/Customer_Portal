@@ -8,8 +8,8 @@
 
 Two authoritative sources disagreed on the password-hashing algorithm:
 
-- `AGENTS.md` §2 (Tech Stack) and `docs/ARCHITECTURE.md` named **bcrypt** (`bcrypt>=4.1`), and it was already implemented and shipped in `app/core/security.py` as part of US-001 (Register User).
-- The stories `docs/stories/US-2.1-login.md`, `US-2.4-password-reset.md`, and `US-2.5-mfa-totp.md` each deliberately specified **Argon2id** in their own Assumptions & Defaults tables — e.g. US-2.1's "Password hashing cost | Argon2id tuned to ≈100 ms | Balance between brute-force resistance and endpoint latency" — and the specifications derived from them (`US-005`, `US-008`, `US-009`) carried that choice through.
+- `AGENTS.md` §2 (Tech Stack) and `docs/ARCHITECTURE.md` named **bcrypt** (`bcrypt>=4.1`), and it was already implemented and shipped in `app/core/security.py` as part of US-1.1 (Register User).
+- The stories `docs/stories/US-2.1-login.md`, `US-2.4-password-reset.md`, and `US-2.5-mfa-totp.md` each deliberately specified **Argon2id** in their own Assumptions & Defaults tables — e.g. US-2.1's "Password hashing cost | Argon2id tuned to ≈100 ms | Balance between brute-force resistance and endpoint latency" — and the specifications derived from them (`US-2.1`, `US-2.4`, `US-2.5`) carried that choice through.
 
 This was flagged as BR-003 in `docs/product/business-rules.md` while `docs/product/*.md` was being authored, since a business-rules doc can't state a fact two ways.
 
@@ -19,7 +19,7 @@ This was flagged as BR-003 in `docs/product/business-rules.md` while `docs/produ
 
 ## Consequences
 
-The already-shipped US-001 implementation used bcrypt and had to be changed, not just documented around:
+The already-shipped US-1.1 implementation used bcrypt and had to be changed, not just documented around:
 
 - `pyproject.toml`: `bcrypt>=4.1` → `argon2-cffi>=23.1`.
 - `app/core/security.py`: `bcrypt.hashpw()` → `argon2.PasswordHasher.hash()`.
@@ -29,4 +29,4 @@ The already-shipped US-001 implementation used bcrypt and had to be changed, not
 - `AGENTS.md` §2, §3.5, §7 and `docs/ARCHITECTURE.md` (tech stack table, package-structure comment, async-offload example, `Settings` example, security addenda): all bcrypt references replaced.
 - `users.hashed_password` (`String(255)`) needed no migration — an Argon2id hash with these parameters is ~97 characters.
 
-No spec required a change; `US-005`, `US-008`, `US-009` were already correct.
+No spec required a change; `US-2.1`, `US-2.4`, `US-2.5` were already correct.

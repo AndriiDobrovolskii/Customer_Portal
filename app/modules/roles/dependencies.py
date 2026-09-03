@@ -30,7 +30,7 @@ RoleServiceDep = Annotated[RoleService, Depends(get_role_service)]
 def require_scope(scope: str) -> Callable[[AuthenticatedUser], Awaitable[None]]:
     """Cross-cutting scope-check factory, first introduced by this module.
 
-    Not part of the original US-012 API design (which described the
+    Not part of the original US-3.2 API design (which described the
     requirement in prose only); every `/v1/admin/*` route this story adds
     needs one, so it's built once here rather than duplicated per route.
     """

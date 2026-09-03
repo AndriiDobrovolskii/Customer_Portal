@@ -9,7 +9,7 @@ from app.db.base import Base
 
 class InvitationToken(Base):
     """Same shape as email_verification_tokens/password_reset_tokens
-    (US-011-db-design.md). `consumed_at` is reused (not a separate
+    (US-3.1-db-design.md). `consumed_at` is reused (not a separate
     `invalidated_at` column) both when the invitee completes setup and
     when an admin resends and the prior token is invalidated (FR-18) —
     both mean "not usable"; the distinguishing detail lives in

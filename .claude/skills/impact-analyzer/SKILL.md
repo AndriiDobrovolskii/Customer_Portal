@@ -13,7 +13,7 @@ Answer one question precisely before anyone plans or codes anything: what does t
 
 ```
 Precondition: the story's spec review is Pass or Pass with Issues; API and DB designs are approved, or explicitly not applicable for a read-only/no-schema-change story.
-Input Artifacts: docs/specifications/<StoryId>-*-spec.md; docs/designs/api/<StoryId>-openapi.yaml, docs/designs/api/<StoryId>-api-design.md; docs/designs/database/<StoryId>-db-design.md, docs/designs/database/<StoryId>-entity-model.md; the existing app/modules/ layout.
+Input Artifacts: docs/specifications/<StoryId>-spec.md; docs/designs/api/<StoryId>-openapi.yaml, docs/designs/api/<StoryId>-api-design.md; docs/designs/database/<StoryId>-db-design.md, docs/designs/database/<StoryId>-entity-model.md; the existing app/modules/ layout.
 Output Artifacts: docs/impact-analysis/<StoryId>-impact-analysis.md.
 ```
 
@@ -21,7 +21,7 @@ Output Artifacts: docs/impact-analysis/<StoryId>-impact-analysis.md.
 
 Read, in order:
 
-1. `docs/specifications/<StoryId>-*-spec.md` — what the story actually requires.
+1. `docs/specifications/<StoryId>-spec.md` — what the story actually requires.
 2. `docs/designs/api/<StoryId>-openapi.yaml` and `-api-design.md` — the endpoints being added/changed.
 3. `docs/designs/database/<StoryId>-db-design.md` and `-entity-model.md` — the schema being added/changed.
 4. The existing `app/modules/` layout — which modules exist today, and which files within them already exist vs. would be new.
@@ -59,3 +59,88 @@ Spec review Pass/Pass with Issues; API/DB designs approved (or explicitly stated
 ## Completion Criteria
 
 Complete only when every affected file, cross-module call, and migration/test impact is stated with a specific reason — nothing left as an unstated assumption for `planner` to rediscover.
+
+---
+
+# Harness Contract
+
+This skill owns the `IMPACT_ANALYSIS` stage of `docs/workflow/stage-map.yaml`.
+
+## Canonical sources
+
+- Workflow / stage / loop-back keys: `docs/workflow/stage-map.yaml` (`IMPACT_ANALYSIS`).
+- Artifact paths: `docs/workflow/artifact-paths.yaml` - **authoritative**.
+  Resolve `story`, `specification`, `specification_review`, `api_design`, `openapi`, `database_design`, `entity_model`, `design_review`, `open_decisions`. Any path shown elsewhere in this skill is illustrative;
+  the registry wins.
+- Status vocabularies: `docs/workflow/artifact-lifecycle.md`.
+- Front matter and the staleness contract: `docs/workflow/artifact-schema.md`.
+- Workflow state: `docs/workflow/state-schema.md`.
+
+## Inputs (registry keys)
+
+- `story`
+- `specification`
+- `specification_review`
+- `api_design`  (conditional - absent when its design stage recorded `NOT_APPLICABLE`)
+- `openapi`  (conditional - absent when its design stage recorded `NOT_APPLICABLE`)
+- `database_design`  (conditional - absent when its design stage recorded `NOT_APPLICABLE`)
+- `entity_model`  (conditional - absent when its design stage recorded `NOT_APPLICABLE`)
+- `design_review`  (conditional - absent when its design stage recorded `NOT_APPLICABLE`)
+- `open_decisions`
+
+## Preconditions (harness)
+
+- Every consumed artifact is current: `status` is not `SUPERSEDED` or
+  `ARCHIVED`, and the `version` this skill records in its own `inputs` is the
+  version actually on disk. A stale input is `BLOCKED`, not a caveat.
+- No `TODO` / `TBD` / `FIXME` / unresolved blocking Open Decision in an
+  `APPROVED` input that this stage depends on.
+- `docs/workflow/active-story.yaml` and `docs/workflow/workflow-state.yaml`
+  agree on which story is active.
+
+## Result Envelope
+
+Return exactly this. `story-orchestrator` records the transition; this skill
+never writes `docs/workflow/workflow-state.yaml`.
+
+```yaml
+result:
+  verdict: PASS | CHANGES_REQUIRED | BLOCKED
+  stage: IMPACT_ANALYSIS
+  story: <StoryId>
+  artifact_status: DRAFT
+  artifacts:
+    - docs/impact-analysis/<StoryId>-impact-analysis.md
+  next_stage: ARCHITECTURE_PLANNING
+  loop_back_stage: null
+  blocking_issues: []
+  non_blocking_findings: []
+```
+
+Loop-back keys valid for this stage (from `stage-map.yaml`; naming any other key
+is rejected and holds the stage as `BLOCKED`):
+
+| key | `loop_back_stage` |
+|---|---|
+| `changes_required_specification` | `SPECIFICATION` |
+| `changes_required_api` | `API_DESIGN` |
+| `changes_required_database` | `DB_DESIGN` |
+
+- `PASS` - the blast radius is surveyed: affected files, cross-module reach,
+  and migration risk are all recorded.
+- `CHANGES_REQUIRED` - the survey found that an upstream artifact is wrong,
+  not merely incomplete. Route to the artifact that must change.
+- `BLOCKED` - a mandatory input is missing or stale.
+
+## Prohibited (harness)
+
+- Do not update workflow state (`workflow-state.yaml`, `active-story.yaml`,
+  `history.jsonl`) - `story-orchestrator` owns those.
+- Do not produce an artifact this skill does not own in
+  `docs/workflow/artifact-paths.yaml`.
+- Do not resolve Open Decisions.
+- Do not emit a retired verdict (`Pass`, `Fail`, `Pass with Issues`,
+  `APPROVED`, ...) - see `artifact-lifecycle.md` section 2.
+- Do not use the retired sequential story ids (`US-0NN`) or retired stage
+  identifiers (`DESIGN`, `PLANNING`, `TESTS`, `VERIFICATION`, `PR`).
+- Do not create commits, branches, or Pull Requests.

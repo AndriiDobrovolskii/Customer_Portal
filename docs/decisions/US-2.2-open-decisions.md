@@ -1,7 +1,7 @@
 # Open Decisions: US-2.2 (Logout)
 
 **Story:** `docs/stories/US-2.2-logout.md`
-**Existing spec (outside this pipeline):** `docs/specifications/US-006-logout-spec.md`, reviewed at `docs/reviews/specifications/US-006-spec-review.md` (verdict: Pass with Issues, 2026-08-22 — one High ambiguity never resolved)
+**Existing spec (outside this pipeline):** `docs/specifications/US-2.2-spec.md`, reviewed at `docs/reviews/specifications/US-2.2-spec-review.md` (verdict: Pass with Issues, 2026-08-22 — one High ambiguity never resolved)
 **Generated:** 2026-08-31
 **Resolved:** 2026-08-31 — user accepted the recommended option on all 6 items (OD-1–OD-4 explicitly confirmed via AskUserQuestion; OD-5–OD-6 carried the stated recommendation, same pattern as US-2.1's OD-1–OD-6).
 
@@ -27,7 +27,7 @@ The story and its existing spec were written generically, before US-2.1 (Login) 
 
 **Question:** Already flagged as a [High] unresolved ambiguity in the existing spec review, never answered. Given OD-1's DB mechanism: if the first `POST /v1/auth/logout` call sets that access token's `UserSession.revoked_at`, a second call presenting the *identical* access token will hit the same "session revoked" check that any other endpoint would — currently that returns `401` (`get_authenticated_user` returns `None`). But LO-AC4 requires `204` on that exact repeat call. Does `POST /v1/auth/logout` need a carve-out in the shared auth dependency — accept an access token whose jti is revoked *only when the endpoint being called is logout itself*, returning `204` — while every other endpoint still gets `401` for that same revoked jti (LO-AC5)? Or does LO-AC4 actually mean a second, different, not-yet-revoked access token (e.g. from another concurrent login) is used for the repeat call?
 
-**Why it can't be inferred:** The source story itself contains the contradiction (already noted in `docs/specifications/US-006-logout-spec.md`'s own Open Questions and the spec review's Ambiguities section); no product doc resolves it.
+**Why it can't be inferred:** The source story itself contains the contradiction (already noted in `docs/specifications/US-2.2-spec.md`'s own Open Questions and the spec review's Ambiguities section); no product doc resolves it.
 
 **Impact of leaving unresolved:** FR-4 is not implementable as literally worded without picking one reading — this blocks writing a passing spec.
 

@@ -1,7 +1,7 @@
 # Open Decisions: US-3.3 (View Audit Information)
 
 **Story:** docs/stories/US-3.3-view-audit-information.md
-**Pre-existing draft:** docs/specifications/US-013-view-audit-information-spec.md (2026-08-22) + docs/reviews/specifications/US-013-spec-review.md — both predate US-3.1/US-3.2 landing in the real codebase and did not have the current code to check against.
+**Pre-existing draft:** docs/specifications/US-3.3-spec.md (2026-08-22) + docs/reviews/specifications/US-3.3-spec-review.md — both predate US-3.1/US-3.2 landing in the real codebase and did not have the current code to check against.
 **Run date:** 2026-09-02
 
 ## OD-1 — BLOCKING: `audit_log` name collision with an existing, unrelated table (and the story disagrees with itself on whether `audit_log` is a table or a view)
@@ -140,13 +140,13 @@ The Data Model Notes list `ticket_audit_log` as one of the five tables the `audi
 
 ## OD-5 — Resolved by precedent: `limit`/`cursor` bounds
 
-AU-AC1 shows `limit=50` as an example but states no maximum, and neither story nor pre-existing spec states invalid-cursor behavior (flagged as an Open Question in both `docs/specifications/US-013-view-audit-information-spec.md` and its review). This is resolved by the shipped precedent in `app/modules/admin_users/service.py` (`list_users`): `limit` capped at 100 with a `422` field error (`code="max"`) if exceeded, and an invalid `cursor` also rejected with a `422` field error. Recommend the same shape for this story's endpoint (independent constant, not a shared one, since `admin_users` and `audit-logs` are separate list endpoints).
+AU-AC1 shows `limit=50` as an example but states no maximum, and neither story nor pre-existing spec states invalid-cursor behavior (flagged as an Open Question in both `docs/specifications/US-3.3-spec.md` and its review). This is resolved by the shipped precedent in `app/modules/admin_users/service.py` (`list_users`): `limit` capped at 100 with a `422` field error (`code="max"`) if exceeded, and an invalid `cursor` also rejected with a `422` field error. Recommend the same shape for this story's endpoint (independent constant, not a shared one, since `admin_users` and `audit-logs` are separate list endpoints).
 
 ---
 
 ## OD-6 — Resolved by implementation: hash-chain trigger concurrency
 
-`docs/reviews/specifications/US-013-spec-review.md`'s own Medium finding: AU-AC7/FR-7 describe a `BEFORE INSERT` trigger computing `previous_hash` from "the previous row's hash," but neither the story nor spec states how correctness is preserved under concurrent `INSERT`s into the same day's partition. Carried forward unresolved through DESIGN and PLANNING (no existing trigger-based hash chain anywhere in this project to resolve it by precedent) — closed at IMPLEMENTATION (T3b, 2026-09-02), where the trigger's actual SQL had to make the call.
+`docs/reviews/specifications/US-3.3-spec-review.md`'s own Medium finding: AU-AC7/FR-7 describe a `BEFORE INSERT` trigger computing `previous_hash` from "the previous row's hash," but neither the story nor spec states how correctness is preserved under concurrent `INSERT`s into the same day's partition. Carried forward unresolved through DESIGN and PLANNING (no existing trigger-based hash chain anywhere in this project to resolve it by precedent) — closed at IMPLEMENTATION (T3b, 2026-09-02), where the trigger's actual SQL had to make the call.
 
 **What was tried and rejected first:** a `SELECT ... ORDER BY occurred_at DESC, id DESC LIMIT 1 FOR UPDATE` on the presumed-latest row, locking it before seeding `previous_hash` from it. This does **not** serialize concurrent appends — the locked row is only read, never modified, by the inserting transaction. Under PostgreSQL MVCC, a second transaction's blocked `FOR UPDATE` request is granted immediately once the first transaction commits, with no `EvalPlanQual` re-check (the locked row's `xmin` never moved), so the second transaction still seeds from the same, now-stale row. Two rows would claim the same `previous_hash` — a false-positive chain break, exactly the failure mode AU-AC7's own gate test exists to catch.
 
@@ -176,7 +176,7 @@ The story's own Open Questions #1: "Cold-storage target and access procedure for
 
 ## OD-13 — High: AU-AC8 identifier-redaction mechanism for fields not stored in a dedicated column
 
-Raised by `docs/reviews/specifications/US-013-spec-review.md` (SPEC_REVIEW, 2026-09-02), not by the original `us-clarifier` run: `profile_audit_log` stores profile changes as `field`/`old_value`/`new_value` free text — a row with `field="display_name"` has the changed `display_name` value sitting directly in `old_value`/`new_value`, not in a dedicated identifier column. AU-AC8/FR-8 requires that `display_name` (one of its three named identifiers) be redacted or anonymised on account erasure, but neither the story nor the spec stated how the erasure script would find a value it doesn't know is an identifier in advance.
+Raised by `docs/reviews/specifications/US-3.3-spec-review.md` (SPEC_REVIEW, 2026-09-02), not by the original `us-clarifier` run: `profile_audit_log` stores profile changes as `field`/`old_value`/`new_value` free text — a row with `field="display_name"` has the changed `display_name` value sitting directly in `old_value`/`new_value`, not in a dedicated identifier column. AU-AC8/FR-8 requires that `display_name` (one of its three named identifiers) be redacted or anonymised on account erasure, but neither the story nor the spec stated how the erasure script would find a value it doesn't know is an identifier in advance.
 
 **Options presented:**
 1. Field-aware redaction: the erasure script knows which `profile_audit_log.field` values are identifier-bearing (e.g. `display_name`) and redacts `old_value`/`new_value` on any of that user's rows where `field` matches — targeted, no scanning of arbitrary text.
@@ -245,7 +245,7 @@ Both converge to the same practical tamper-detection behavior (a wiped day still
 
 ## OD-18 — Resolved: AU-AC9 (retention job) scope for this story
 
-Raised by `advisor` at TESTS-stage review (2026-09-02): AU-AC9/FR-9 (move entries older than 400 days to cold storage) has no file, task, or test row anywhere in `docs/plans/US-013-implementation-plan.md`, `docs/plans/US-013-task-breakdown.md`, or the traceability matrix — a second missing job, same class as `scripts/verify_audit_chain.py` (OD-15) before it was caught. Unlike that one, this gap traces to OD-9's still-open, legal/DPO-pending cold-storage-target question: the job's core mechanic (where rows go) cannot be built without that decision.
+Raised by `advisor` at TESTS-stage review (2026-09-02): AU-AC9/FR-9 (move entries older than 400 days to cold storage) has no file, task, or test row anywhere in `docs/plans/US-3.3-implementation-plan.md`, `docs/plans/US-3.3-task-breakdown.md`, or the traceability matrix — a second missing job, same class as `scripts/verify_audit_chain.py` (OD-15) before it was caught. Unlike that one, this gap traces to OD-9's still-open, legal/DPO-pending cold-storage-target question: the job's core mechanic (where rows go) cannot be built without that decision.
 
 **Options presented:**
 1. Defer explicitly: do not build the retention job in this story; state the deferral plainly in the plan/task-breakdown/matrix (matching how AU-AC4's DB-grant half was deferred under OD-12) so `reconciliation-reviewer` sees a disclosed gap, not a silently dropped AC.
@@ -257,7 +257,7 @@ Raised by `advisor` at TESTS-stage review (2026-09-02): AU-AC9/FR-9 (move entrie
 
 ## OD-19 — Resolved: OD-2's committed erasure script was never carried into the plan/task breakdown
 
-Found 2026-09-02 at IMPLEMENTATION (T7/T8 prep, advisor review): OD-2 (CLARIFICATION) resolved with an explicit, unconditional build commitment — "build a minimal, provisional DA-AC9 script now" (anonymize the `users` row, redact direct identifiers on that user's existing audit rows) — later refined by OD-13 (SPEC_REVIEW) into field-aware redaction for `profile_audit_log`. Neither `docs/plans/US-013-implementation-plan.md`'s Files To Create nor `docs/plans/US-013-task-breakdown.md`'s T1-T9 ever listed this script — it silently dropped out between CLARIFICATION and PLANNING and was never caught, unlike `scripts/verify_audit_chain.py` (caught at PLANNING) and AU-AC9's retention job (caught at TESTS). **Third instance of the same defect class** — worth naming as a pattern, not just a one-off: a resolved Open Decision's committed artifact needs to be checked against the plan/task breakdown by name, not assumed present because the decision was resolved.
+Found 2026-09-02 at IMPLEMENTATION (T7/T8 prep, advisor review): OD-2 (CLARIFICATION) resolved with an explicit, unconditional build commitment — "build a minimal, provisional DA-AC9 script now" (anonymize the `users` row, redact direct identifiers on that user's existing audit rows) — later refined by OD-13 (SPEC_REVIEW) into field-aware redaction for `profile_audit_log`. Neither `docs/plans/US-3.3-implementation-plan.md`'s Files To Create nor `docs/plans/US-3.3-task-breakdown.md`'s T1-T9 ever listed this script — it silently dropped out between CLARIFICATION and PLANNING and was never caught, unlike `scripts/verify_audit_chain.py` (caught at PLANNING) and AU-AC9's retention job (caught at TESTS). **Third instance of the same defect class** — worth naming as a pattern, not just a one-off: a resolved Open Decision's committed artifact needs to be checked against the plan/task breakdown by name, not assumed present because the decision was resolved.
 
 Unlike OD-9/OD-18 (AU-AC9), this is not a deferral candidate: OD-2's resolution was unconditional (not blocked on any still-open policy question), so silently dropping it now would reverse a decision the user already made, not merely disclose a gap.
 

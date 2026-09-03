@@ -157,7 +157,7 @@ class PasswordResetRateLimitCache:
 
 class MfaTokenCache:
     """Valkey-backed opaque `mfa_token` (FR-3) - single-use via `GETDEL`,
-    not a JWT (see docs/plans/US-009-implementation-plan.md Architectural
+    not a JWT (see docs/plans/US-2.5-implementation-plan.md Architectural
     Change #3). Not fail-closed like RevocationCache: an unreachable
     Valkey means the token can't be found, which is the same outward
     behavior as an already-invalid token (401), not a security bypass.

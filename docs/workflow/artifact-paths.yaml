@@ -1,0 +1,221 @@
+# =============================================================================
+# CANONICAL ARTIFACT PATH REGISTRY
+# =============================================================================
+# This file is the single authoritative source for where every workflow
+# artifact lives and which skill owns it.
+#
+# Rules:
+#   - Skills MUST resolve artifact locations from this registry, not from
+#     hard-coded paths. A skill may show a resolved example path for
+#     readability but must state that this file is authoritative.
+#   - {story_id}  -> canonical epic-dotted Story identifier, e.g. US-3.3
+#   - {slug}      -> lowercase-kebab short title from the Story front matter
+#   - Exactly one `owner` per artifact type. Other skills may read or
+#     reference an artifact but must not (re)generate an artifact they do
+#     not own.
+#   - A consumed artifact that has no `owner` here is an external input.
+#
+# Related authorities:
+#   - docs/workflow/stage-map.yaml        workflow + routing
+#   - docs/workflow/artifact-lifecycle.md status vocabularies
+#   - docs/workflow/artifact-schema.md    artifact front matter
+#   - docs/workflow/state-schema.md       workflow state
+# =============================================================================
+
+version: 1
+
+artifacts:
+
+  # --- Backlog / Story ------------------------------------------------------
+  story:
+    pattern: docs/stories/{story_id}-{slug}.md
+    owner: backlog-sync
+    external_ok: true          # may pre-exist locally without a GitHub source
+
+  story_catalog:
+    pattern: docs/catalog/stories.yaml
+    owner: backlog-sync
+
+  # --- Clarification --------------------------------------------------------
+  clarification_report:
+    pattern: docs/evidence/{story_id}-clarification-report.md
+    owner: us-clarifier
+
+  open_decisions:
+    pattern: docs/decisions/{story_id}-open-decisions.md
+    owner: us-clarifier
+
+  # --- Specification --------------------------------------------------------
+  specification:
+    pattern: docs/specifications/{story_id}-spec.md
+    owner: story-spec-writer
+
+  specification_review:
+    pattern: docs/reviews/specifications/{story_id}-spec-review.md
+    owner: story-spec-reviewer
+
+  # --- Design ---------------------------------------------------------------
+  api_design:
+    pattern: docs/designs/api/{story_id}-api-design.md
+    owner: openapi-designer
+
+  openapi:
+    pattern: docs/designs/api/{story_id}-openapi.yaml
+    owner: openapi-designer
+
+  database_design:
+    pattern: docs/designs/database/{story_id}-db-design.md
+    owner: db-designer
+
+  entity_model:
+    pattern: docs/designs/database/{story_id}-entity-model.md
+    owner: db-designer
+
+  design_review:
+    pattern: docs/reviews/designs/{story_id}-design-review.md
+    owner: design-reviewer
+
+  # --- Impact / Planning ----------------------------------------------------
+  impact_analysis:
+    pattern: docs/impact-analysis/{story_id}-impact-analysis.md
+    owner: impact-analyzer
+
+  implementation_plan:
+    pattern: docs/plans/{story_id}-implementation-plan.md
+    owner: planner
+
+  task_breakdown:
+    pattern: docs/plans/{story_id}-task-breakdown.md
+    owner: implementation-planner
+
+  plan_review:
+    pattern: docs/reviews/plans/{story_id}-plan-review.md
+    owner: plan-reviewer
+
+  # --- Tests ----------------------------------------------------------------
+  test_strategy:
+    pattern: docs/tests/{story_id}-test-strategy.md
+    owner: test-writer
+
+  ac_test_matrix:
+    pattern: docs/tests/{story_id}-ac-test-matrix.md
+    owner: test-writer
+
+  test_generation_report:
+    pattern: docs/evidence/{story_id}-test-generation-report.md
+    owner: test-writer
+
+  # --- Implementation -------------------------------------------------------
+  # IMPLEMENTATION spans four builder skills (schema-builder, data-layer-builder,
+  # migration-manager, service-and-router-builder). None of them owns a
+  # story-level artifact: their output is source code, and their per-task
+  # progress is tracked in `pipeline_status`. The aggregated evidence is written
+  # at QUALITY_GATE by gate-enforcer, the only skill that runs after all four.
+
+  implementation_report:
+    pattern: docs/evidence/{story_id}-implementation-report.md
+    owner: gate-enforcer
+    note: >
+      What was actually built - modules, files, endpoints, migrations - as the
+      aggregate of all IMPLEMENTATION sub-steps. Consumed by
+      implementation-verifier and reconciliation-reviewer.
+
+  quality_gate_report:
+    pattern: docs/evidence/{story_id}-quality-gate-report.md
+    owner: gate-enforcer
+    note: >
+      Mechanical gate evidence only: pytest, mypy --strict, lint-imports, and
+      pre-commit results with actual command output. Distinct from
+      implementation_report, which describes scope rather than proving it.
+
+  implementation_verification:
+    pattern: docs/verification/{story_id}-implementation-verification.md
+    owner: implementation-verifier
+
+  security_review:
+    pattern: docs/reviews/security/{story_id}-security-review.md
+    owner: security-reviewer
+
+  # --- Reconciliation -------------------------------------------------------
+  reconciliation:
+    pattern: docs/reviews/reconciliation/{story_id}-reconciliation.md
+    owner: reconciliation-reviewer
+
+  traceability:
+    pattern: docs/reconciliation/{story_id}-traceability.md
+    owner: reconciliation-reviewer
+
+  # --- PR -------------------------------------------------------------------
+  pr_summary:
+    pattern: docs/pr/{story_id}-pr-summary.md
+    owner: pr-preparer
+
+  # --- Delivery / Archive ---------------------------------------------------
+  delivery_summary:
+    pattern: docs/evidence/{story_id}-delivery-summary.md
+    owner: story-orchestrator
+
+  # --- Cross-story harness artifacts ---------------------------------------
+  pipeline_status:
+    pattern: docs/catalog/{story_id}-pipeline-status.md
+    owner: story-orchestrator
+
+  workflow_history:
+    pattern: docs/workflow/history.jsonl
+    owner: story-orchestrator
+
+  project_state:
+    pattern: docs/knowledge/project-state.md
+    owner: story-orchestrator
+
+# =============================================================================
+# Retired paths. MUST NOT appear in any skill, command, or new artifact.
+# docs/workflow/history.jsonl is the single exclusion (append-only history).
+#
+# The sequential story-id scheme (US-001..US-016) was unified onto the
+# epic-dotted scheme (US-1.1..US-4.3) during the harness migration. Both the
+# id form and, for five artifact classes, the path shape changed.
+# =============================================================================
+retired_paths:
+
+  # --- directory moves ---
+  docs/security/{id}-security-review.md:
+    replacement: docs/reviews/security/{story_id}-security-review.md
+  docs/reconciliation/{id}-reconciliation-report.md:
+    replacement: docs/reviews/reconciliation/{story_id}-reconciliation.md
+
+  # --- filename-stem changes ---
+  docs/verification/{id}-verification-report.md:
+    replacement: docs/verification/{story_id}-implementation-verification.md
+  docs/pr/{id}-pr-description.md:
+    replacement: docs/pr/{story_id}-pr-summary.md
+  docs/tests/{id}-traceability-matrix.md:
+    replacement: docs/tests/{story_id}-ac-test-matrix.md
+    note: >
+      The single matrix file is superseded by a pair. Migrated files land at
+      the ac_test_matrix path; test_strategy is produced for new stories only.
+
+  # --- specification filename carried a slug that the registry pattern drops ---
+  docs/specifications/{id}-{slug}-spec.md:
+    replacement: docs/specifications/{story_id}-spec.md
+
+retired_id_scheme:
+  note: >
+    Sequential ids are retired. Any US-0NN reference outside history.jsonl is a
+    defect. Mapping is recorded in docs/catalog/stories.yaml as `retired_id`.
+  US-001: US-1.1
+  US-002: US-1.2
+  US-003: US-1.3
+  US-004: US-1.4
+  US-005: US-2.1
+  US-006: US-2.2
+  US-007: US-2.3
+  US-008: US-2.4
+  US-009: US-2.5
+  US-010: US-2.6
+  US-011: US-3.1
+  US-012: US-3.2
+  US-013: US-3.3
+  US-014: US-4.1
+  US-015: US-4.2
+  US-016: US-4.3

@@ -66,3 +66,72 @@ Complete only when:
 - The clarification report states an explicit readiness verdict.
 
 Do not write a specification. That is `story-spec-writer`'s job, and it should only be invoked once this skill's verdict is **Ready for Specification** or the user explicitly accepts the open risk.
+
+---
+
+# Harness Contract
+
+This skill owns the `CLARIFICATION` stage of `docs/workflow/stage-map.yaml`.
+
+## Canonical sources
+
+- Workflow / stage / loop-back keys: `docs/workflow/stage-map.yaml` (`CLARIFICATION`).
+- Artifact paths: `docs/workflow/artifact-paths.yaml` - **authoritative**.
+  Resolve `story`. Any path shown elsewhere in this skill is illustrative;
+  the registry wins.
+- Status vocabularies: `docs/workflow/artifact-lifecycle.md`.
+- Front matter and the staleness contract: `docs/workflow/artifact-schema.md`.
+- Workflow state: `docs/workflow/state-schema.md`.
+
+## Inputs (registry keys)
+
+- `story`
+
+## Preconditions (harness)
+
+- Every consumed artifact is current: `status` is not `SUPERSEDED` or
+  `ARCHIVED`, and the `version` this skill records in its own `inputs` is the
+  version actually on disk. A stale input is `BLOCKED`, not a caveat.
+- No `TODO` / `TBD` / `FIXME` / unresolved blocking Open Decision in an
+  `APPROVED` input that this stage depends on.
+- `docs/workflow/active-story.yaml` and `docs/workflow/workflow-state.yaml`
+  agree on which story is active.
+
+## Result Envelope
+
+Return exactly this. `story-orchestrator` records the transition; this skill
+never writes `docs/workflow/workflow-state.yaml`.
+
+```yaml
+result:
+  verdict: PASS | BLOCKED
+  stage: CLARIFICATION
+  story: <StoryId>
+  artifact_status: DRAFT
+  artifacts:
+    - docs/evidence/<StoryId>-clarification-report.md
+    - docs/decisions/<StoryId>-open-decisions.md
+  next_stage: SPECIFICATION
+  loop_back_stage: null
+  blocking_issues: []
+  non_blocking_findings: []
+```
+
+- `PASS` - scope is understood; every ambiguity is either resolved by a cited
+  source or recorded as an Open Decision; both artifacts exist. Open Decisions
+  may still be `OPEN`: they are resolved at `HUMAN_SPEC_APPROVAL`, not here.
+- `BLOCKED` - the story is missing or unintelligible, or `active-story.yaml`
+  and `workflow-state.yaml` disagree on which story is active.
+
+## Prohibited (harness)
+
+- Do not update workflow state (`workflow-state.yaml`, `active-story.yaml`,
+  `history.jsonl`) - `story-orchestrator` owns those.
+- Do not produce an artifact this skill does not own in
+  `docs/workflow/artifact-paths.yaml`.
+- Do not resolve Open Decisions.
+- Do not emit a retired verdict (`Pass`, `Fail`, `Pass with Issues`,
+  `APPROVED`, ...) - see `artifact-lifecycle.md` section 2.
+- Do not use the retired sequential story ids (`US-0NN`) or retired stage
+  identifiers (`DESIGN`, `PLANNING`, `TESTS`, `VERIFICATION`, `PR`).
+- Do not create commits, branches, or Pull Requests.

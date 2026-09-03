@@ -194,7 +194,7 @@ def test_generate_refresh_token_is_random_each_call() -> None:
     assert first_hash != second_hash
 
 
-# --- US-009 FR-6/FR-7: mfa_enrollment_required claim ----------------------
+# --- US-2.5 FR-6/FR-7: mfa_enrollment_required claim ----------------------
 
 
 def test_encode_decode_access_token_round_trip_with_mfa_enrollment_required() -> None:
@@ -228,7 +228,7 @@ def test_decode_access_token_missing_mfa_enrollment_claim_defaults_false() -> No
     assert claims.mfa_enrollment_required is False
 
 
-# --- US-009 FR-3: mfa_token generation/hashing -----------------------------
+# --- US-2.5 FR-3: mfa_token generation/hashing -----------------------------
 
 
 def test_generate_mfa_token_returns_distinct_raw_and_hash() -> None:
@@ -250,7 +250,7 @@ def test_generate_mfa_token_is_random_each_call() -> None:
     assert first_raw != second_raw
 
 
-# --- US-009 FR-1: TOTP secret / otpauth_uri --------------------------------
+# --- US-2.5 FR-1: TOTP secret / otpauth_uri --------------------------------
 
 
 def test_generate_totp_secret_is_20_random_bytes() -> None:
@@ -278,7 +278,7 @@ def test_build_otpauth_uri_encodes_rfc6238_params() -> None:
     assert "user%40example.com" in uri
 
 
-# --- US-009 FR-4: TOTP verification, skew tolerance ------------------------
+# --- US-2.5 FR-4: TOTP verification, skew tolerance ------------------------
 
 
 def test_verify_totp_code_correct_code_returns_matched_step() -> None:

@@ -62,7 +62,7 @@ _CREATE_DEFAULT_PARTITION = """
 CREATE TABLE IF NOT EXISTS audit_log_default PARTITION OF audit_log DEFAULT
 """
 
-# US-013-entity-model.md's Indexes Summary: covering index for FR-1's
+# US-3.3-entity-model.md's Indexes Summary: covering index for FR-1's
 # filtered, newest-first query. Also load-bearing for the hash-chain
 # trigger's own seed query (`ORDER BY occurred_at DESC, id DESC LIMIT 1`,
 # run on every single INSERT) — without this, that query full-scans and
@@ -174,7 +174,7 @@ CREATE TRIGGER audit_log_hash_chain_trigger
 """
 
 # Compatibility view over the 4 existing, still-live per-domain tables plus
-# `audit_log` itself (US-013-entity-model.md) — `ticket_audit_log` (a 5th
+# `audit_log` itself (US-3.3-entity-model.md) — `ticket_audit_log` (a 5th
 # source) is excluded per OD-4, since Epic 4/the ticket module doesn't
 # exist yet; extending this view is a small migration when it ships.
 # `profile_audit_log`'s timestamp column is actually named `timestamp`, not

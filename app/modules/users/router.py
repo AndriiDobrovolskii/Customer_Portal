@@ -62,7 +62,7 @@ async def login(
         user_agent=request.headers.get("User-Agent"),
         request_id=request_id,
     )
-    # US-009 MF-AC3: no refresh token is issued on the MFA-challenge branch
+    # US-2.5 MF-AC3: no refresh token is issued on the MFA-challenge branch
     # (raw_refresh_token is None), so no cookie is set - the client must
     # call /mfa/verify to actually complete the login.
     if raw_refresh_token is not None:

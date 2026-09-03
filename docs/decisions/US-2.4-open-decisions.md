@@ -1,7 +1,7 @@
 # Open Decisions: US-2.4 Password Reset
 
 **Story:** `docs/stories/US-2.4-password-reset.md`
-**Pre-existing spec:** `docs/specifications/US-008-password-reset-spec.md` (drafted 2026-08-22, Pass with Issues, predates the actual login/logout/refresh codebase now in place).
+**Pre-existing spec:** `docs/specifications/US-2.4-spec.md` (drafted 2026-08-22, Pass with Issues, predates the actual login/logout/refresh codebase now in place).
 **Logged:** 2026-09-01
 
 ## Resolutions (2026-09-01)
@@ -46,5 +46,5 @@ All three Open Decisions below were resolved by the user on 2026-09-01, recommen
 
 ## Resolved by precedent (not logged as Open Decisions)
 
-- **PR-AC4's three-way token-state mapping** (`token-expired` vs `token-invalid` for expired / consumed / unknown-hash), left as an unresolved Open Question in the pre-existing `US-008` spec, is resolved by direct precedent: `app/modules/email_verification/service.py` — which handles the exact token shape this story cites as its model (`email_verification_tokens`) — already maps unknown-hash → `TokenInvalidError`, already-consumed → `TokenInvalidError`, expired → `TokenExpiredError`. Recommend applying the identical mapping here.
+- **PR-AC4's three-way token-state mapping** (`token-expired` vs `token-invalid` for expired / consumed / unknown-hash), left as an unresolved Open Question in the pre-existing `US-2.4` spec, is resolved by direct precedent: `app/modules/email_verification/service.py` — which handles the exact token shape this story cites as its model (`email_verification_tokens`) — already maps unknown-hash → `TokenInvalidError`, already-consumed → `TokenInvalidError`, expired → `TokenExpiredError`. Recommend applying the identical mapping here.
 - **Missing/empty/malformed email on the request endpoint**, the pre-existing spec's second unresolved Open Question, is resolved by precedent: `LoginRequest.email` is typed as plain `str` with no format validation (`app/modules/users/schemas.py`); no endpoint in this codebase validates email format at the schema layer. Recommend the same: no dedicated format validation, `email: str`.

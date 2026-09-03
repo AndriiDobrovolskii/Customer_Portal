@@ -114,7 +114,7 @@ class PasswordPolicyError(ProblemError):
 
 
 class TokenStaleError(ProblemError):
-    """MR-AC2 (US-3.2/spec US-012): the session's access token was issued
+    """MR-AC2 (US-3.2/spec US-3.2): the session's access token was issued
     before the target's last role change (`perm_epoch`). Deliberately a
     distinct type slug from `UnauthenticatedError` — the client is meant
     to react by calling `/auth/refresh`, not by re-authenticating from
@@ -129,10 +129,10 @@ class TokenStaleError(ProblemError):
 
 class MfaInvalidCodeError(ProblemError):
     """FR-4: incorrect code, replayed code, or an invalid/expired/already-
-    consumed mfa_token — all indistinguishable (US-009 MF-AC4). Also
+    consumed mfa_token — all indistinguishable (US-2.5 MF-AC4). Also
     reused by FR-2's activate (wrong code, or no PENDING enrolment at
     all — an Open Question the API design left as one generic shape,
-    see docs/designs/api/US-009-api-design.md) and by FR-8's disable
+    see docs/designs/api/US-2.5-api-design.md) and by FR-8's disable
     (wrong TOTP code).
     """
 
@@ -160,7 +160,7 @@ class MfaEnrollmentRequiredError(ProblemError):
     recovery-code use) and the endpoint being called is not one of the
     two enrolment endpoints that accept such a token. This is the
     default-deny check at the shared authenticated-request choke point
-    (get_authenticated_user) — see docs/plans/US-009-implementation-plan.md
+    (get_authenticated_user) — see docs/plans/US-2.5-implementation-plan.md
     Architectural Change #2.
     """
 
