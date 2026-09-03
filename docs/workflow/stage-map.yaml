@@ -1,12 +1,395 @@
-stages:
+# =============================================================================
+# CANONICAL WORKFLOW + ROUTING DEFINITION
+# =============================================================================
+# This file is the ONLY authoritative definition of the story-delivery
+# workflow: stage identifiers, stage order, stage ownership, normal
+# transitions, loop-back targets, and human gates.
+#
+# No skill, command, or prose document may define an alternative stage list,
+# alternative stage identifiers, or alternative routing. Prose docs
+# (stages.md, AGENTS.md, skill "Position in Workflow" sections) are
+# explanatory and MUST stay consistent with this file.
+#
+# Artifact locations referenced here are registry KEYS defined in
+# docs/workflow/artifact-paths.yaml. Never put a filesystem path in this file.
+#
+# Result contract (see docs/workflow/artifact-lifecycle.md):
+#   verdict = PASS             -> orchestrator advances to `next`
+#   verdict = CHANGES_REQUIRED -> orchestrator routes to loop_back[<key>]
+#                                 (the skill selects the key; it MUST exist here)
+#   verdict = BLOCKED          -> orchestrator holds at the current stage and
+#                                 surfaces blocking_issues
+#   verdict = NOT_APPLICABLE   -> only where `optional: true`; advances to `next`
+#
+# Only story-orchestrator may record a transition (docs/workflow/workflow-state.yaml
+# + append docs/workflow/history.jsonl). Stage skills never mutate workflow state.
+# =============================================================================
+
+version: 2
+workflow: story-delivery
+
+# Ordered list of canonical stage identifiers. This is the authoritative set.
+stage_order:
+  - BACKLOG_SYNC
   - CLARIFICATION
   - SPECIFICATION
   - SPEC_REVIEW
-  - DESIGN
-  - PLANNING
-  - TESTS
+  - HUMAN_SPEC_APPROVAL
+  - API_DESIGN
+  - DB_DESIGN
+  - DESIGN_REVIEW
+  - IMPACT_ANALYSIS
+  - ARCHITECTURE_PLANNING
+  - IMPLEMENTATION_PLANNING
+  - PLAN_REVIEW
+  - HUMAN_PLAN_APPROVAL
+  - TEST_WRITING
   - IMPLEMENTATION
-  - VERIFICATION
+  - QUALITY_GATE
+  - IMPLEMENTATION_VERIFICATION
   - SECURITY_REVIEW
   - RECONCILIATION
-  - PR
+  - HUMAN_PR_APPROVAL
+  - PR_PREPARATION
+  - READY_FOR_PR
+  - COMPLETED
+  - ARCHIVED
+
+# Artifact types produced only when the approved Specification does NOT mark
+# that area NOT_APPLICABLE. When a stage lists one of these in `inputs`, the
+# input is REQUIRED unless the owning stage (API_DESIGN / DB_DESIGN) recorded a
+# NOT_APPLICABLE verdict, in which case the consuming stage proceeds without it.
+# A dry-run / validator treats these as "conditionally required".
+conditional_artifacts:
+  - api_design
+  - openapi
+  - database_design
+  - entity_model
+  - design_review
+
+# Retired identifiers -> canonical replacement. MUST NOT appear anywhere in the
+# active harness. docs/workflow/history.jsonl is the single exclusion.
+retired_identifiers:
+  CLARIFY: CLARIFICATION
+  SPEC_WRITE: SPECIFICATION
+  DESIGN: [API_DESIGN, DB_DESIGN]
+  PLANNING: [ARCHITECTURE_PLANNING, IMPLEMENTATION_PLANNING]
+  TESTS: TEST_WRITING
+  TESTING: TEST_WRITING
+  VERIFICATION: IMPLEMENTATION_VERIFICATION
+  IMPLEMENTATION_VERIFY: IMPLEMENTATION_VERIFICATION
+  HUMAN_REVIEW: HUMAN_PR_APPROVAL
+  PR: PR_PREPARATION
+  PULL_REQUEST: READY_FOR_PR
+  DONE: COMPLETED
+
+stages:
+
+  BACKLOG_SYNC:
+    type: automated_skill
+    skill: backlog-sync
+    purpose: >
+      Synchronize the active Story from the configured GitHub source (when one
+      exists) into docs/stories/ and docs/catalog/stories.yaml.
+    inputs: []                       # external: GitHub MCP issues
+    outputs: [story, story_catalog]
+    next: CLARIFICATION
+    run_policy: >
+      Not run during every `continue`. Runs only on explicit backlog sync, on
+      Story activation, or on a RECONCILIATION story_source_conflict loop-back.
+
+  CLARIFICATION:
+    type: automated_skill
+    skill: us-clarifier
+    inputs: [story]
+    outputs: [clarification_report, open_decisions]
+    next: SPECIFICATION
+
+  SPECIFICATION:
+    type: automated_skill
+    skill: story-spec-writer
+    inputs: [story, clarification_report, open_decisions]
+    outputs: [specification]
+    next: SPEC_REVIEW
+
+  SPEC_REVIEW:
+    type: automated_skill
+    skill: story-spec-reviewer
+    inputs: [story, specification, open_decisions]
+    outputs: [specification_review]
+    next: HUMAN_SPEC_APPROVAL
+    loop_back:
+      changes_required: SPECIFICATION
+      changes_required_clarification: CLARIFICATION
+
+  HUMAN_SPEC_APPROVAL:
+    type: human_gate
+    owner: human
+    required_artifacts: [specification, specification_review]
+    approve_command: "/so:approve"
+    reject_command: "/so:reject"
+    on_approve: API_DESIGN
+    on_reject: SPECIFICATION
+
+  API_DESIGN:
+    type: automated_skill
+    skill: openapi-designer
+    inputs: [specification, specification_review, open_decisions]
+    outputs: [api_design, openapi]
+    next: DB_DESIGN
+    optional: true
+    optional_when: >
+      The approved Specification explicitly states the Story does not change
+      public API behavior. Record the decision; emit verdict NOT_APPLICABLE.
+
+  DB_DESIGN:
+    type: automated_skill
+    skill: db-designer
+    inputs: [specification, api_design, openapi, open_decisions]
+    outputs: [database_design, entity_model]
+    next: DESIGN_REVIEW
+    optional: true
+    optional_when: >
+      The approved Specification explicitly states the Story does not change
+      persistence behavior. Record the decision; emit verdict NOT_APPLICABLE.
+
+  DESIGN_REVIEW:
+    type: automated_skill
+    skill: design-reviewer
+    inputs: [story, specification, specification_review, api_design, openapi,
+             database_design, entity_model, open_decisions]
+    outputs: [design_review]
+    next: IMPACT_ANALYSIS
+    optional: true
+    optional_when: >
+      Both API_DESIGN and DB_DESIGN recorded verdict NOT_APPLICABLE (the Story
+      changes neither public API behavior nor persistence). There is no design to
+      review; emit verdict NOT_APPLICABLE with a one-line rationale and still
+      produce a design_review artifact stating both areas were out of scope.
+    loop_back:
+      changes_required_api: API_DESIGN
+      changes_required_database: DB_DESIGN
+      changes_required_both: API_DESIGN
+
+  IMPACT_ANALYSIS:
+    type: automated_skill
+    skill: impact-analyzer
+    inputs: [story, specification, specification_review, api_design, openapi,
+             database_design, entity_model, design_review, open_decisions]
+    outputs: [impact_analysis]
+    next: ARCHITECTURE_PLANNING
+    loop_back:
+      changes_required_specification: SPECIFICATION
+      changes_required_api: API_DESIGN
+      changes_required_database: DB_DESIGN
+
+  ARCHITECTURE_PLANNING:
+    type: automated_skill
+    skill: planner
+    purpose: >
+      Architectural plan: what changes, which files, which risks, how it is
+      validated. Consumes impact-analyzer's blast-radius survey rather than
+      re-deriving it. Decides WHAT; IMPLEMENTATION_PLANNING decides IN WHAT ORDER.
+    inputs: [story, open_decisions, specification, specification_review,
+             api_design, openapi, database_design, entity_model, design_review,
+             impact_analysis]
+    outputs: [implementation_plan]
+    next: IMPLEMENTATION_PLANNING
+    loop_back:
+      changes_required_impact: IMPACT_ANALYSIS
+      changes_required_specification: SPECIFICATION
+
+  IMPLEMENTATION_PLANNING:
+    type: automated_skill
+    skill: implementation-planner
+    purpose: >
+      Ordered, independently-verifiable tasks naming which execution skill runs
+      each one, respecting AGENTS.md section 3 layering and the
+      migration-before-model-use rule.
+    inputs: [story, specification, api_design, openapi, database_design,
+             entity_model, impact_analysis, implementation_plan]
+    outputs: [task_breakdown]
+    next: PLAN_REVIEW
+    loop_back:
+      changes_required_plan: ARCHITECTURE_PLANNING
+
+  PLAN_REVIEW:
+    type: automated_skill
+    skill: plan-reviewer
+    inputs: [story, specification, specification_review, impact_analysis,
+             implementation_plan, task_breakdown, api_design, openapi,
+             database_design, entity_model, open_decisions]
+    outputs: [plan_review]
+    next: HUMAN_PLAN_APPROVAL
+    loop_back:
+      changes_required: ARCHITECTURE_PLANNING
+      changes_required_sequencing: IMPLEMENTATION_PLANNING
+
+  HUMAN_PLAN_APPROVAL:
+    type: human_gate
+    owner: human
+    required_artifacts: [implementation_plan, task_breakdown, plan_review]
+    approve_command: "/so:approve"
+    reject_command: "/so:reject"
+    on_approve: TEST_WRITING
+    on_reject: ARCHITECTURE_PLANNING
+
+  TEST_WRITING:
+    type: automated_skill
+    skill: test-writer
+    inputs: [story, specification, api_design, openapi, database_design,
+             entity_model, impact_analysis, implementation_plan, task_breakdown,
+             plan_review]
+    outputs: [test_strategy, ac_test_matrix, test_generation_report]
+    next: IMPLEMENTATION
+    loop_back:
+      changes_required_tests: TEST_WRITING
+      invalid_specification: SPECIFICATION
+      invalid_api_design: API_DESIGN
+      invalid_database_design: DB_DESIGN
+
+  IMPLEMENTATION:
+    type: composite_skill
+    purpose: >
+      Code generation. Sub-steps run in the dependency order fixed by
+      AGENTS.md section 3 (models/migration before repository, repository before
+      service, service before router) and refined per story by task_breakdown.
+      Sub-step progress is tracked in pipeline_status, NOT in workflow-state.yaml.
+    skills:
+      - schema-builder                # schemas.py
+      - data-layer-builder            # models.py, repository.py, cache.py
+      - migration-manager             # alembic revision, proven upgrade/downgrade/upgrade
+      - service-and-router-builder    # service.py, router.py, dependencies.py, exceptions.py
+    inputs: [story, open_decisions, specification, specification_review,
+             impact_analysis, implementation_plan, task_breakdown, plan_review,
+             api_design, openapi, database_design, entity_model, test_strategy,
+             ac_test_matrix]
+    outputs: [pipeline_status]
+    next: QUALITY_GATE
+    loop_back:
+      partial: IMPLEMENTATION
+      blocked_by_plan: IMPLEMENTATION_PLANNING
+      blocked_by_architecture: ARCHITECTURE_PLANNING
+
+  QUALITY_GATE:
+    type: automated_skill
+    skill: gate-enforcer
+    purpose: >
+      The mechanical Definition-of-Done gate (AGENTS.md section 6) plus the
+      runtime rules no tool checks (section 6.6). Runs once, after every
+      IMPLEMENTATION sub-step is complete. Also writes the aggregated
+      implementation_report that downstream review stages consume.
+    inputs: [story, implementation_plan, task_breakdown, ac_test_matrix]
+    outputs: [implementation_report, quality_gate_report]
+    next: IMPLEMENTATION_VERIFICATION
+    loop_back:
+      changes_required: IMPLEMENTATION
+
+  IMPLEMENTATION_VERIFICATION:
+    type: automated_skill
+    skill: implementation-verifier
+    inputs: [story, specification, specification_review, impact_analysis,
+             implementation_plan, task_breakdown, plan_review,
+             implementation_report, quality_gate_report, api_design, openapi,
+             database_design, entity_model, test_strategy, ac_test_matrix]
+    outputs: [implementation_verification]
+    next: SECURITY_REVIEW
+    loop_back:
+      changes_required: IMPLEMENTATION
+
+  SECURITY_REVIEW:
+    type: automated_skill
+    skill: security-reviewer
+    inputs: [story, specification, specification_review, impact_analysis,
+             implementation_plan, plan_review, implementation_report,
+             implementation_verification, api_design, openapi, database_design,
+             entity_model, test_strategy, ac_test_matrix, open_decisions]
+    outputs: [security_review]
+    next: RECONCILIATION
+    loop_back:
+      changes_required: IMPLEMENTATION
+      invalid_security_design: API_DESIGN
+
+  RECONCILIATION:
+    type: automated_skill
+    skill: reconciliation-reviewer
+    inputs: [story, specification, specification_review, api_design, openapi,
+             database_design, entity_model, design_review, impact_analysis,
+             implementation_plan, task_breakdown, plan_review, test_strategy,
+             ac_test_matrix, test_generation_report, implementation_report,
+             implementation_verification, security_review, open_decisions]
+    outputs: [reconciliation, traceability]
+    next: HUMAN_PR_APPROVAL
+    loop_back:
+      implementation_drift: IMPLEMENTATION
+      test_gap: TEST_WRITING
+      plan_gap: ARCHITECTURE_PLANNING
+      design_gap: API_DESIGN
+      specification_gap: SPECIFICATION
+      story_source_conflict: BACKLOG_SYNC
+
+  HUMAN_PR_APPROVAL:
+    type: human_gate
+    owner: human
+    required_artifacts: [implementation_verification, security_review,
+                         reconciliation, traceability]
+    approve_command: "/so:approve"
+    reject_command: "/so:reject"
+    on_approve: PR_PREPARATION
+    on_reject: RECONCILIATION
+
+  PR_PREPARATION:
+    type: automated_skill
+    skill: pr-preparer
+    inputs: [story, specification, impact_analysis, implementation_plan,
+             implementation_report, implementation_verification, security_review,
+             reconciliation, traceability]
+    outputs: [pr_summary]
+    next: READY_FOR_PR
+    loop_back:
+      stale_reconciliation: RECONCILIATION
+
+  READY_FOR_PR:
+    type: human_gate
+    owner: human
+    required_artifacts: [pr_summary]
+    meaning: >
+      All harness checks have passed. A human creates or finalizes the Pull
+      Request and records that it is open/ready. No new artifact prerequisites
+      beyond what PR_PREPARATION produced. Consistent with AGENTS.md section 1:
+      the harness proposes, a human executes shared-state actions (push, PR
+      creation, merge).
+    approve_command: "/so:approve"
+    on_approve: COMPLETED
+    on_reject: PR_PREPARATION
+
+  COMPLETED:
+    type: human_gate
+    owner: human
+    required_artifacts: [pr_summary]
+    meaning: >
+      A human confirms the Pull Request has been merged, or the delivery has
+      otherwise been explicitly marked complete. Archive mode may run only from
+      this stage.
+    approve_command: "/so:approve"
+    on_approve: ARCHIVED
+    on_reject: PR_PREPARATION
+
+  ARCHIVED:
+    type: terminal
+    owner: story-orchestrator
+    meaning: >
+      Knowledge consolidation and workflow cleanup are complete. Reached only
+      through archive mode after explicit human invocation. Story artifacts are
+      NOT physically moved; catalog status + artifact metadata distinguish
+      history from active work.
+    produces: [delivery_summary, project_state]
+
+# Input rule: every entry in a stage's `inputs` is either always-required or
+# listed in `conditional_artifacts` above (required unless its owning design
+# stage recorded NOT_APPLICABLE). The orchestrator resolves each to a path via
+# artifact-paths.yaml before invoking the stage skill.
+#
+# Loop-back rule: a skill may name a loop_back key only if that key exists under
+# the current stage's `loop_back` map in this file. The orchestrator rejects an
+# unknown key and holds the stage as BLOCKED pending human decision.
