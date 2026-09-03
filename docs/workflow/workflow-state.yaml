@@ -1,8 +1,26 @@
 story: US-3.3
 
-current_stage: RECONCILIATION
+current_stage: PR
 
-status: BLOCKED
+status: IN_PROGRESS
+# RECONCILIATION re-run done 2026-09-03: docs/reconciliation/US-013-
+# reconciliation-report.md - PASS (initial pass Fail, 3 gaps
+# found+closed same-day). User chose "re-invoke test-writer" over
+# accepting the gaps; test-writer closed all 3 (AU-AC1 new field-shape
+# test, AU-AC2/AU-AC5 tightened existing tests), plus the 2 stale
+# matrix lines. Mid-session environment resolution: mypy became
+# blocked by Windows Smart App Control (WinError 4551, same class as
+# the known detect-secrets block but hitting mypy's compiled `librt`
+# dependency) - user asked how to bypass SAC, was given 3 options
+# (disable SAC/rebuild from source/wait), chose rebuild; `uv pip
+# install --no-binary librt/mypy --reinstall-package` fixed it, and as
+# a side effect cleared detect-secrets too - full pre-commit 7/7 green
+# again, no --no-verify needed for remaining commits this story.
+# Full re-verification: 557/557 tests (was 556), mypy strict clean (131
+# files), lint-imports 6/6. Advancing to PR - pr-preparer invoked next;
+# push/PR-creation still requires explicit user authorization per this
+# pipeline's standing convention (every prior story required "go"/"gp").
+#
 # RECONCILIATION done 2026-09-03: docs/reconciliation/US-013-
 # reconciliation-report.md - FAIL. Every AC has a matrix row and every
 # named test function exists (2 stale matrix lines fixed in place: a
