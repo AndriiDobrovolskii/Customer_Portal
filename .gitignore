@@ -39,10 +39,6 @@ docs/hooks/
 
 # .graphifyignore
 node_modules/
-dist/
 *.generated.py
-
-# only index src/, ignore everything else
-*
-!src/
-!src/**
+graphify-out/
+.claude/*.graphify-bak
