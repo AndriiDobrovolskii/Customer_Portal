@@ -2,9 +2,9 @@
 artifact_type: security_review
 story: US-4.1
 version: 2
-status: DRAFT
+status: ARCHIVED
 created_at: "2026-09-04T02:00:00Z"
-updated_at: "2026-09-04T09:00:00Z"
+updated_at: "2026-09-04T15:00:00Z"
 produced_by: security-reviewer
 supersedes: 1
 inputs:

@@ -5,8 +5,8 @@
 
 version: 1
 
-active_story: US-4.1
-story_path: docs/stories/US-4.1-create-ticket.md
+active_story: null
+story_path: null
 
 source:
   type: local_only
@@ -14,12 +14,12 @@ source:
   issue_number: null
   issue_url: null
 
-activated_at: "2026-09-03T00:00:00Z"
-activated_by: Andrii Dobrovolskii
+activated_at: null
+activated_by: null
 
-status: IN_PROGRESS
+status: ARCHIVED
 
 note: >
-  A draft specification and spec review exist for US-4.1 but predate the
-  current codebase (docs/catalog/stories.yaml note). They are context only;
-  CLARIFICATION runs fresh.
+  US-4.1 (Support Tickets - Create) was delivered as PR #16 (merged
+  2026-09-04T07:54:07Z, de191f3) and archived via /so:archive on 2026-09-04.
+  See docs/evidence/US-4.1-delivery-summary.md. No Story is currently active.

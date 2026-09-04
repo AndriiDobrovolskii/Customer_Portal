@@ -149,11 +149,12 @@ stories:
     path: docs/stories/US-4.1-create-ticket.md
     epic: EPIC-4
     title: Support Tickets (Create)
-    state: IN_PROGRESS
+    state: ARCHIVED
+    delivered_by: { pr: 16, note: "Merged 2026-09-04T07:54:07Z (de191f3)" }
     note: >
-      A draft specification and spec review exist but predate the current
-      codebase. CLARIFICATION runs fresh when this Story is activated.
-      Activated 2026-09-03 via /so:start.
+      Delivered through the full pipeline 2026-09-03/04 and archived
+      2026-09-04. See docs/evidence/US-4.1-delivery-summary.md. OD-3 (category
+      enum) and BR-007 FK ondelete mechanics remain open, carried forward.
 
   - id: US-4.2
     retired_id: US-015

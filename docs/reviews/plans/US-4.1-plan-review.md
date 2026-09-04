@@ -2,9 +2,9 @@
 artifact_type: plan_review
 story: US-4.1
 version: 1
-status: DRAFT
+status: ARCHIVED
 created_at: "2026-09-03T02:00:00Z"
-updated_at: "2026-09-03T02:00:00Z"
+updated_at: "2026-09-04T15:00:00Z"
 produced_by: plan-reviewer
 inputs:
   - path: docs/stories/US-4.1-create-ticket.md

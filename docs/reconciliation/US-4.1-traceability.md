@@ -2,9 +2,9 @@
 artifact_type: traceability
 story: US-4.1
 version: 2
-status: DRAFT
+status: ARCHIVED
 created_at: "2026-09-04T03:00:00Z"
-updated_at: "2026-09-04T10:00:00Z"
+updated_at: "2026-09-04T15:00:00Z"
 produced_by: reconciliation-reviewer
 supersedes: 1
 inputs:

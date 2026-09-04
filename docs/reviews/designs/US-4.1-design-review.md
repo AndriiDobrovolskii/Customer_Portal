@@ -2,9 +2,9 @@
 artifact_type: design_review
 story: US-4.1
 version: 3
-status: APPROVED
+status: ARCHIVED
 created_at: "2026-09-03T00:00:00Z"
-updated_at: "2026-09-03T00:10:00Z"
+updated_at: "2026-09-04T15:00:00Z"
 produced_by: design-reviewer
 inputs:
   - path: docs/stories/US-4.1-create-ticket.md

@@ -2,9 +2,9 @@
 artifact_type: api_design
 story: US-4.1
 version: 3
-status: DRAFT
+status: ARCHIVED
 created_at: "2026-09-03T00:00:00Z"
-updated_at: "2026-09-03T00:05:00Z"
+updated_at: "2026-09-04T15:00:00Z"
 produced_by: openapi-designer
 inputs:
   - path: docs/specifications/US-4.1-spec.md

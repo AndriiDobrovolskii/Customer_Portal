@@ -2,9 +2,9 @@
 artifact_type: task_breakdown
 story: US-4.1
 version: 1
-status: DRAFT
+status: ARCHIVED
 created_at: "2026-09-03T01:00:00Z"
-updated_at: "2026-09-03T01:00:00Z"
+updated_at: "2026-09-04T15:00:00Z"
 produced_by: implementation-planner
 inputs:
   - path: docs/plans/US-4.1-implementation-plan.md

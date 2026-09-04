@@ -22,16 +22,16 @@ last_completed_stage: COMPLETED
 status: ARCHIVED
 attempt: 1
 
-last_invoked_skill: pr-preparer
+last_invoked_skill: story-orchestrator
 
 last_result:
-  verdict: PASS
-  stage: PR_PREPARATION
-  recorded_at: "2026-09-04T12:00:00Z"
+  verdict: ARCHIVED
+  stage: ARCHIVED
+  recorded_at: "2026-09-04T15:00:00Z"
 
 last_artifacts:
-  - type: pr_summary
-    path: docs/pr/US-4.1-pr-summary.md
+  - type: delivery_summary
+    path: docs/evidence/US-4.1-delivery-summary.md
     version: 1
 
 pending_human_gate: null
@@ -46,9 +46,9 @@ non_blocking_findings:
   - "RECONCILIATION v2 (PASS): FR-1 says a 'ticket_audit_log' entry is written; shipped code writes to the existing audit_log table instead (category=\"tickets\"), per DESIGN_REVIEW's DR-1 fix. Disclosed wording-only gap between spec text and the approved, reviewed design — not a code defect."
 
 started_at: "2026-09-03T00:00:00Z"
-updated_at: "2026-09-04T14:00:00Z"
+updated_at: "2026-09-04T15:00:00Z"
 completed_at: "2026-09-04T13:00:00Z"
-archived_at: "2026-09-04T14:00:00Z"
+archived_at: "2026-09-04T15:00:00Z"
 
 implementation_substep: null
 
@@ -792,3 +792,42 @@ note: >
   BR-007 FK ondelete mechanics, the idempotency poll-exhaustion 500 path,
   and the two Spec Drift items (ticket_number guessability, ticket_audit_log
   wording) remain open, carried for /so:archive's consolidation pass.
+  /so:archive ran 2026-09-04T15:00:00Z (story-orchestrator). Verified: exactly
+  one active Story; commit-hygiene concern resolved (working tree clean,
+  US-3.3 evidence/graphify items committed separately at b435a69/9f86883).
+  Found all 21 front-matter-bearing US-4.1 artifacts still status: DRAFT
+  (only design_review v3 was APPROVED) despite every owning skill's recorded
+  PASS verdict and every human gate's recorded /so:approve - no skill this
+  story ever wrote status: APPROVED. Flagged to the user; user chose to
+  backfill DRAFT (and design_review's APPROVED) straight to ARCHIVED on all
+  21, reflecting the already-recorded verdicts/approvals rather than
+  re-deriving them - see docs/evidence/US-4.1-delivery-summary.md's Status
+  backfill note. Separately found feat/us-4.1-create-ticket is 5 commits
+  ahead of main (unmerged, no PR ever opened) despite COMPLETED being
+  approved on the stated premise the PR had been merged; flagged to the user,
+  who chose to record it accurately in the delivery summary and proceed
+  rather than push/merge first.
+  CORRECTION 2026-09-04T15:30:00Z: the "unmerged, no PR ever opened" finding
+  above was wrong. It was derived from `git log -1 main` against the local
+  main ref without running `git fetch origin` first. After the user asked to
+  push the branch and open the PR, `git fetch origin` showed origin/main
+  already contains PR #16 ("feat: add self-service support ticket creation
+  (US-4.1)"), merged 2026-09-04T07:54:07Z via merge commit de191f3 - hours
+  before this archive session began. The COMPLETED gate's 2026-09-04T14:00:00Z
+  approval was correct; my archive-run finding was not. Corrected in
+  docs/evidence/US-4.1-delivery-summary.md, docs/catalog/stories.yaml
+  (delivered_by.pr: 16), and docs/knowledge/project-state.md (Archived
+  Stories row). No push or PR-creation action was taken or is needed. Wrote docs/evidence/US-4.1-delivery-summary.md
+  (v1); set docs/catalog/stories.yaml US-4.1 state to ARCHIVED; updated
+  docs/knowledge/project-state.md (Delivered Capabilities row, two new Known
+  Constraints for OD-3/ticket_number, Archived Stories row) - applied
+  directly per archive-flow step 5. Proposed (NOT applied) three candidate
+  docs/product/business-rules.md entries (ticket-creation idempotency,
+  ticket-creation rate limit, account-deactivated ticket-creation gate) for
+  human review; no docs/ARCHITECTURE.md change proposed (SS3.7 already covers
+  the non-self-committing AuditLogService.record_event pattern). No GitHub
+  sync (source local_only). Cleared active-story.yaml
+  (active_story: null, status: ARCHIVED). category enum (OD-3), BR-007 FK
+  ondelete mechanics, the idempotency poll-exhaustion 500 path, the two Spec
+  Drift items, and the unpushed/unmerged branch all remain open, carried in
+  the delivery summary as known limitations / deferred work.

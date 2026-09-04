@@ -2,9 +2,9 @@
 artifact_type: implementation_verification
 story: US-4.1
 version: 3
-status: DRAFT
+status: ARCHIVED
 created_at: "2026-09-04T07:00:00Z"
-updated_at: "2026-09-04T07:00:00Z"
+updated_at: "2026-09-04T15:00:00Z"
 produced_by: implementation-verifier
 supersedes: docs/verification/US-4.1-implementation-verification.md (v2)
 inputs:

@@ -2,9 +2,9 @@
 artifact_type: pr_summary
 story: US-4.1
 version: 1
-status: DRAFT
+status: ARCHIVED
 created_at: "2026-09-04T12:00:00Z"
-updated_at: "2026-09-04T12:00:00Z"
+updated_at: "2026-09-04T15:00:00Z"
 produced_by: pr-preparer
 inputs:
   - path: docs/verification/US-4.1-implementation-verification.md

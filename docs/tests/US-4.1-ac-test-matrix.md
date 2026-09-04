@@ -2,9 +2,9 @@
 artifact_type: ac_test_matrix
 story: US-4.1
 version: 5
-status: DRAFT
+status: ARCHIVED
 created_at: "2026-09-03T13:00:00Z"
-updated_at: "2026-09-04T04:00:00Z"
+updated_at: "2026-09-04T15:00:00Z"
 produced_by: test-writer
 inputs:
   - path: docs/specifications/US-4.1-spec.md
