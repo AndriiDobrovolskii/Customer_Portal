@@ -284,6 +284,7 @@ stages:
     next: IMPLEMENTATION_VERIFICATION
     loop_back:
       changes_required: IMPLEMENTATION
+      changes_required_tests: TEST_WRITING
 
   IMPLEMENTATION_VERIFICATION:
     type: automated_skill
@@ -296,6 +297,7 @@ stages:
     next: SECURITY_REVIEW
     loop_back:
       changes_required: IMPLEMENTATION
+      changes_required_tests: TEST_WRITING
 
   SECURITY_REVIEW:
     type: automated_skill

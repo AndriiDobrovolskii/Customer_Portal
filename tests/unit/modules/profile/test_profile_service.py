@@ -198,6 +198,9 @@ class RecordingEmailSender:
     async def send_invitation_email(self, *, to: str, raw_token: str) -> None:
         raise NotImplementedError
 
+    async def send_ticket_created_email(self, *, to: str, ticket_number: str) -> None:
+        raise NotImplementedError
+
 
 def _make_service(
     repository: FakeProfileRepository,

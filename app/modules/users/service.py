@@ -682,6 +682,32 @@ class UserService:
         )
         return response, raw_refresh_token
 
+    async def get_email_for_user(self, user_id: uuid.UUID) -> str | None:
+        """Cross-module read (US-4.1 FR-1): `support.service` needs the
+        requester's email address to queue the ticket-created confirmation
+        email via `EmailSender`, which only this module's repository can
+        resolve. Not part of `US-4.1-implementation-plan.md`'s stated
+        collaborator list for `TicketService` — flagged as a plan gap in
+        `docs/catalog/US-4.1-pipeline-status.md` — added here following the
+        same minimal, read-only, service -> service pattern as
+        `resolve_scopes_for_user`/`get_role_grants_for_user` above.
+        """
+        user = await self._repository.get_by_id(user_id)
+        return user.email if user is not None else None
+
+    async def get_account_status_for_user(self, user_id: uuid.UUID) -> str | None:
+        """Cross-module read (US-4.1 FR-5): `support.service` needs the
+        requester's *current* account status to gate ticket creation —
+        `get_authenticated_user` below deliberately never checks it (a
+        session survives its own account's deactivation unless revoked),
+        so a deactivated caller with a still-valid session must be checked
+        here instead. Same minimal, read-only, service -> service pattern
+        as `get_email_for_user` above. Returns `None` for an unknown user,
+        mirroring that method's shape.
+        """
+        user = await self._repository.get_by_id(user_id)
+        return user.status if user is not None else None
+
     async def get_authenticated_user(
         self,
         token: str,

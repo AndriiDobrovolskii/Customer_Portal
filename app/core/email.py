@@ -21,6 +21,8 @@ class EmailSender(Protocol):
 
     async def send_invitation_email(self, *, to: str, raw_token: str) -> None: ...
 
+    async def send_ticket_created_email(self, *, to: str, ticket_number: str) -> None: ...
+
 
 class LoggingEmailSender:
     """No-op sender that logs dispatch without a real mail provider.
@@ -52,6 +54,9 @@ class LoggingEmailSender:
 
     async def send_invitation_email(self, *, to: str, raw_token: str) -> None:
         logger.info("invitation email dispatched")
+
+    async def send_ticket_created_email(self, *, to: str, ticket_number: str) -> None:
+        logger.info("ticket created email dispatched")
 
 
 def get_email_sender() -> EmailSender:

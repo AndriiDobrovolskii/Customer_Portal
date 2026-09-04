@@ -149,10 +149,11 @@ stories:
     path: docs/stories/US-4.1-create-ticket.md
     epic: EPIC-4
     title: Support Tickets (Create)
-    state: BACKLOG
+    state: IN_PROGRESS
     note: >
       A draft specification and spec review exist but predate the current
       codebase. CLARIFICATION runs fresh when this Story is activated.
+      Activated 2026-09-03 via /so:start.
 
   - id: US-4.2
     retired_id: US-015

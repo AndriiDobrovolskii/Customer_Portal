@@ -6,6 +6,7 @@ from app.modules.audit.router import router as audit_router
 from app.modules.email_verification.router import router as email_verification_router
 from app.modules.profile.router import router as profile_router
 from app.modules.roles.router import router as roles_router
+from app.modules.support.router import router as support_router
 from app.modules.users.router import router as users_router
 
 router = APIRouter(prefix="/api/v1")
@@ -16,3 +17,4 @@ router.include_router(account_router)
 router.include_router(roles_router)
 router.include_router(admin_users_router)
 router.include_router(audit_router)
+router.include_router(support_router)
