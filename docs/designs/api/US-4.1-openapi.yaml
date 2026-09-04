@@ -1,0 +1,378 @@
+openapi: 3.0.3
+info:
+  title: Support Tickets (Create) (US-4.1 / spec US-4.1) — fragment
+  version: "3"
+x-story: US-4.1
+x-source-specification: docs/specifications/US-4.1-spec.md
+x-source-specification-version: 1
+x-produced-by: openapi-designer
+paths:
+  /v1/support/tickets:
+    post:
+      operationId: createTicket
+      summary: Raise a new support ticket
+      tags: [support, tickets]
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: Idempotency-Key
+          in: header
+          required: true
+          schema:
+            type: string
+          description: >
+            Required (FR-1, FR-4). Missing header is 422 validation-failed
+            per OD-2's recommendation — no source AC states this case.
+            Retrying the same key within 24h returns the original ticket
+            (201); reusing it with a different body is 422
+            idempotency-key-reuse. Server-side scoping (per-user) and reuse
+            comparison (full-payload hash) per OD-2's recommendation are not
+            visible in this contract.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateTicketRequest"
+      responses:
+        "201":
+          description: >
+            Ticket created (FR-1), or the original ticket returned unchanged
+            on an idempotent replay (FR-4) — same status code both times.
+            Authorization: identity/ownership only (CurrentUserDep — a
+            valid, non-revoked session); deliberately no `tickets:*` scope
+            requirement — the shipped role seed data grants `tickets:write`
+            only to support_agent/admin and customer holds zero scopes
+            (design review DR-4).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TicketRead"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          description: Caller is authenticated but deactivated (FR-5).
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/AccountDeactivatedProblem"
+        "422":
+          description: >
+            Empty/oversized subject, oversized body, unrecognized category
+            (FR-3; category's valid value set is OD-3, not fixed by this
+            contract — see Open Questions), missing Idempotency-Key header
+            (OD-2), a reused Idempotency-Key with a different body (FR-4),
+            or an attachment_id not owned by / not bound to the caller
+            (FR-7) — the response never reveals which of the three
+            attachment cases applied.
+          content:
+            application/problem+json:
+              schema:
+                oneOf:
+                  - $ref: "#/components/schemas/ValidationFailedProblem"
+                  - $ref: "#/components/schemas/IdempotencyKeyReuseProblem"
+                  - $ref: "#/components/schemas/AttachmentNotOwnedProblem"
+        "429":
+          description: >
+            5 tickets already created by this customer in the last hour
+            (FR-6); the customer's existing open tickets are unaffected.
+          headers:
+            Retry-After:
+              schema:
+                type: integer
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/TooManyRequestsProblem"
+    get:
+      operationId: listOwnTickets
+      summary: List the caller's own support tickets
+      tags: [support, tickets]
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: status
+          in: query
+          required: false
+          schema:
+            type: string
+            enum: [open, waiting_on_support, waiting_on_customer, resolved, closed]
+          description: >
+            Full lifecycle per business-glossary.md's Support Ticket entry
+            (not stated by the spec — see Open Questions). This story only
+            ever produces open tickets; filtering by another status yields
+            an empty page, not an error.
+        - name: cursor
+          in: query
+          required: false
+          schema:
+            type: string
+          description: Opaque pagination cursor from a previous response's `next_cursor`.
+        - name: limit
+          in: query
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+          description: >
+            Not stated by the spec; reuses US-3.1's own unstated choice of
+            100 for consistency — see Open Questions.
+      responses:
+        "200":
+          description: >
+            Cursor-paginated list of the caller's own tickets, newest first
+            (FR-2). Authorization: identity/ownership only (CurrentUserDep),
+            no `tickets:*` scope required for this branch (design review
+            DR-4) — the staff-rejection branch is the separate 403 below.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TicketListResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          description: >
+            Caller holds tickets:read or tickets:write (i.e. is
+            support_agent or admin), checked via
+            roles.dependencies.require_scope (design review DR-4) — OD-4's
+            recommendation: customer-only scope for this story; full
+            permission-scoped agent queue behavior is Out of Scope and
+            belongs to a future queue-view story.
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/AgentQueueNotAvailableProblem"
+        "422":
+          description: "Malformed `cursor` or out-of-range `limit`, mirroring US-3.1 FR-4."
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ValidationFailedProblem"
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+  responses:
+    Unauthorized:
+      description: No valid access token (FR-5).
+      content:
+        application/problem+json:
+          schema:
+            $ref: "#/components/schemas/UnauthorizedProblem"
+  schemas:
+    TicketRead:
+      type: object
+      required: [id, ticket_number, status, requester_id, subject, body, category, created_at, updated_at]
+      properties:
+        id:
+          type: string
+          format: uuid
+          description: >
+            Opaque internal identifier; this contract's own addition (design
+            review DR-5 fix — matches US-4.1-api-design.md Open Questions
+            #7), matching every other *Read schema's UUID id in this
+            project.
+        ticket_number:
+          type: string
+          example: "CP-2026-0000431"
+          description: >
+            Human-readable, sequential in presentation but MUST NOT be
+            guessable or enumerable as an API identifier (FR-1) — generation
+            mechanism is a db-designer concern, not fixed here.
+        status:
+          type: string
+          enum: [open, waiting_on_support, waiting_on_customer, resolved, closed]
+          description: Always "open" for a ticket this story creates.
+        requester_id:
+          type: string
+          format: uuid
+        subject:
+          type: string
+        body:
+          type: string
+          description: Plain text, never rendered as HTML (OD-5 recommendation; NFR).
+        category:
+          type: string
+          maxLength: 50
+          description: >
+            Valid value set is OD-3 — not enumerated by this contract.
+            maxLength matches tickets.category String(50) (design review
+            DR-2).
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+      description: >
+        No SLA target field is present (FR-1's explicit statement) — only
+        the raw created_at/updated_at timestamps.
+    TicketListResponse:
+      type: object
+      required: [items]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/TicketRead"
+        next_cursor:
+          type: string
+          nullable: true
+          description: >
+            Present when another page exists. Envelope field names reused
+            verbatim from US-3.1-openapi.yaml's UserListResponse — see Open
+            Questions #5.
+    CreateTicketRequest:
+      type: object
+      required: [subject, body, category]
+      additionalProperties: false
+      properties:
+        subject:
+          type: string
+          minLength: 1
+          maxLength: 150
+        body:
+          type: string
+          minLength: 1
+          maxLength: 5000
+        category:
+          type: string
+          maxLength: 50
+          description: >
+            Required; rejected as validation-failed if not in the
+            (currently unenumerated) allow-list — see Open Questions #1.
+            maxLength matches tickets.category String(50) (design review
+            DR-2).
+        attachment_ids:
+          type: array
+          default: []
+          items:
+            type: string
+            format: uuid
+          description: >
+            Live field per OD-1's adopted recommendation (build binding now)
+            — see Decisions Adopted section in US-4.1-api-design.md. Each id
+            must be uploaded by the caller and not yet bound to another
+            ticket, or the request is rejected as attachment-not-owned
+            (FR-7).
+      description: >
+        additionalProperties: false rejects any field outside this schema,
+        including an SLA-target-like field the story explicitly says must
+        never be written by a caller.
+    UnauthorizedProblem:
+      allOf:
+        - $ref: "#/components/schemas/ProblemBase"
+      properties:
+        type:
+          type: string
+          example: ".../errors/unauthorized"
+        status:
+          type: integer
+          example: 401
+      description: Cross-cutting slug shared by every authenticated endpoint in this project.
+    AccountDeactivatedProblem:
+      allOf:
+        - $ref: "#/components/schemas/ProblemBase"
+      properties:
+        type:
+          type: string
+          example: ".../errors/account-deactivated"
+        status:
+          type: integer
+          example: 403
+      description: Introduced by this story (FR-5).
+    ValidationFailedProblem:
+      allOf:
+        - $ref: "#/components/schemas/ProblemBase"
+      properties:
+        type:
+          type: string
+          example: ".../errors/validation-failed"
+        status:
+          type: integer
+          example: 422
+        errors:
+          type: array
+          items:
+            type: object
+            required: [field, message, code]
+            properties:
+              field:
+                type: string
+              message:
+                type: string
+              code:
+                type: string
+      description: Reused cross-project slug and shape (`app/core/exceptions.py`'s `FieldError`), not new here.
+    IdempotencyKeyReuseProblem:
+      allOf:
+        - $ref: "#/components/schemas/ProblemBase"
+      properties:
+        type:
+          type: string
+          example: ".../errors/idempotency-key-reuse"
+        status:
+          type: integer
+          example: 422
+      description: Introduced by this story (FR-4); slug named verbatim by the spec's own prose.
+    AttachmentNotOwnedProblem:
+      allOf:
+        - $ref: "#/components/schemas/ProblemBase"
+      properties:
+        type:
+          type: string
+          example: ".../errors/attachment-not-owned"
+        status:
+          type: integer
+          example: 422
+      description: >
+        Introduced by this story (FR-7, BR-016). Response never reveals
+        whether the attachment_id was owned by another user, already bound,
+        or unknown (IDOR prevention).
+    AgentQueueNotAvailableProblem:
+      allOf:
+        - $ref: "#/components/schemas/ProblemBase"
+      properties:
+        type:
+          type: string
+          example: ".../errors/agent-queue-not-available"
+        status:
+          type: integer
+          example: 403
+      description: >
+        This contract's own slug (OD-4's recommendation), not named by the
+        spec — see Open Questions #4. Returned when the caller holds
+        tickets:read or tickets:write (design review DR-4).
+    TooManyRequestsProblem:
+      allOf:
+        - $ref: "#/components/schemas/ProblemBase"
+      properties:
+        type:
+          type: string
+          example: ".../errors/too-many-requests"
+        status:
+          type: integer
+          example: 429
+      description: >
+        FR-6 (no source AC slug name). Follows US-3.1-openapi.yaml's naming
+        rather than email_verification's older too-many-attempts — see Open
+        Questions #3.
+    ProblemBase:
+      type: object
+      description: RFC 7807 problem body. `type` is an absolute/relative URI ending in the slug named per response.
+      required: [type, title, status, detail, instance]
+      properties:
+        type:
+          type: string
+        title:
+          type: string
+        status:
+          type: integer
+        detail:
+          type: string
+        instance:
+          type: string
+          example: /v1/support/tickets

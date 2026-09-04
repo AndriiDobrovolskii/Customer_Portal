@@ -40,6 +40,7 @@ class FakeAuditRepository:
         self.list_calls: list[dict[str, Any]] = []
         self.self_audit_calls: list[dict[str, Any]] = []
         self.denied_calls: list[dict[str, Any]] = []
+        self.event_calls: list[dict[str, Any]] = []
         self.committed = False
 
     async def list_audit_logs(
@@ -105,6 +106,35 @@ class FakeAuditRepository:
                 "request_id": request_id,
                 "ip": ip,
                 "user_agent": user_agent,
+            }
+        )
+
+    async def record_event(
+        self,
+        *,
+        category: str,
+        actor_id: uuid.UUID | None,
+        actor_role: str | None,
+        event: str,
+        target_id: uuid.UUID | None,
+        outcome: str | None,
+        request_id: str | None,
+        ip: str | None,
+        user_agent: str | None,
+        payload: dict[str, Any] | None,
+    ) -> None:
+        self.event_calls.append(
+            {
+                "category": category,
+                "actor_id": actor_id,
+                "actor_role": actor_role,
+                "event": event,
+                "target_id": target_id,
+                "outcome": outcome,
+                "request_id": request_id,
+                "ip": ip,
+                "user_agent": user_agent,
+                "payload": payload,
             }
         )
 
@@ -411,3 +441,58 @@ async def test_record_access_denied_writes_entry() -> None:
     assert call["request_id"] == "req-11"
     assert call["ip"] == "10.0.0.3"
     assert repository.committed is True
+
+
+# --- record_event: cross-module write path (US-4.1's ticket_created) -------
+
+
+async def test_record_event_writes_without_committing() -> None:
+    # Arrange: US-4.1-implementation-plan.md's Architectural Change #2 — the
+    # calling module's service owns the transaction boundary and must commit
+    # this write together with its own; `record_event` must not self-commit,
+    # unlike every other method on this service.
+    role_service = FakeRoleService(role_names=["support_agent"])
+    service, repository, _ = _make_service(role_service=role_service)
+    actor_id = uuid.uuid4()
+    target_id = uuid.uuid4()
+
+    # Act
+    await service.record_event(
+        category="tickets",
+        event="ticket_created",
+        actor_id=actor_id,
+        target_id=target_id,
+        outcome="success",
+        payload={"ticket_number": "CP-2026-0000001", "category": "billing"},
+    )
+
+    # Assert
+    assert len(repository.event_calls) == 1
+    call = repository.event_calls[0]
+    assert call["category"] == "tickets"
+    assert call["event"] == "ticket_created"
+    assert call["actor_id"] == actor_id
+    assert call["actor_role"] == "support_agent"
+    assert call["target_id"] == target_id
+    assert call["outcome"] == "success"
+    assert call["payload"] == {"ticket_number": "CP-2026-0000001", "category": "billing"}
+    assert repository.committed is False
+
+
+async def test_record_event_actor_role_none_when_no_roles_held() -> None:
+    # Arrange
+    service, repository, _ = _make_service(role_service=FakeRoleService(role_names=[]))
+    actor_id = uuid.uuid4()
+
+    # Act
+    await service.record_event(
+        category="tickets",
+        event="ticket_created",
+        actor_id=actor_id,
+        target_id=None,
+        outcome="success",
+        payload=None,
+    )
+
+    # Assert
+    assert repository.event_calls[0]["actor_role"] is None

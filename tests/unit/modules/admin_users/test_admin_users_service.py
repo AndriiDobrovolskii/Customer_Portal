@@ -273,6 +273,9 @@ class FakeEmailSender:
     async def send_mfa_recovery_used_notice(self, *, to: str) -> None:
         raise NotImplementedError
 
+    async def send_ticket_created_email(self, *, to: str, ticket_number: str) -> None:
+        raise NotImplementedError
+
 
 def _make_service(
     repository: FakeAdminUserRepository | None = None,

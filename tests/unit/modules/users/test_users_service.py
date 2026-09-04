@@ -502,6 +502,9 @@ class FakeEmailSender:
     async def send_invitation_email(self, *, to: str, raw_token: str) -> None:
         pass
 
+    async def send_ticket_created_email(self, *, to: str, ticket_number: str) -> None:
+        pass
+
 
 class FakeRefreshRateLimitCache:
     def __init__(

@@ -194,5 +194,46 @@ class AuditRepository:
         )
         await self._session.flush()
 
+    async def record_event(
+        self,
+        *,
+        category: str,
+        actor_id: uuid.UUID | None,
+        actor_role: str | None,
+        event: str,
+        target_id: uuid.UUID | None,
+        outcome: str | None,
+        request_id: str | None,
+        ip: str | None,
+        user_agent: str | None,
+        payload: dict[str, Any] | None,
+    ) -> None:
+        """Generic write for a new event type from a module other than
+        `audit` itself (US-4.1's `ticket_created` is the first caller) -
+        `category` is a parameter here, unlike `record_self_audit`/
+        `record_access_denied`, which hardcode `category="audit"` for
+        their own module's events. Deliberately no `commit()` call: the
+        caller (`AuditLogService.record_event`, then whichever service
+        outside this module calls it) owns the transaction boundary, per
+        US-4.1-implementation-plan.md's Architectural Change #2 - this
+        write must land inside the caller's own single commit, not a
+        separate one.
+        """
+        self._session.add(
+            AuditLog(
+                category=category,
+                actor_id=actor_id,
+                actor_role=actor_role,
+                event=event,
+                target_id=target_id,
+                outcome=outcome,
+                request_id=request_id,
+                ip=ip,
+                user_agent=user_agent,
+                payload=payload,
+            )
+        )
+        await self._session.flush()
+
     async def commit(self) -> None:
         await self._session.commit()

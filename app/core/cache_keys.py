@@ -43,3 +43,11 @@ def mfa_verify_attempts_key(token_hash: str) -> str:
 
 def mfa_used_step_key(user_id: uuid.UUID, step: int) -> str:
     return f"mfa_used_step:{user_id}:{step}"
+
+
+def idempotency_key(user_id: uuid.UUID, key: str) -> str:
+    return f"idempotency:{user_id}:{key}"
+
+
+def ticket_create_rate_key(user_id: uuid.UUID) -> str:
+    return f"ticket_create_rate:{user_id}"

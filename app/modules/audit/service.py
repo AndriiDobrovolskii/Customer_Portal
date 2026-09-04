@@ -46,6 +46,21 @@ class AuditRepositoryProtocol(Protocol):
         user_agent: str | None,
     ) -> None: ...
 
+    async def record_event(
+        self,
+        *,
+        category: str,
+        actor_id: uuid.UUID | None,
+        actor_role: str | None,
+        event: str,
+        target_id: uuid.UUID | None,
+        outcome: str | None,
+        request_id: str | None,
+        ip: str | None,
+        user_agent: str | None,
+        payload: dict[str, object] | None,
+    ) -> None: ...
+
     async def commit(self) -> None: ...
 
 
@@ -168,3 +183,38 @@ class AuditLogService:
             user_agent=user_agent,
         )
         await self._repository.commit()
+
+    async def record_event(
+        self,
+        *,
+        category: str,
+        event: str,
+        actor_id: uuid.UUID,
+        target_id: uuid.UUID | None,
+        outcome: str | None,
+        payload: dict[str, object] | None,
+    ) -> None:
+        """Generic write path for an event type owned by a module other
+        than `audit` itself (US-4.1's `ticket_created` is the first
+        caller) - service -> service, per `AGENTS.md` §3. Deliberately does
+        **not** call `self._repository.commit()`, unlike every other method
+        on this class: the calling module's service owns the transaction
+        boundary and must commit this write together with its own, in the
+        same request-scoped `AsyncSession` (US-4.1-implementation-plan.md
+        Architectural Change #2). A caller that assumes this method commits
+        (copying `list_audit_logs`/`record_access_denied`'s pattern) would
+        silently lose this write.
+        """
+        actor_role = await _resolve_actor_role(self._role_service, actor_id)
+        await self._repository.record_event(
+            category=category,
+            actor_id=actor_id,
+            actor_role=actor_role,
+            event=event,
+            target_id=target_id,
+            outcome=outcome,
+            request_id=None,
+            ip=None,
+            user_agent=None,
+            payload=payload,
+        )

@@ -5,8 +5,8 @@
 
 version: 1
 
-active_story: null
-story_path: null
+active_story: US-4.1
+story_path: docs/stories/US-4.1-create-ticket.md
 
 source:
   type: local_only
@@ -14,12 +14,12 @@ source:
   issue_number: null
   issue_url: null
 
-activated_at: null
-activated_by: null
+activated_at: "2026-09-03T00:00:00Z"
+activated_by: Andrii Dobrovolskii
 
-status: ARCHIVED
+status: IN_PROGRESS
 
 note: >
-  US-3.3 (View Audit Information) was delivered (PR #13, merged 2026-09-03)
-  and archived via /so:archive on 2026-09-03. See
-  docs/evidence/US-3.3-delivery-summary.md. No Story is currently active.
+  A draft specification and spec review exist for US-4.1 but predate the
+  current codebase (docs/catalog/stories.yaml note). They are context only;
+  CLARIFICATION runs fresh.

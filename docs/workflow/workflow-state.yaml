@@ -12,7 +12,7 @@
 
 version: 1
 
-story: US-3.3
+story: US-4.1
 workflow: story-delivery
 
 current_stage: ARCHIVED
@@ -22,16 +22,16 @@ last_completed_stage: COMPLETED
 status: ARCHIVED
 attempt: 1
 
-last_invoked_skill: story-orchestrator
+last_invoked_skill: pr-preparer
 
 last_result:
-  verdict: ARCHIVED
-  stage: ARCHIVED
-  recorded_at: "2026-09-03T06:00:00Z"
+  verdict: PASS
+  stage: PR_PREPARATION
+  recorded_at: "2026-09-04T12:00:00Z"
 
 last_artifacts:
-  - type: delivery_summary
-    path: docs/evidence/US-3.3-delivery-summary.md
+  - type: pr_summary
+    path: docs/pr/US-4.1-pr-summary.md
     version: 1
 
 pending_human_gate: null
@@ -39,22 +39,756 @@ pending_human_gate: null
 blocking_issues: []
 
 non_blocking_findings:
-  - >
-    SECURITY_REVIEW (Low, carried forward and disclosed in RECONCILIATION):
-    the audit event name and the cursor value are copied into the log payload
-    without a max_length bound. Not exploitable as shipped - both are
-    server-generated - but a future caller-supplied event name would inherit
-    the gap.
+  - "category enum (OD-3): tickets.category has no DB-level CHECK/ENUM constraint (plain String(50)), pending stakeholder decision on allowed values. ST-AC3's 'unknown category' sub-case remains untestable until this resolves — confirmed at RECONCILIATION as blocked on a human decision, not a pipeline-fixable gap; carried for HUMAN_PR_APPROVAL."
+  - "BR-007 FK ondelete mechanics: requester_id/uploaded_by default to RESTRICT pending the account-erasure job's mechanics (legal/DPO sign-off pending). Open since DB_DESIGN, carried forward."
+  - "Idempotency create/replay race's poll-exhaustion path returns an undocumented 500 (no contract slug). Confirmed as implementation behavior, not a further design gap; carried forward, non-blocking."
+  - "RECONCILIATION v2 (PASS): ticket_number (migration 37c89e98a86f) is sequentially guessable ('CP-{year}-{seq:07d}' via a plain SEQUENCE), in tension with FR-1's own 'MUST NOT be guessable' clause. Traced to an approved design decision (US-4.1-db-design.md v3, reviewed and passed at DESIGN_REVIEW v3), not undisclosed implementation drift. Not currently exploitable (no ticket_number-keyed lookup exists). Named as Spec Drift in docs/reviews/reconciliation/US-4.1-reconciliation.md v2; carried for HUMAN_PR_APPROVAL."
+  - "RECONCILIATION v2 (PASS): FR-1 says a 'ticket_audit_log' entry is written; shipped code writes to the existing audit_log table instead (category=\"tickets\"), per DESIGN_REVIEW's DR-1 fix. Disclosed wording-only gap between spec text and the approved, reviewed design — not a code defect."
 
-started_at: "2026-09-02T00:00:00Z"
-updated_at: "2026-09-03T06:00:00Z"
-completed_at: "2026-09-03T05:46:47Z"
-archived_at: "2026-09-03T06:00:00Z"
+started_at: "2026-09-03T00:00:00Z"
+updated_at: "2026-09-04T14:00:00Z"
+completed_at: "2026-09-04T13:00:00Z"
+archived_at: "2026-09-04T14:00:00Z"
 
 implementation_substep: null
 
-# US-3.3 reached PR_PREPARATION under the pre-migration 11-stage vocabulary
-# (its final recorded stage was the retired identifier `PR`, which maps to
-# PR_PREPARATION). PR #13 merged 2026-09-03T05:46:47Z. Archived 2026-09-03 via
-# /so:archive — see docs/evidence/US-3.3-delivery-summary.md. No Story is
-# currently active; docs/workflow/active-story.yaml.active_story is null.
+note: >
+  IMPLEMENTATION attempt 1 (third pass, 2026-09-03) re-invoked
+  service-and-router-builder for the T5-T7 sub-step only (T1-T4 remained
+  current, per docs/catalog/US-4.1-pipeline-status.md, and were not
+  re-invoked): added FR-5's account-deactivated 403 gate, the one open item
+  TEST_WRITING attempt 3 carried forward (test_create_ticket_deactivated_account_returns_403
+  was reproducibly returning 201). New: UserService.get_account_status_for_user
+  (app/modules/users/service.py, mirroring get_email_for_user's cross-module
+  read pattern), support.exceptions.AccountDeactivatedError (own
+  ProblemError subclass, type_slug="account-deactivated", status=403 -
+  no cross-module import of users.exceptions' identically-shaped one),
+  TicketService.create_ticket now checks account status first, before the
+  idempotency claim or any write. No prior art existed in this codebase for
+  a per-request (non-login) account-status re-check - CurrentUserDep never
+  checks it, and login's own deactivation gate (users/service.py) includes
+  OD-10's auto-reactivation grace-period logic, deliberately not mirrored
+  here since ticket creation has no such precedent. Verified: ruff
+  check/format clean, mypy --strict clean (10 files under app/modules/support
+  + app/modules/users/service.py), lint-imports 6/6 kept,
+  tests/integration/modules/support/test_support_router.py 24/24 passed (was
+  23/24 - the FR-5 test now passes, no regression), full non-support unit
+  suite 302/302 passed (0 regressions). Confirmed test ripple, not fixed
+  here (out of this skill's remit): tests/unit/modules/support/test_support_service.py's
+  FakeUserService lacks the new get_account_status_for_user member - 13 of
+  its create_ticket-exercising tests fail with AttributeError, same class of
+  ripple as the prior EmailSender/get_email_for_user widening. Carried to
+  QUALITY_GATE for its changes_required_tests -> TEST_WRITING loop-back (the
+  same amended routing precedent already in stage-map.yaml from earlier this
+  story). Advanced to QUALITY_GATE, attempt 1, for gate-enforcer's fresh run
+  covering both this fix and the test ripple it introduces.
+  US-4.1 activated 2026-09-03 via /so:start. A pre-existing draft
+  specification and spec review exist for this Story but predate the current
+  codebase (see docs/catalog/stories.yaml); they were treated as context only.
+  CLARIFICATION ran fresh 2026-09-03 (us-clarifier, verdict PASS). SPECIFICATION
+  ran fresh 2026-09-03 (story-spec-writer, verdict PASS), overwriting the stale
+  draft at docs/specifications/US-4.1-spec.md with a version carrying proper
+  front matter and all 7 ACs traced. SPEC_REVIEW ran fresh 2026-09-03
+  (story-spec-reviewer, verdict PASS), superseding the stale pre-migration
+  review that predated the current spec. HUMAN_SPEC_APPROVAL approved
+  2026-09-03T11:52:00Z by sbruhov@gmail.com; advanced to API_DESIGN.
+  API_DESIGN ran 2026-09-03 (openapi-designer, verdict PASS), producing
+  docs/designs/api/US-4.1-api-design.md and US-4.1-openapi.yaml covering
+  POST/GET /v1/support/tickets; all 7 ACs map to an operation/response.
+  category's enum (OD-3) is left unenumerated pending stakeholder input;
+  OD-1/OD-2/OD-4/OD-5 engineering recommendations were adopted as design
+  assumptions, flagged for confirmation at DB_DESIGN/PLANNING. Advanced to
+  DB_DESIGN. DB_DESIGN ran 2026-09-03 (db-designer, verdict PASS), producing
+  docs/designs/database/US-4.1-db-design.md and US-4.1-entity-model.md: new
+  tables tickets/attachments/ticket_audit_log, Valkey-only idempotency
+  replay and rate-limit counters. Deliberately excludes the story's own
+  Data Model Notes' full-lifecycle columns (assignee_id, resolved_at, etc.)
+  as out of scope for US-4.1 per the spec. category enum (OD-3) and BR-007
+  FK ondelete mechanics remain open, carried as non-blocking findings for
+  DESIGN_REVIEW/PLANNING. Advanced to DESIGN_REVIEW. DESIGN_REVIEW ran
+  2026-09-03 (design-reviewer, verdict CHANGES_REQUIRED), producing
+  docs/reviews/designs/US-4.1-design-review.md. Critical finding DR-1: the
+  DB design's new ticket_audit_log table cites non-existent
+  AuthAuditLog/AdminAuditLog/AccountLifecycleAuditLog precedent and
+  contradicts US-3.3-db-design.md's already-decided architecture (a single
+  partitioned, hash-chained, category-discriminated audit_log table is the
+  write target for new event types) — business-glossary.md's stale
+  five-table description was followed instead of the actual codebase/
+  US-3.3 precedent. Major finding DR-2: CreateTicketRequest.category has no
+  maxLength in the OpenAPI contract vs. tickets.category String(50). Major
+  finding DR-3: no atomicity mechanism stated for the idempotency
+  create/replay race. Routed changes_required_both back to API_DESIGN
+  (loop_back_stage), attempt 2 for that stage. API_DESIGN re-ran 2026-09-03
+  (openapi-designer, verdict PASS, attempt 2), producing v2 of
+  US-4.1-api-design.md and US-4.1-openapi.yaml: fixed DR-2 by adding
+  maxLength: 50 to category in both CreateTicketRequest and TicketRead, and
+  removed the api-design narrative's stale specific reference to a
+  ticket_audit_log table (naming the audit destination remains db-designer's
+  call). DR-1 and DR-3 are database-design findings out of this stage's
+  scope, carried forward as non-blocking findings for DB_DESIGN to resolve
+  on its own re-run. Advanced to DB_DESIGN, attempt 1. DB_DESIGN re-ran
+  2026-09-03 (db-designer, verdict PASS), producing v2 of US-4.1-db-design.md
+  and US-4.1-entity-model.md: resolved DR-1 by removing ticket_audit_log and
+  routing FR-1's ticket_created event into the existing audit_log table
+  (category="tickets", target_id=ticket.id) per US-3.3-db-design.md's
+  precedent, flagging app/modules/audit/service.py as newly in this story's
+  blast radius (service-to-service cross-module write); resolved DR-3 by
+  stating an atomic SET NX EX compare-and-set idempotency gate (reusing
+  MfaReplayCache.mark_step_used's primitive) with a bounded poll for the
+  concurrent mid-flight case and explicit replay-before-rate-limit ordering.
+  category enum (OD-3) and BR-007 FK ondelete mechanics remain open,
+  carried as non-blocking findings for DESIGN_REVIEW/PLANNING, alongside two
+  new design assumptions (the poll pattern and its undocumented 500 path)
+  for PLAN_REVIEW/IMPLEMENTATION_PLANNING to confirm. Advanced to
+  DESIGN_REVIEW, attempt 1. DESIGN_REVIEW re-ran 2026-09-03 (design-reviewer,
+  verdict CHANGES_REQUIRED, v2): DR-1/DR-2/DR-3 verified fixed, no
+  regression; new Critical finding DR-4 — neither design named the actual
+  authorization mechanism gating POST/GET /v1/support/tickets, and the
+  shipped role/permission seed data gives customer zero tickets:* scopes,
+  so a require_scope gate on POST would break FR-1 for every real customer.
+  New Minor finding DR-5 (id-provenance contradiction between api-design.md
+  and openapi.yaml) and DR-6 (DB design's actor_role mechanism description
+  inaccurate). Routed changes_required_api back to API_DESIGN, attempt 3.
+  API_DESIGN re-ran 2026-09-03 (openapi-designer, verdict PASS, attempt 3),
+  producing v3 of US-4.1-api-design.md and US-4.1-openapi.yaml: fixed DR-4
+  by stating per-operation, in both documents, that POST and GET's customer
+  branch authorize by identity/ownership only (CurrentUserDep, no
+  tickets:* scope) and GET's staff-rejection branch checks the actual
+  tickets:read/tickets:write scope via require_scope; fixed DR-5 by
+  correcting openapi.yaml's TicketRead.id description to match
+  api-design.md. Citations (CurrentUserDep, require_scope,
+  audit/dependencies.py's require_audit_read, profile/account routers'
+  CurrentUserDep-only gating) verified by direct file read; corrected an
+  initial over-claim that CurrentUserDep itself encodes account-active
+  status — it does not, and FR-5's 403 account-deactivated handling is
+  unchanged from prior versions, left as a service-and-router-builder
+  concern. DR-6 remains open for DB_DESIGN. Advanced to DB_DESIGN, attempt
+  1 — note db-design v2's recorded api_design input version (2) is now
+  stale against the v3 on disk, so DB_DESIGN must regenerate rather than
+  short-circuit on its next run. DB_DESIGN re-ran 2026-09-03 (db-designer,
+  verdict PASS), producing v3 of US-4.1-db-design.md and
+  US-4.1-entity-model.md: fixed DR-6 (actor_role resolved via a
+  service-to-service call to roles.service.get_role_grants_for_user, not
+  auth middleware); no schema change, since API_DESIGN v3 was
+  authorization-wording-only and stated DB_DESIGN required no change.
+  category enum (OD-3) and BR-007 FK ondelete mechanics remain open,
+  carried as non-blocking findings for DESIGN_REVIEW/PLANNING. Advanced to
+  DESIGN_REVIEW, attempt 1. DESIGN_REVIEW re-ran 2026-09-03 (design-reviewer,
+  verdict PASS, v3): DR-4/DR-5/DR-6 verified fixed by direct read of
+  app/modules/users/dependencies.py (CurrentUserDep), app/modules/roles/
+  dependencies.py (require_scope), app/modules/audit/dependencies.py
+  (require_audit_read precedent), and app/modules/audit/service.py
+  (_resolve_actor_role's service-to-service call to roles.service via
+  RoleServiceProtocol) — all citations accurate, no regression, no new
+  finding. category enum (OD-3), BR-007 FK ondelete mechanics, and the
+  idempotency poll-exhaustion undocumented 500 path remain open, carried
+  as non-blocking findings for IMPACT_ANALYSIS/PLANNING. Advanced to
+  IMPACT_ANALYSIS, attempt 1. IMPACT_ANALYSIS ran 2026-09-03 (impact-analyzer,
+  verdict PASS), producing docs/impact-analysis/US-4.1-impact-analysis.md: new
+  module app/modules/support/ (models/schemas/repository/cache/service/router/
+  dependencies/exceptions), a new scripts/purge_unbound_attachments.py mirroring
+  scripts/purge_unverified_accounts.py's precedent, two new app/core/cache_keys.py
+  key builders, and three modified existing files (app/modules/audit/service.py
+  and repository.py need a new method since neither existing method fits a
+  ticket_created write; app/api/v1/router.py needs the new router registered;
+  migrations/env.py needs a new model-registration import). Flagged a new
+  support.service -> audit.service cross-module dependency and an unresolved
+  transaction-boundary tension (the new audit write must land in ticket
+  creation's own transaction, but audit.service's existing methods self-commit)
+  for ARCHITECTURE_PLANNING to resolve. Migration required: tickets/attachments
+  new tables only, no existing table changed. Test-surface: new unit/integration
+  test files under tests/*/modules/support/ and tests/*/scripts/; confirmed
+  tests/unit/test_audit_write_call_site_scan.py and tests/conftest.py need no
+  change. category enum (OD-3), BR-007 FK ondelete mechanics, and the
+  idempotency poll-exhaustion undocumented 500 path remain open, carried as
+  non-blocking findings for ARCHITECTURE_PLANNING/PLAN_REVIEW. Advanced to
+  ARCHITECTURE_PLANNING, attempt 1. ARCHITECTURE_PLANNING ran 2026-09-03
+  (planner, verdict PASS), producing docs/plans/US-4.1-implementation-plan.md:
+  new app/modules/support/ module (models/schemas/repository/cache/service/
+  router/dependencies/exceptions) plus scripts/purge_unbound_attachments.py,
+  per impact-analyzer's survey. Resolved the flagged transaction-boundary
+  tension: a new AuditLogService.record_event() method must not self-commit
+  (unlike the two existing self-committing methods); support.service.
+  create_ticket() owns the single commit for the ticket insert, attachment
+  bind, and audit write together, since DI guarantees one request-scoped
+  AsyncSession shared by both services' repositories. Flagged the
+  migrations/env.py model-registration import explicitly (same one-line
+  pattern as 6 prior stories). category enum (OD-3), BR-007 FK ondelete
+  mechanics, and the idempotency poll-exhaustion 500 path (confirmed as
+  implementation behavior, not a further gap) remain open, carried as
+  non-blocking findings for PLAN_REVIEW/IMPLEMENTATION_PLANNING. Advanced to
+  IMPLEMENTATION_PLANNING, attempt 1. IMPLEMENTATION_PLANNING ran 2026-09-03
+  (implementation-planner, verdict PASS), producing v1 of
+  US-4.1-task-breakdown.md: 8 tasks (T1-T8) sequencing the four execution
+  skills plus gate-enforcer per AGENTS.md section 3 layering — schema-builder
+  (T1) and data-layer-builder (T2 support module, T3 audit/repository.py)
+  parallel-eligible; migration-manager (T4) after T2; audit.service.
+  record_event (T5) after T3; support.service/exceptions.py/purge script (T6)
+  after T1, T4, T5; support.router/dependencies.py/API router registration
+  (T7) after T6; gate-enforcer (T8) last. Flagged one open question:
+  scripts/purge_unbound_attachments.py has no clean single-skill owner among
+  the four execution skills, assigned to service-and-router-builder (T6) as
+  closest fit pending plan-reviewer confirmation. category enum (OD-3),
+  BR-007 FK ondelete mechanics, and the idempotency poll-exhaustion 500 path
+  remain open, carried as non-blocking findings for PLAN_REVIEW. Advanced to
+  PLAN_REVIEW, attempt 1. PLAN_REVIEW ran 2026-09-03 (plan-reviewer, verdict
+  PASS, v1 — retired-vocabulary "Pass with Issues" internally, mapped per
+  artifact-lifecycle.md), producing docs/reviews/plans/US-4.1-plan-review.md:
+  full impact-analysis coverage confirmed (including the two audit
+  cross-module ripple files and the transaction-boundary resolution), no
+  task-breakdown layering violation. Two non-blocking findings: T1/T2 leaves
+  app/modules/support/__init__.py without an explicit owning task, and the
+  plan's numbered Risks section omits the hand-written ticket_number_seq
+  guard hazard already stated in its own Validation Strategy section.
+  category enum (OD-3) and BR-007 FK ondelete mechanics remain open, carried
+  forward. Advanced to HUMAN_PLAN_APPROVAL, status WAITING_FOR_HUMAN pending
+  /so:approve or /so:reject. HUMAN_PLAN_APPROVAL approved 2026-09-03T12:29:00Z
+  by sbruhov@gmail.com; advanced to TEST_WRITING. TEST_WRITING ran 2026-09-03
+  (test-writer, verdict PASS, v1), producing US-4.1-test-strategy.md,
+  US-4.1-ac-test-matrix.md, and US-4.1-test-generation-report.md: all 7 ACs
+  have at least one test in tests/unit/modules/support/test_support_service.py
+  (new, 15 functions) and tests/integration/modules/support/test_support_router.py
+  (new, 20 functions), including the full AGENTS.md §5 security matrix for
+  both routes as this story's actual authorization model requires (no token/
+  malformed/expired/revoked -> 401 on POST; no token -> 401 on GET;
+  account-deactivated -> 403 on POST; agent-scope-holder -> 403 on GET).
+  Both files necessarily import from app/modules/support/, which does not
+  exist until IMPLEMENTATION runs — expected test-first ordering, not a
+  defect. Four non-blocking findings carried: ST-AC3's "unknown category"
+  sub-case untestable pending OD-3; scripts/purge_unbound_attachments.py's
+  test deferred; audit/service.py's own record_event unit test deferred to
+  audit's test file; and the service/cache method contract test-writer had
+  to design (service.py/cache.py don't exist yet) is flagged as a
+  changes_required_tests candidate if IMPLEMENTATION lands a materially
+  different shape. OD-3 and BR-007 FK ondelete mechanics remain open,
+  carried forward for IMPLEMENTATION. Advanced to IMPLEMENTATION, attempt 1
+  — composite_skill, sub-steps (schema-builder -> data-layer-builder ->
+  migration-manager -> service-and-router-builder) tracked in
+  docs/catalog/US-4.1-pipeline-status.md per task-breakdown T1-T7. IMPLEMENTATION
+  ran to completion 2026-09-03 (all 4 sub-steps PASS, full detail in
+  pipeline-status.md): T1 schema-builder created app/modules/support/schemas.py;
+  T2/T3 data-layer-builder created models.py/repository.py/cache.py, extended
+  cache_keys.py, added AuditRepository.record_event — deliberately deviated
+  from test-strategy's raising TicketIdempotencyCache.claim_or_get() design
+  assumption in favor of a gateway-compliant claim()/get_envelope()/resolve()/
+  release() shape per AGENTS.md §3 and db-design's own stated branching
+  location, flagged as a changes_required_tests candidate for TEST_WRITING;
+  T4 migration-manager (env.py edit performed by story-orchestrator under the
+  explicit sign-off above) produced migration 37c89e98a86f, upgrade/downgrade/
+  upgrade proven against real PostgreSQL, stripping 8 spurious autogenerate
+  diff lines unrelated to this story; T5/T6/T7 service-and-router-builder
+  built support/{service,router,dependencies,exceptions}.py and
+  scripts/purge_unbound_attachments.py, registered support_router, extended
+  audit.service.record_event (no self-commit) — found and fixed 2 real plan
+  gaps along the way (FR-1's email-delivery path had no collaborator anywhere
+  in the plan, added EmailSender.send_ticket_created_email + a new minimal
+  UserService.get_email_for_user; a claimed-but-failed idempotency key had no
+  release path, added TicketIdempotencyCache.release). Verified end-to-end
+  against real PostgreSQL/Valkey via two hand-written smoke scripts (service-
+  layer and full HTTP round-trip), all 7 FRs and the audit cross-module write
+  confirmed working; lint-imports 6/6 kept; full non-support unit suite
+  300/300 passed, 0 regressions. The pre-existing 12 support unit tests fail
+  at runtime exactly as the flagged Protocol-shape deviation predicts (not a
+  regression). Advanced to QUALITY_GATE, attempt 1. QUALITY_GATE ran
+  2026-09-03 (gate-enforcer, verdict CHANGES_REQUIRED, v1), producing
+  US-4.1-implementation-report.md and US-4.1-quality-gate-report.md:
+  pre-commit run --all-files FAILED on 3 hooks - ruff (lint) 4 errors, mypy
+  (strict) 11 errors across 6 files, unit tests 12 failed/300 passed. The 12
+  support unit-test failures confirm the flagged data-layer-builder/
+  service-and-router-builder deviation from test-strategy's TicketService
+  constructor shape (TypeError: missing user_service, email_sender). New
+  finding beyond what pipeline-status.md had flagged: extending the shared
+  app/core/email.py EmailSender Protocol (send_ticket_created_email) broke
+  mypy strict on 4 other modules' test fakes that implement it
+  (email_verification, admin_users, profile, users) - they still pass at
+  runtime (Protocol conformance isn't runtime-checked), so pipeline-status.md's
+  "300/300 passed, 0 regressions" pytest claim stands, but mypy strict fails
+  regardless. Same effect on AuditRepositoryProtocol's new record_event member
+  against tests/unit/modules/audit/test_audit_service.py's FakeAuditRepository.
+  pytest --cov=app --cov-fail-under=85 could not run in this environment
+  (coverage's C tracer unavailable, PyTracer unsupported for this project's
+  concurrency=["greenlet","thread"] config) - recorded as not-run-here, CI is
+  the authority; moot while the 12 test failures stand. lint-imports passed,
+  no new ignore_imports/exhaustive=false. Part B runtime-rule spot-checks
+  (ORM containment, cache TTL, cross-module discipline, banned idioms, section
+  6.7 contract/security) all Pass on direct grep/read evidence. No bypass
+  proposed for any failure per AGENTS.md section 7.9. Routed changes_required
+  back to IMPLEMENTATION, attempt 2 - the fix is either a TEST_WRITING re-run
+  against the shipped TicketService/EmailSender/AuditRepositoryProtocol
+  shapes, or IMPLEMENTATION conforming to test-strategy's original shape;
+  either path also needs the 4 out-of-module test fakes updated for the
+  widened EmailSender Protocol. category enum (OD-3), BR-007 FK ondelete
+  mechanics, and the idempotency poll-exhaustion 500 path remain open,
+  carried forward. story-orchestrator held IMPLEMENTATION as BLOCKED
+  2026-09-03T18:00:00Z: QUALITY_GATE.loop_back had no key reaching TEST_WRITING,
+  the only stage owning tests/, and all 27 reported failures live there (app/
+  itself mypy-strict clean, lint-imports 6/6, 300/300 non-support tests green).
+  User authorized 2026-09-03T18:10:00Z adding changes_required_tests:
+  TEST_WRITING to QUALITY_GATE.loop_back in stage-map.yaml (routing amendment,
+  AGENTS.md section 7.8 sign-off, edited directly by story-orchestrator
+  mirroring the T4 env.py precedent). Routed accordingly; advanced to
+  TEST_WRITING, attempt 2 - test-writer must reconcile the shipped
+  TicketService(ticket_repository, attachment_repository, idempotency_cache,
+  rate_limit_cache, audit_service, user_service, email_sender) constructor,
+  the gateway-compliant claim()/get_envelope()/resolve()/release() cache shape,
+  and the widened EmailSender/AuditRepositoryProtocol members (4 out-of-module
+  fakes need updating too) against its existing 20 integration tests, which
+  assert unchanged external behavior. TEST_WRITING re-ran 2026-09-03
+  (test-writer, verdict PASS, v2, attempt 2), producing v2 of
+  US-4.1-test-strategy.md, US-4.1-ac-test-matrix.md, and
+  US-4.1-test-generation-report.md: rewrote
+  tests/unit/modules/support/test_support_service.py against the shipped
+  TicketService/TicketIdempotencyCache/TicketRepository/AttachmentRepository
+  shapes (FakeTicketRepository/FakeAttachmentRepository now return real
+  app.modules.support.models.Ticket/Attachment ORM instances, not lookalike
+  dataclasses, to satisfy mypy --strict's Protocol return-type covariance
+  check — matching admin_users' existing _make_user convention); added 3 new
+  unit tests for ST-AC1's confirmation-email-queued behavior and extended
+  the rate-limit/attachment-not-owned failure-path tests to assert
+  TicketIdempotencyCache.release is called. Also extended
+  tests/unit/modules/audit/test_audit_service.py with FakeAuditRepository
+  .record_event and two new tests (closing test-writer's own v1-carried
+  gap), and added a send_ticket_created_email stub to the 4 out-of-module
+  EmailSender-implementing fakes (admin_users, users, email_verification,
+  profile) that the widened shared EmailSender Protocol broke under mypy
+  --strict. tests/integration/modules/support/test_support_router.py needed
+  no change (confirmed by inspection: it never constructs TicketService
+  directly, only through the real FastAPI DI chain). Verified:
+  ruff check/format clean, mypy --strict 0 errors across 144 source files,
+  pytest tests/unit 316 passed (0 failed; was 300 passed/12 failed at
+  QUALITY_GATE v1). category enum (OD-3), BR-007 FK ondelete mechanics, and
+  scripts/purge_unbound_attachments.py's missing test remain open, carried
+  forward unchanged. Advanced to IMPLEMENTATION, attempt 1 — QUALITY_GATE
+  must re-run against the reconciled test suite; no application code changed
+  in this pass, only tests and this stage's own artifacts.
+  QUALITY_GATE ran 2026-09-03 (gate-enforcer, verdict PASS, v2), producing
+  v2 of US-4.1-implementation-report.md and US-4.1-quality-gate-report.md:
+  all 7 pre-commit hooks green (the one hiccup - detect-secrets flagging an
+  unstaged .secrets.baseline line-number shift from TEST_WRITING attempt 2's
+  edit to tests/unit/modules/users/test_users_service.py - resolved by
+  staging it, the documented normal remediation, not a bypass); mypy app
+  tests 0 errors across 144 files (was 11 errors/6 files at v1); lint-imports
+  6/6 kept, no new ignore_imports/exhaustive=false; pytest tests/unit
+  316/316 passed (was 300 passed/12 failed at v1); migration cycle
+  (upgrade-downgrade-upgrade) re-proven directly against customer_portal_pg
+  in this pass, not only trusted from migration-manager's T4 record.
+  Coverage threshold (--cov-fail-under=85) remains not-runnable in this
+  environment (coverage's C tracer unavailable, PyTracer unsupported for
+  this project's concurrency=["greenlet","thread"] config) - explicitly
+  labeled not-run with CI as the authority, not asserted as a pass; no
+  longer the sole blocker since test correctness is now green. Part B
+  runtime-rule spot-checks (ORM containment, cache TTL, cross-module
+  discipline, banned idioms, section 6.7 contract/security) all
+  re-confirmed Pass on direct grep/read evidence; eager-loading N/A (no
+  relationship() declared on Ticket/Attachment). No bypass proposed for any
+  check. category enum (OD-3), BR-007 FK ondelete mechanics, the
+  idempotency poll-exhaustion 500 path, and
+  scripts/purge_unbound_attachments.py's missing test remain open, carried
+  forward for IMPLEMENTATION_VERIFICATION/RECONCILIATION. Advanced to
+  IMPLEMENTATION_VERIFICATION, attempt 1. IMPLEMENTATION_VERIFICATION ran
+  2026-09-03 (implementation-verifier, verdict CHANGES_REQUIRED, v1),
+  producing docs/verification/US-4.1-implementation-verification.md: all
+  SS6.5/SS6.6/SS6.7 items independently verified Pass or justified N/A (no
+  ORM leak, no missing eager-load, every cache write TTL'd, no
+  service->router cross-module call, response_model/status_code on both
+  routes, extra="forbid"+privilege exclusion on the inbound schema,
+  .env.example unchanged confirmed via git diff). One SS5 finding: GET
+  /v1/support/tickets has only 2 of 5 required security-case tests
+  (no_token, insufficient_permissions) - expired/malformed/revoked are
+  missing, and this gap is not recorded in US-4.1-ac-test-matrix.md's own
+  Gaps Not Covered section (not a deliberate cut). This is a TEST_WRITING-
+  owned gap; IMPLEMENTATION_VERIFICATION.loop_back in stage-map.yaml has
+  only changes_required -> IMPLEMENTATION, no key reaching TEST_WRITING -
+  same structural mismatch QUALITY_GATE.loop_back had earlier this story
+  before its user-authorized changes_required_tests: TEST_WRITING
+  amendment. story-orchestrator held BLOCKED rather than mechanically
+  routing to IMPLEMENTATION, which cannot fix a test file. category enum
+  (OD-3), BR-007 FK ondelete mechanics, the idempotency poll-exhaustion 500
+  path, and scripts/purge_unbound_attachments.py's missing test remain
+  open, carried forward. story-orchestrator held BLOCKED
+  2026-09-03T22:00:00Z pending human routing decision. User authorized
+  2026-09-03T22:05:00Z adding changes_required_tests: TEST_WRITING to
+  IMPLEMENTATION_VERIFICATION.loop_back in stage-map.yaml (routing
+  amendment, AGENTS.md section 7.8 sign-off, mirroring the QUALITY_GATE
+  precedent), edited directly by story-orchestrator. Routed accordingly;
+  advanced to TEST_WRITING, attempt 3 - test-writer must add the missing
+  expired/malformed/revoked security-case tests for GET
+  /v1/support/tickets to tests/integration/modules/support/
+  test_support_router.py and record them in US-4.1-ac-test-matrix.md.
+  TEST_WRITING ran 2026-09-03 (test-writer, verdict PASS, v3, attempt 3),
+  producing v3 of US-4.1-test-strategy.md, US-4.1-ac-test-matrix.md, and
+  US-4.1-test-generation-report.md: added the 3 missing GET security-case
+  tests (test_list_own_tickets_malformed_token_returns_401/
+  _expired_token_returns_401/_revoked_session_token_returns_401), giving
+  both protected routes the full 5-case AGENTS.md SS5 matrix. Running
+  tests/integration/modules/support/ for the first time in this story's
+  pipeline (QUALITY_GATE v1/v2 ran tests/unit only; IMPLEMENTATION_VERIFICATION
+  v1 verified by code read) surfaced two further pre-existing defects,
+  confirmed via git stash as pre-dating this pass: (1)
+  test_list_own_tickets_returns_only_callers_tickets_newest_first was flaky
+  (a created_at tie broken by a random id.desc() tiebreak per models.py's
+  own documented design, not insertion order as the test assumed) - fixed
+  with explicit one-minute-apart created_at values, a test-file-only fix;
+  (2) HEADLINE FINDING - test_create_ticket_deactivated_account_returns_403
+  reproducibly fails (201, not 403): FR-5's account-deactivated 403 gate was
+  never implemented in IMPLEMENTATION's T5-T7 pass, confirmed by full read
+  of app/modules/support/{service,router,dependencies}.py - no
+  account-status check exists anywhere in the module, and CurrentUserDep
+  does not encode account-active status (already flagged, never actually
+  picked up, in this story's own API_DESIGN v3/DESIGN_REVIEW v3 history).
+  Not a test defect - the test is left unchanged and correctly asserts the
+  spec. Recorded as an open item in docs/catalog/US-4.1-pipeline-status.md's
+  T5-T7 row so the next IMPLEMENTATION pass does not re-validate that row as
+  current via continue-flow step 5 and skips fixing it. Verified: ruff
+  check/format clean, mypy --strict clean, pytest
+  tests/integration/modules/support/test_support_router.py 23/24 passed (1
+  failure = the disclosed FR-5 gap). category enum (OD-3), BR-007 FK
+  ondelete mechanics, and scripts/purge_unbound_attachments.py's missing
+  test remain open, carried forward unchanged. Advanced to IMPLEMENTATION,
+  attempt 1 - service-and-router-builder (T5-T7) must add the
+  account-deactivated 403 check to app/modules/support/{service,router,
+  dependencies}.py before QUALITY_GATE re-runs; QUALITY_GATE's next run
+  must also execute tests/integration/modules/support/, not only
+  tests/unit, so this class of gap cannot survive undetected again.
+  IMPLEMENTATION attempt 1 (third pass) completed 2026-09-03: FR-5's
+  account-deactivated 403 gate added per the entry above. Advanced to
+  QUALITY_GATE, attempt 1. QUALITY_GATE ran 2026-09-03 (gate-enforcer,
+  verdict CHANGES_REQUIRED, v3), producing v3 of
+  US-4.1-implementation-report.md and US-4.1-quality-gate-report.md (v2
+  marked SUPERSEDED): ran the full gate against the T5-T7 rework, this
+  time executing both tests/unit and tests/integration/modules/support/
+  per the prior attempt's own instruction. Confirmed exactly the ripple
+  pipeline-status.md had already flagged and nothing else new: mypy app
+  tests 1 error and pytest tests/unit 13 failed/303 passed, both because
+  tests/unit/modules/support/test_support_service.py's FakeUserService
+  does not implement the new get_account_status_for_user member. app/
+  itself is clean (ruff/format/lint-imports 6/6), and
+  tests/integration/modules/support/ is 24/24 green, including the FR-5
+  test this IMPLEMENTATION pass was reworked to fix. detect-secrets
+  failed once on an unstaged .secrets.baseline rewrite - resolved by
+  staging it, the documented remediation, not a bypass. Coverage
+  (--cov-fail-under=85) remains not-runnable in this environment
+  (coverage's C tracer unavailable for concurrency=[greenlet,thread]),
+  labeled not-run with CI as the authority, moot while the 13 failures
+  stand. Migration cycle not re-run this pass (no model/migration file
+  touched by T5-T7); v2's proof against customer_portal_pg stands as
+  current. No bypass proposed for either real failure, per AGENTS.md
+  section 7.9 - the fix is a test-fixture update, test-writer's to make,
+  not gate-enforcer's. Routed changes_required_tests -> TEST_WRITING
+  (key already present in stage-map.yaml QUALITY_GATE.loop_back from the
+  earlier user-authorized amendment this story); since TEST_WRITING was
+  already attempted 3 times this story, attempt := 4. Advanced to
+  TEST_WRITING, attempt 4 - test-writer must add
+  get_account_status_for_user to FakeUserService in
+  tests/unit/modules/support/test_support_service.py (mirroring its
+  existing email=... constructor-parameter pattern) so the 13 currently
+  failing create_ticket-exercising tests pass with an active-account
+  default. category enum (OD-3), BR-007 FK ondelete mechanics, the
+  idempotency poll-exhaustion 500 path, and
+  scripts/purge_unbound_attachments.py's missing test remain open,
+  carried forward unchanged. TEST_WRITING re-ran 2026-09-03 (test-writer,
+  verdict PASS, v4, attempt 4), producing v4 of US-4.1-test-strategy.md,
+  US-4.1-ac-test-matrix.md, and US-4.1-test-generation-report.md: added
+  get_account_status_for_user to FakeUserService (default "active"),
+  fixing the 13 unit-test failures and 1 mypy Protocol-conformance error
+  QUALITY_GATE v3 reported. Added 2 new unit tests for the FR-5 gate
+  itself (test_create_ticket_deactivated_account_raises_before_any_write,
+  test_create_ticket_active_account_proceeds) - it previously had
+  integration coverage only. No application code changed. Verified:
+  pytest tests/unit -q 318 passed (was 303 passed/13 failed); mypy app
+  tests --strict 0 errors across 144 files; ruff check/format clean.
+  Advanced to IMPLEMENTATION, attempt 1 - no builder sub-step re-invoked
+  since no application code changed this pass (docs/catalog/
+  US-4.1-pipeline-status.md's T1-T7 rows remain current); QUALITY_GATE
+  must re-run against the reconciled test suite. category enum (OD-3),
+  BR-007 FK ondelete mechanics, the idempotency poll-exhaustion 500 path,
+  and scripts/purge_unbound_attachments.py's missing test remain open,
+  carried forward unchanged.
+  IMPLEMENTATION (attempt 1) validated 2026-09-03 by story-orchestrator per
+  continue-flow step 5: docs/catalog/US-4.1-pipeline-status.md's existing
+  output confirms all 4 sub-steps (schema-builder, data-layer-builder,
+  migration-manager, service-and-router-builder) Done/PASS, current against
+  TEST_WRITING v4 (no application code changed in that pass, only test
+  fakes) - no builder skill re-invoked. Advanced to QUALITY_GATE, attempt 1,
+  for gate-enforcer's fresh run against the reconciled test suite (318
+  passed, mypy --strict 0 errors per TEST_WRITING v4). category enum
+  (OD-3), BR-007 FK ondelete mechanics, the idempotency poll-exhaustion 500
+  path, scripts/purge_unbound_attachments.py's missing test, and the
+  FR-1 email-collaborator emergent scope (EmailSender.send_ticket_created_email,
+  UserService.get_email_for_user) remain open, carried forward for
+  RECONCILIATION/HUMAN_PR_APPROVAL.
+  QUALITY_GATE ran 2026-09-04 (gate-enforcer, verdict PASS, v4), producing v4
+  of US-4.1-implementation-report.md and US-4.1-quality-gate-report.md (v3
+  marked SUPERSEDED): fresh run against the reconciled test suite - no
+  application code changed since v3 (TEST_WRITING v4 only added
+  get_account_status_for_user to FakeUserService). All 7 pre-commit hooks
+  green; mypy app tests 0 errors across 144 files; lint-imports 6/6 kept, no
+  new ignore_imports/exhaustive=false (git diff -- pyproject.toml empty).
+  pytest --cov=app --cov-fail-under=85 ran successfully in this environment
+  this attempt (unlike v1-v3, blocked by coverage's C-tracer/concurrency
+  config incompatibility) - 599 passed (318 unit + 281 integration, including
+  tests/integration/modules/support/ against real PostgreSQL/Valkey via
+  testcontainers), 95.94% total coverage, no touched module below the 85%
+  floor. Migration cycle (upgrade head -> downgrade -1 -> upgrade head)
+  re-proven fresh against the live database, not only carried from
+  migration-manager's earlier proof. Part B runtime-rule spot-checks (ORM
+  containment, eager-loading N/A - no relationship() on Ticket/Attachment,
+  cache TTL on every TicketIdempotencyCache/TicketCreationRateLimitCache
+  write, cross-module discipline via service-to-service DI, banned-idiom
+  grep clean, section 6.7 contract/security - response_model/status_code on
+  both routes, extra="forbid"+privilege exclusion, .env.example unchanged)
+  all Pass/N/A on direct grep/read evidence. No bypass proposed or needed.
+  Advanced to IMPLEMENTATION_VERIFICATION, attempt 1. category enum (OD-3),
+  BR-007 FK ondelete mechanics, the idempotency poll-exhaustion 500 path,
+  scripts/purge_unbound_attachments.py's missing test, and the FR-1
+  email-collaborator emergent scope remain open, carried forward for
+  IMPLEMENTATION_VERIFICATION/RECONCILIATION.
+  IMPLEMENTATION_VERIFICATION re-ran 2026-09-04 (implementation-verifier,
+  verdict PASS, v2 — v1 marked SUPERSEDED, stale against implementation_report
+  v4/quality_gate_report v4), producing v2 of
+  US-4.1-implementation-verification.md: all SS6.5/SS6.6/SS6.7 items
+  independently re-verified Pass or justified N/A against the current code
+  (migration file unchanged and re-confirmed; ORM containment, cache TTL,
+  cross-module discipline, response_model/status_code, extra="forbid"+
+  privilege exclusion, .env.example unchanged, no sensitive *Read field - all
+  Pass on direct file:line citation). v1's sole finding - GET
+  /v1/support/tickets missing 3 of 5 SS5 security-case tests - confirmed fixed
+  by TEST_WRITING attempt 3 (test_list_own_tickets_{malformed_token,
+  expired_token,revoked_session}_returns_401, US-4.1-ac-test-matrix.md v4);
+  both protected routes now carry full applicable SS5 coverage (POST's
+  "insufficient permissions" cell is an explicit N/A - identity-only
+  authorization, DESIGN_REVIEW v3 DR-4 - not an unflagged gap). FR-5's
+  account-deactivated 403 gate independently confirmed correct by code read
+  (service.py:172-174, checked before any write). No Critical/Major finding.
+  Advanced to SECURITY_REVIEW, attempt 1. category enum (OD-3), BR-007 FK
+  ondelete mechanics, the idempotency poll-exhaustion 500 path,
+  scripts/purge_unbound_attachments.py's missing test, and the FR-1
+  email-collaborator emergent scope remain open, carried forward for
+  SECURITY_REVIEW/RECONCILIATION.
+  RECONCILIATION ran 2026-09-04 (reconciliation-reviewer, verdict
+  CHANGES_REQUIRED, v1), producing docs/reviews/reconciliation/
+  US-4.1-reconciliation.md and docs/reconciliation/US-4.1-traceability.md:
+  all 7 ACs have a matrix row; all 32 named test functions across
+  tests/integration/modules/support/test_support_router.py,
+  tests/unit/modules/support/test_support_service.py, and
+  tests/unit/modules/audit/test_audit_service.py were independently opened
+  and confirmed to exist and assert their claimed AC behavior - no
+  partial-assertion or missing-function gap found in ST-AC1, ST-AC2, ST-AC4,
+  ST-AC5, or ST-AC6, and 6 of ST-AC7's 7 sub-clauses fully covered. The one
+  Fail-forcing gap: ST-AC7's 24-hour purge-job clause has no test -
+  scripts/purge_unbound_attachments.py exists (built at IMPLEMENTATION T6),
+  the implementation plan's own Testing Strategy names the exact test file
+  and pattern to mirror (test_anonymize_erased_user.py, which exists), and
+  no Open Decision blocks writing it - this is undone test-writer work after
+  four TEST_WRITING passes, not a design/implementation defect. Two Spec
+  Drift items recorded but not verdict-forcing: ticket_number's guessable
+  format (traced to an approved, DESIGN_REVIEW-passed design decision, not
+  undisclosed drift; not currently exploitable) and the ticket_audit_log vs.
+  audit_log wording gap (traces to DESIGN_REVIEW's own DR-1 fix). ST-AC3's
+  unknown-category gap remains open, confirmed blocked on OD-3 (a
+  stakeholder decision, not pipeline-fixable) - explicitly excluded from
+  this verdict, carried non-blocking for HUMAN_PR_APPROVAL. FR-1's
+  email-collaborator emergent scope confirmed acceptable, resolved. Routed
+  test_gap -> TEST_WRITING, attempt 5 - test-writer must add
+  tests/integration/scripts/test_purge_unbound_attachments.py per the
+  implementation plan's own Testing Strategy section, then RECONCILIATION
+  must re-run.
+  SECURITY_REVIEW ran 2026-09-04 (security-reviewer, verdict PASS, v1),
+  producing docs/reviews/security/US-4.1-security-review.md: all six
+  AGENTS.md §7 non-negotiable checks Pass or N/A (password/credential
+  storage checks N/A - this story handles no credentials). extra="forbid"
+  + privilege-field exclusion confirmed on CreateTicketRequest
+  (schemas.py:15); all repository SQL parameterized via SQLAlchemy
+  constructs, migration 37c89e98a86f's two raw op.execute() calls are
+  compile-time constants with no interpolated value; no token/hash/PII in
+  any new log call (service.py:275, email.py:58) and no print() anywhere
+  in scope; both routes' auth-failure path unmodified from the existing
+  uniform CurrentUserDep flow, and AttachmentNotOwnedError's single slug
+  for not-found/not-owned/already-bound confirmed as the IDOR-prevention
+  mechanism (BR-016). One Low advisory (non-§7, does not affect verdict):
+  ticket_number's sequential format contradicts open-decisions.md's
+  carried-forward non-guessability intent, though not currently
+  exploitable (no endpoint looks up by ticket_number). Advanced to
+  RECONCILIATION, attempt 1. category enum (OD-3), BR-007 FK ondelete
+  mechanics, the idempotency poll-exhaustion 500 path,
+  scripts/purge_unbound_attachments.py's missing test, the FR-1
+  email-collaborator emergent scope, and the ticket_number guessability
+  advisory all remain open, carried forward for RECONCILIATION/
+  HUMAN_PR_APPROVAL.
+  RECONCILIATION ran 2026-09-04 (reconciliation-reviewer, verdict
+  CHANGES_REQUIRED, v1), producing docs/reviews/reconciliation/
+  US-4.1-reconciliation.md and docs/reconciliation/US-4.1-traceability.md:
+  all 7 ACs have a matrix row; all 32 named test functions independently
+  confirmed to exist and assert their claimed behavior - no gap found in
+  ST-AC1/ST-AC2/ST-AC4/ST-AC5/ST-AC6, and 6 of ST-AC7's 7 sub-clauses fully
+  covered. The one Fail-forcing gap: ST-AC7's 24h unbound-attachment purge
+  clause had no test - scripts/purge_unbound_attachments.py exists
+  (IMPLEMENTATION T6), the implementation plan's own Testing Strategy names
+  the exact file and pattern to write, and no Open Decision blocks it - four
+  TEST_WRITING passes had simply not delivered it. Two Spec Drift items
+  recorded but not verdict-forcing (ticket_number's guessable format, traced
+  to an approved DESIGN_REVIEW-passed decision; ticket_audit_log vs
+  audit_log wording, traces to DR-1's fix). ST-AC3's unknown-category gap
+  confirmed blocked on OD-3, non-blocking, carried for HUMAN_PR_APPROVAL.
+  FR-1's email-collaborator emergent scope confirmed acceptable, resolved.
+  Routed test_gap -> TEST_WRITING, attempt 5. TEST_WRITING re-ran 2026-09-04
+  (test-writer, verdict PASS, v5, attempt 5), producing v5 of
+  US-4.1-test-strategy.md, US-4.1-ac-test-matrix.md, and
+  US-4.1-test-generation-report.md: added
+  tests/integration/scripts/test_purge_unbound_attachments.py (4 new
+  integration tests against real PostgreSQL, exercising
+  AttachmentRepository.find_unbound_older_than/.purge - the repository code
+  path scripts/purge_unbound_attachments.py's main() actually composes -
+  mirroring test_anonymize_erased_user.py's precedent of testing the
+  underlying unit rather than a script's own settings-driven main()):
+  test_purge_unbound_attachments_deletes_unbound_attachment_older_than_24h,
+  _leaves_unbound_attachment_within_24h_untouched,
+  _leaves_bound_attachment_older_than_24h_untouched,
+  _purge_of_empty_candidate_list_deletes_nothing. ac_test_matrix.md's ST-AC7
+  deferred-purge row replaced with 4 rows; its corresponding "Gaps Not
+  Covered" bullet removed. Verified: ruff check/format clean, mypy --strict
+  0 errors, all 4 new tests pass against the real test database, no
+  regression in tests/unit/modules/support or tests/integration/scripts. No
+  application code changed. Advanced to IMPLEMENTATION, attempt 1 - no
+  builder sub-step re-invoked since no application code changed this pass
+  (docs/catalog/US-4.1-pipeline-status.md's T1-T7 rows remain current);
+  RECONCILIATION must re-run once QUALITY_GATE/IMPLEMENTATION_VERIFICATION/
+  SECURITY_REVIEW have re-confirmed against the now-complete test suite.
+  category enum (OD-3), BR-007 FK ondelete mechanics, the idempotency
+  poll-exhaustion 500 path, the two Spec Drift items (ticket_number
+  guessability, ticket_audit_log wording), and the ticket_number
+  guessability security advisory remain open, carried forward for
+  HUMAN_PR_APPROVAL.
+  IMPLEMENTATION (attempt 1) validated 2026-09-04 by story-orchestrator per
+  continue-flow step 5: docs/catalog/US-4.1-pipeline-status.md's existing
+  output (re-validated the same day) confirms all 4 sub-steps
+  (schema-builder, data-layer-builder, migration-manager,
+  service-and-router-builder) remain Done/PASS and current against
+  TEST_WRITING v5 — no application code changed in that pass (only the new
+  purge-script integration test file), so no builder skill was re-invoked.
+  Advanced to QUALITY_GATE, attempt 1, for gate-enforcer's fresh run against
+  the now-complete test suite (all 7 ACs covered per RECONCILIATION v1's
+  test_gap fix). category enum (OD-3), BR-007 FK ondelete mechanics, the
+  idempotency poll-exhaustion 500 path, the two Spec Drift items
+  (ticket_number guessability, ticket_audit_log wording), and the
+  ticket_number guessability security advisory remain open, carried forward
+  for RECONCILIATION's re-run and HUMAN_PR_APPROVAL.
+  QUALITY_GATE ran 2026-09-04 (gate-enforcer, verdict PASS, v5), producing v5
+  of US-4.1-implementation-report.md and US-4.1-quality-gate-report.md (v4
+  marked SUPERSEDED): fresh run against the now-complete test suite - no
+  application code changed since v4 (TEST_WRITING v5 only added
+  tests/integration/scripts/test_purge_unbound_attachments.py, 4 tests against
+  AttachmentRepository.find_unbound_older_than/.purge). All 7 pre-commit hooks
+  green; mypy app tests 0 errors across 145 files; lint-imports 6/6 kept, no
+  new ignore_imports/exhaustive=false. pytest --cov=app --cov-fail-under=85:
+  603 passed (318 unit + 285 integration, including the 4 new purge-script
+  tests against real PostgreSQL), 96.18% total coverage, no touched module
+  below the 85% floor (support/repository.py rose from 74% to 86% now that
+  the purge path is exercised). Migration cycle (upgrade head -> downgrade -1
+  -> upgrade head) re-proven fresh against the live database. Part B
+  runtime-rule spot-checks all Pass/N/A, unchanged since no application code
+  changed this pass; confirmed the new test file contains no
+  unittest.mock/AsyncMock/MagicMock (no-mock-in-integration-tests hook and a
+  direct grep both clean). No bypass proposed or needed. Advanced to
+  IMPLEMENTATION_VERIFICATION, attempt 1. scripts/purge_unbound_attachments.py's
+  missing test is resolved, no longer carried. category enum (OD-3), BR-007
+  FK ondelete mechanics, the idempotency poll-exhaustion 500 path, the two
+  Spec Drift items (ticket_number guessability, ticket_audit_log wording), and
+  the ticket_number guessability security advisory remain open, carried
+  forward for IMPLEMENTATION_VERIFICATION/RECONCILIATION/HUMAN_PR_APPROVAL.
+  IMPLEMENTATION_VERIFICATION re-ran 2026-09-04 (implementation-verifier,
+  verdict PASS, v3 - v2 marked SUPERSEDED, stale against implementation_report
+  v5/quality_gate_report v5/test_strategy v5/ac_test_matrix v5), producing v3
+  of US-4.1-implementation-verification.md: all SS6.5/SS6.6/SS6.7 items
+  independently re-verified Pass or justified N/A against the current code by
+  direct re-read (migration file, service.py, router.py, cache.py, schemas.py
+  all confirmed unchanged since v2, since TEST_WRITING attempt 5 added only a
+  test file). The full SS5 security-case matrix (10 cell functions across both
+  protected routes) re-confirmed present by direct grep, unchanged since v2.
+  The new tests/integration/scripts/test_purge_unbound_attachments.py exercises
+  an unauthenticated maintenance script, not a protected route - out of scope
+  for SS5, confirmed mock-free. No Critical/Major finding. Advanced to
+  SECURITY_REVIEW, attempt 1. category enum (OD-3), BR-007 FK ondelete
+  mechanics, the idempotency poll-exhaustion 500 path, the two Spec Drift
+  items (ticket_number guessability, ticket_audit_log wording), and the
+  ticket_number guessability security advisory remain open, carried forward
+  for SECURITY_REVIEW/RECONCILIATION/HUMAN_PR_APPROVAL.
+  SECURITY_REVIEW re-ran 2026-09-04 (security-reviewer, verdict PASS, v2 - v1
+  marked SUPERSEDED, stale against implementation_verification v3/
+  implementation_report v5/test_strategy v5/ac_test_matrix v5), producing v2 of
+  US-4.1-security-review.md: all six AGENTS.md section 7 checklist rows
+  re-confirmed Pass or N/A by direct re-read of app/modules/support/{schemas,
+  repository,service,router}.py and migration 37c89e98a86f - application code
+  confirmed byte-identical to what v1 reviewed (TEST_WRITING attempt 5 added
+  only a test file, tests/integration/scripts/test_purge_unbound_attachments.py,
+  out of this checklist's scope). No Critical/Major finding. Same one Low
+  advisory carried forward unchanged (ticket_number sequential guessability,
+  not currently exploitable - no ticket_number-keyed lookup exists). Advanced
+  to RECONCILIATION, attempt 1 - reconciliation-reviewer must re-run against
+  the now-current security_review v2 alongside implementation_verification v3.
+  category enum (OD-3), BR-007 FK ondelete mechanics, the idempotency
+  poll-exhaustion 500 path, the two Spec Drift items (ticket_number
+  guessability, ticket_audit_log wording), and the ticket_number guessability
+  security advisory remain open, carried forward for RECONCILIATION/
+  HUMAN_PR_APPROVAL.
+  RECONCILIATION re-ran 2026-09-04 (reconciliation-reviewer, verdict PASS,
+  v2 - v1 marked SUPERSEDED, stale against implementation_report v5/
+  implementation_verification v3/security_review v2/test_strategy v5/
+  ac_test_matrix v5), producing v2 of docs/reviews/reconciliation/
+  US-4.1-reconciliation.md and docs/reconciliation/US-4.1-traceability.md:
+  v1's sole Fail-forcing gap (ST-AC7's 24h purge-job clause) confirmed
+  closed - TEST_WRITING attempt 5's 4 new tests in
+  tests/integration/scripts/test_purge_unbound_attachments.py were opened
+  and read in full, each confirmed to assert the claimed purge/survive
+  behavior against AttachmentRepository.find_unbound_older_than/.purge. No
+  application code changed since v1's review (confirmed by
+  implementation_report v5/implementation_verification v3, both re-read).
+  All 7 ACs now fully covered except ST-AC3's unknown-category sub-case,
+  confirmed blocked on OD-3 (stakeholder decision, not pipeline-fixable),
+  non-blocking. The two Spec Drift items (ticket_number guessability,
+  ticket_audit_log wording) carried forward unchanged, non-blocking - both
+  trace to approved, reviewed design decisions, not undisclosed drift.
+  Advanced to HUMAN_PR_APPROVAL, status WAITING_FOR_HUMAN pending
+  /so:approve or /so:reject. category enum (OD-3), BR-007 FK ondelete
+  mechanics, the idempotency poll-exhaustion 500 path, and the two Spec
+  Drift items remain open, carried for human review at this gate.
+  HUMAN_PR_APPROVAL approved 2026-09-04T11:00:00Z by sbruhov@gmail.com;
+  advanced to PR_PREPARATION. category enum (OD-3), BR-007 FK ondelete
+  mechanics, the idempotency poll-exhaustion 500 path, and the two Spec
+  Drift items (ticket_number guessability, ticket_audit_log wording) remain
+  open, carried forward for pr-preparer to note in the PR description.
+  PR_PREPARATION ran 2026-09-04 (pr-preparer, verdict PASS, v1), producing
+  docs/pr/US-4.1-pr-summary.md: confirmed all four required gates Pass by
+  direct read (gate-enforcer v5, implementation-verifier v3, security-reviewer
+  v2, reconciliation-reviewer v2); drafted PR title, summary, test-plan
+  checklist (from the traceability matrix and quality-gate report), and a
+  Risk/Rollback section from the implementation plan's own Risks list.
+  .env.example confirmed unchanged (no new Settings field). Commit-hygiene
+  concern flagged, not silently resolved: the working tree carries files
+  unrelated to this story - untracked US-3.3 evidence artifacts
+  (docs/evidence/US-3.3-*, docs/reviews/designs/US-3.3-design-review.md,
+  docs/reconciliation/US-3.3-traceability.md), an untracked
+  .claude/settings.json.graphify-bak and graphify-out/, and a .gitignore
+  edit removing an unrelated graphify-tooling ignore block - named in the PR
+  summary's own Commit Hygiene section for human review before the branch is
+  pushed. Advanced to READY_FOR_PR, status WAITING_FOR_HUMAN pending
+  /so:approve or /so:reject. category enum (OD-3), BR-007 FK ondelete
+  mechanics, the idempotency poll-exhaustion 500 path, and the two Spec
+  Drift items remain open, carried for human review at this gate.
+  READY_FOR_PR approved 2026-09-04T13:00:00Z by sbruhov@gmail.com; advanced
+  to COMPLETED, status WAITING_FOR_HUMAN pending /so:approve or /so:reject
+  to confirm the Pull Request has been merged (archive mode may run only
+  from COMPLETED). The commit-hygiene concern pr-preparer flagged (unrelated
+  US-3.3 evidence files, .claude/settings.json.graphify-bak, graphify-out/,
+  and an unrelated .gitignore edit in the working tree) remains unresolved
+  and should be addressed before the branch is pushed. category enum
+  (OD-3), BR-007 FK ondelete mechanics, the idempotency poll-exhaustion 500
+  path, and the two Spec Drift items (ticket_number guessability,
+  ticket_audit_log wording) remain open, carried for archive-time note.
+  COMPLETED approved 2026-09-04T14:00:00Z by sbruhov@gmail.com (confirming
+  the Pull Request has been merged); advanced to ARCHIVED per
+  stage-map.yaml's on_approve target. The commit-hygiene concern pr-preparer
+  flagged remains unresolved and should be reviewed. category enum (OD-3),
+  BR-007 FK ondelete mechanics, the idempotency poll-exhaustion 500 path,
+  and the two Spec Drift items (ticket_number guessability, ticket_audit_log
+  wording) remain open, carried for /so:archive's consolidation pass.
