@@ -4,12 +4,16 @@ from datetime import UTC, datetime
 import pytest
 from pydantic import ValidationError
 
-from app.modules.support.models import TicketReply
+from app.modules.support.models import Ticket, TicketReply
 from app.modules.support.schemas import (
+    CloseTicketRequest,
     CreateReplyRequest,
+    ReopenTicketRequest,
     ReplyRead,
     ReplyThreadPage,
+    ResolveTicketRequest,
     TicketDetailRead,
+    TicketStateRead,
 )
 
 pytestmark = pytest.mark.unit
@@ -152,6 +156,146 @@ def test_ticket_detail_read_composes_reply_thread_page() -> None:
     assert detail.first_response_at is None
     assert len(detail.replies.items) == 1
     assert detail.replies.items[0].author_kind == "customer"
+
+
+# =============================================================================
+# US-4.3 (Ticket Resolution)
+# =============================================================================
+
+
+# --- FR-10: ResolveTicketRequest.resolution_note validation -----------------
+
+
+def test_resolve_ticket_request_rejects_unknown_field() -> None:
+    # Arrange / Act / Assert
+    with pytest.raises(ValidationError):
+        ResolveTicketRequest(resolution_note="Fixed it.", extra_field="not allowed")  # type: ignore[call-arg]
+
+
+def test_resolve_ticket_request_rejects_empty_resolution_note() -> None:
+    # Arrange / Act / Assert: FR-10 — empty or absent resolution_note is 422.
+    with pytest.raises(ValidationError):
+        ResolveTicketRequest(resolution_note="")
+
+
+def test_resolve_ticket_request_rejects_resolution_note_over_5000_chars() -> None:
+    # Arrange / Act / Assert: matches the backing column's String(5000) cap
+    # (US-4.3-db-design.md, resolves US-4.3-api-design.md Open Questions #3).
+    with pytest.raises(ValidationError):
+        ResolveTicketRequest(resolution_note="x" * 5001)
+
+
+def test_resolve_ticket_request_accepts_resolution_note_at_5000_char_boundary() -> None:
+    # Arrange / Act
+    request = ResolveTicketRequest(resolution_note="x" * 5000)
+
+    # Assert
+    assert len(request.resolution_note) == 5000
+
+
+def test_resolve_ticket_request_missing_resolution_note_raises() -> None:
+    # Arrange / Act / Assert: FR-10 — the field is mandatory, no default.
+    with pytest.raises(ValidationError):
+        ResolveTicketRequest()  # type: ignore[call-arg]
+
+
+# --- CloseTicketRequest / ReopenTicketRequest: optional, unconstrained `reason` --
+
+
+def test_close_ticket_request_reason_omitted_defaults_to_none() -> None:
+    # Arrange / Act
+    request = CloseTicketRequest()
+
+    # Assert
+    assert request.reason is None
+
+
+def test_close_ticket_request_accepts_reason() -> None:
+    # Arrange / Act
+    request = CloseTicketRequest(reason="Customer confirmed fixed.")
+
+    # Assert
+    assert request.reason == "Customer confirmed fixed."
+
+
+def test_close_ticket_request_rejects_unknown_field() -> None:
+    # Arrange / Act / Assert
+    with pytest.raises(ValidationError):
+        CloseTicketRequest(extra_field="not allowed")  # type: ignore[call-arg]
+
+
+def test_reopen_ticket_request_reason_omitted_defaults_to_none() -> None:
+    # Arrange / Act
+    request = ReopenTicketRequest()
+
+    # Assert
+    assert request.reason is None
+
+
+def test_reopen_ticket_request_accepts_reason() -> None:
+    # Arrange / Act
+    request = ReopenTicketRequest(reason="Issue recurred.")
+
+    # Assert
+    assert request.reason == "Issue recurred."
+
+
+def test_reopen_ticket_request_rejects_unknown_field() -> None:
+    # Arrange / Act / Assert
+    with pytest.raises(ValidationError):
+        ReopenTicketRequest(extra_field="not allowed")  # type: ignore[call-arg]
+
+
+# --- TicketStateRead: data-minimization scope (Open Questions #5) ----------
+
+
+def test_ticket_state_read_from_attributes_excludes_closed_by_and_resolution_note() -> None:
+    # Arrange: US-4.3-api-design.md Open Questions #5 — deliberately minimal;
+    # `closed_by`/`resolution_note` exist on the ORM row but must never
+    # appear on this response schema.
+    ticket = Ticket(
+        requester_id=uuid.uuid4(), subject="Cannot log in", body="Still broken.", category="billing"
+    )
+    ticket.id = uuid.uuid4()
+    ticket.ticket_number = "CP-2026-0000001"
+    ticket.status = "resolved"
+    ticket.resolved_at = _FIXED_NOW
+    ticket.resolution_note = "Restarted the service."
+    ticket.closed_at = None
+    ticket.closed_by = None
+    ticket.updated_at = _FIXED_NOW
+
+    # Act
+    state = TicketStateRead.model_validate(ticket)
+
+    # Assert
+    assert state.status == "resolved"
+    assert state.resolved_at == _FIXED_NOW
+    assert not hasattr(state, "resolution_note")
+    assert not hasattr(state, "closed_by")
+
+
+def test_ticket_state_read_closed_at_present_once_closed() -> None:
+    # Arrange
+    ticket = Ticket(
+        requester_id=uuid.uuid4(), subject="Cannot log in", body="Still broken.", category="billing"
+    )
+    ticket.id = uuid.uuid4()
+    ticket.ticket_number = "CP-2026-0000002"
+    ticket.status = "closed"
+    ticket.resolved_at = None
+    ticket.resolution_note = None
+    ticket.closed_at = _FIXED_NOW
+    ticket.closed_by = uuid.uuid4()
+    ticket.updated_at = _FIXED_NOW
+
+    # Act
+    state = TicketStateRead.model_validate(ticket)
+
+    # Assert
+    assert state.status == "closed"
+    assert state.closed_at == _FIXED_NOW
+    assert state.resolved_at is None
 
 
 def test_ticket_detail_read_first_response_at_present_once_stamped() -> None:

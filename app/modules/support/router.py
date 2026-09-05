@@ -10,12 +10,16 @@ from app.modules.support.dependencies import (
     resolve_actor_kind,
 )
 from app.modules.support.schemas import (
+    CloseTicketRequest,
     CreateReplyRequest,
     CreateTicketRequest,
+    ReopenTicketRequest,
     ReplyRead,
+    ResolveTicketRequest,
     TicketDetailRead,
     TicketListResponse,
     TicketRead,
+    TicketStateRead,
 )
 from app.modules.users.dependencies import CurrentUserDep
 
@@ -136,4 +140,76 @@ async def get_ticket_detail(
         actor_kind=resolve_actor_kind(current_user),
         cursor=cursor,
         limit=limit,
+    )
+
+
+# =============================================================================
+# US-4.3 (Ticket Resolution)
+# =============================================================================
+
+
+@router.post(
+    "/{id}/resolve",
+    response_model=TicketStateRead,
+    status_code=status.HTTP_200_OK,
+)
+async def resolve_ticket(
+    id: uuid.UUID,
+    body: ResolveTicketRequest,
+    current_user: CurrentUserDep,
+    service: TicketServiceDep,
+) -> TicketStateRead:
+    """FR-1/FR-6/FR-7/FR-9/FR-10. Check order (state before actor) is
+    enforced by `TicketService.resolve_ticket` itself, not this router or a
+    `require_scope` dependency — a scope dependency here would run before
+    the service can check transition validity, reversing FR-6/FR-7's
+    required order (US-4.3-api-design.md).
+    """
+    return await service.resolve_ticket(
+        ticket_id=id,
+        actor_id=current_user.user_id,
+        actor_kind=resolve_actor_kind(current_user),
+        resolution_note=body.resolution_note,
+    )
+
+
+@router.post(
+    "/{id}/close",
+    response_model=TicketStateRead,
+    status_code=status.HTTP_200_OK,
+)
+async def close_ticket(
+    id: uuid.UUID,
+    body: CloseTicketRequest,
+    current_user: CurrentUserDep,
+    service: TicketServiceDep,
+) -> TicketStateRead:
+    """FR-2/FR-8. `body.reason` is accepted but not persisted anywhere
+    (US-4.3-db-design.md).
+    """
+    return await service.close_ticket(
+        ticket_id=id,
+        actor_id=current_user.user_id,
+        actor_kind=resolve_actor_kind(current_user),
+    )
+
+
+@router.post(
+    "/{id}/reopen",
+    response_model=TicketStateRead,
+    status_code=status.HTTP_200_OK,
+)
+async def reopen_ticket(
+    id: uuid.UUID,
+    body: ReopenTicketRequest,
+    current_user: CurrentUserDep,
+    service: TicketServiceDep,
+) -> TicketStateRead:
+    """FR-5/FR-6/FR-8. `body.reason` is accepted but not persisted anywhere,
+    same as `close_ticket`.
+    """
+    return await service.reopen_ticket(
+        ticket_id=id,
+        actor_id=current_user.user_id,
+        actor_kind=resolve_actor_kind(current_user),
     )

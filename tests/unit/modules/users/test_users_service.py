@@ -511,6 +511,11 @@ class FakeEmailSender:
     async def send_ticket_reply_queue_notification(self, *, ticket_number: str) -> None:
         pass
 
+    async def send_ticket_resolved_email(
+        self, *, to: str, ticket_number: str, resolution_note: str
+    ) -> None:
+        pass
+
 
 class FakeRefreshRateLimitCache:
     def __init__(

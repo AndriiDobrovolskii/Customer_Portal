@@ -14,6 +14,7 @@ from app.modules.support.exceptions import (
     AttachmentNotOwnedError,
     IdempotencyKeyReuseError,
     InsufficientPermissionError,
+    InvalidStateTransitionError,
     TicketClosedError,
     TicketCreationRateLimitError,
     TicketNotFoundError,
@@ -28,6 +29,7 @@ from app.modules.support.schemas import (
     TicketDetailRead,
     TicketListResponse,
     TicketRead,
+    TicketStateRead,
 )
 
 logger = logging.getLogger(__name__)
@@ -38,6 +40,22 @@ _RATE_LIMIT_MAX_CREATES = 5  # FR-6
 _POLL_INTERVAL_SECONDS = 0.1  # US-4.1-db-design.md's bounded poll: 100ms
 _POLL_MAX_ATTEMPTS = 5  # ...up to 5 times, 500ms total
 _MAX_LIST_LIMIT = 100  # US-4.1-openapi.yaml, reusing US-3.1's own unstated choice
+
+# US-4.3 Decision 4: one explicit table, keyed by status, shared by all three
+# transition endpoints - the spec's own NFR ("one explicit transition table
+# in a single module"). Event names are the endpoint verbs, not audit_log's
+# past-tense event strings - two different vocabularies for two different
+# audiences.
+_ALLOWED_EVENTS_BY_STATUS: dict[str, list[str]] = {
+    "open": ["resolve", "close"],
+    "waiting_on_support": ["resolve", "close"],
+    "waiting_on_customer": ["resolve", "close"],
+    "resolved": ["close", "reopen"],
+    "closed": [],
+}
+_RESOLVE_ELIGIBLE_STATUSES = ["open", "waiting_on_support", "waiting_on_customer"]  # OD-5
+_CLOSE_ELIGIBLE_STATUSES = ["open", "waiting_on_support", "waiting_on_customer", "resolved"]
+_REOPEN_ELIGIBLE_STATUSES = ["resolved"]
 
 
 class TicketRepositoryProtocol(Protocol):
@@ -57,6 +75,20 @@ class TicketRepositoryProtocol(Protocol):
         *,
         status: str | None = None,
         first_response_at: datetime | None = None,
+    ) -> Ticket | None: ...
+
+    async def transition_status(
+        self,
+        ticket_id: uuid.UUID,
+        *,
+        expected_statuses: list[str],
+        new_status: str,
+        resolved_at: datetime | None = None,
+        clear_resolved_at: bool = False,
+        resolution_note: str | None = None,
+        closed_at: datetime | None = None,
+        closed_by: uuid.UUID | None = None,
+        require_resolved_within_window: bool = False,
     ) -> Ticket | None: ...
 
     async def commit(self) -> None: ...
@@ -358,6 +390,154 @@ class TicketService:
             next_cursor=page.next_cursor,
         )
 
+    async def resolve_ticket(
+        self,
+        *,
+        ticket_id: uuid.UUID,
+        actor_id: uuid.UUID,
+        actor_kind: str,
+        resolution_note: str,
+    ) -> TicketStateRead:
+        """FR-1/FR-6/FR-7/FR-9. Check order per US-4.3-api-design.md: lookup/
+        ownership -> transition validity (409) -> permission (403) ->
+        conditional UPDATE (409 on race loss) -> audit write -> best-effort
+        email, all before one commit.
+        """
+        ticket = await self._repository.get_by_id(ticket_id)
+        if ticket is None:
+            raise TicketNotFoundError
+        if actor_kind == "customer" and ticket.requester_id != actor_id:
+            raise TicketNotFoundError
+
+        if ticket.status not in _RESOLVE_ELIGIBLE_STATUSES:
+            raise InvalidStateTransitionError(
+                allowed_events=_ALLOWED_EVENTS_BY_STATUS[ticket.status]
+            )
+
+        if actor_kind != "agent":
+            raise InsufficientPermissionError
+
+        transitioned = await self._repository.transition_status(
+            ticket_id,
+            expected_statuses=_RESOLVE_ELIGIBLE_STATUSES,
+            new_status="resolved",
+            resolved_at=datetime.now(UTC),
+            resolution_note=resolution_note,
+        )
+        if transitioned is None:
+            raise InvalidStateTransitionError(
+                allowed_events=_ALLOWED_EVENTS_BY_STATUS[ticket.status]
+            )
+
+        await self._audit_service.record_event(
+            category="tickets",
+            event="ticket_resolved",
+            actor_id=actor_id,
+            target_id=ticket_id,
+            outcome="success",
+            payload=None,
+        )
+        await self._repository.commit()
+
+        # Best-effort, after commit (create_ticket's own precedent).
+        email = await self._user_service.get_email_for_user(transitioned.requester_id)
+        if email is not None:
+            try:
+                await self._email_sender.send_ticket_resolved_email(
+                    to=email,
+                    ticket_number=transitioned.ticket_number,
+                    resolution_note=resolution_note,
+                )
+            except Exception:
+                logger.exception("failed to send ticket resolved email")
+
+        return TicketStateRead.model_validate(transitioned)
+
+    async def close_ticket(
+        self, *, ticket_id: uuid.UUID, actor_id: uuid.UUID, actor_kind: str
+    ) -> TicketStateRead:
+        """FR-2/FR-8. No permission check beyond the lookup/ownership check —
+        the requester and any tickets:write agent share the same success
+        path (US-4.3-api-design.md).
+        """
+        ticket = await self._repository.get_by_id(ticket_id)
+        if ticket is None:
+            raise TicketNotFoundError
+        if actor_kind == "customer" and ticket.requester_id != actor_id:
+            raise TicketNotFoundError
+
+        if ticket.status not in _CLOSE_ELIGIBLE_STATUSES:
+            raise InvalidStateTransitionError(
+                allowed_events=_ALLOWED_EVENTS_BY_STATUS[ticket.status]
+            )
+
+        transitioned = await self._repository.transition_status(
+            ticket_id,
+            expected_statuses=_CLOSE_ELIGIBLE_STATUSES,
+            new_status="closed",
+            closed_at=datetime.now(UTC),
+            closed_by=actor_id,
+        )
+        if transitioned is None:
+            raise InvalidStateTransitionError(
+                allowed_events=_ALLOWED_EVENTS_BY_STATUS[ticket.status]
+            )
+
+        await self._audit_service.record_event(
+            category="tickets",
+            event="ticket_closed",
+            actor_id=actor_id,
+            target_id=ticket_id,
+            outcome="success",
+            payload=None,
+        )
+        await self._repository.commit()
+
+        return TicketStateRead.model_validate(transitioned)
+
+    async def reopen_ticket(
+        self, *, ticket_id: uuid.UUID, actor_id: uuid.UUID, actor_kind: str
+    ) -> TicketStateRead:
+        """FR-5/FR-6. Requires status "resolved" with the inclusive 7-day
+        window (DR-2); a ticket outside the window but not yet auto-closed
+        gets the same 409 a genuine invalid-state caller gets (implementation-
+        plan Risk 1 — not resolved here).
+        """
+        ticket = await self._repository.get_by_id(ticket_id)
+        if ticket is None:
+            raise TicketNotFoundError
+        if actor_kind == "customer" and ticket.requester_id != actor_id:
+            raise TicketNotFoundError
+
+        if ticket.status not in _REOPEN_ELIGIBLE_STATUSES:
+            raise InvalidStateTransitionError(
+                allowed_events=_ALLOWED_EVENTS_BY_STATUS[ticket.status]
+            )
+
+        transitioned = await self._repository.transition_status(
+            ticket_id,
+            expected_statuses=_REOPEN_ELIGIBLE_STATUSES,
+            new_status="waiting_on_support",
+            clear_resolved_at=True,
+            require_resolved_within_window=True,
+        )
+        if transitioned is None:
+            raise InvalidStateTransitionError(
+                allowed_events=_ALLOWED_EVENTS_BY_STATUS[ticket.status]
+            )
+
+        await self._audit_service.record_event(
+            category="tickets",
+            event="ticket_reopened",
+            actor_id=actor_id,
+            target_id=ticket_id,
+            outcome="success",
+            payload=None,
+        )
+        await self._repository.commit()
+
+        return TicketStateRead.model_validate(transitioned)
+
 
 # =============================================================================
 # US-4.2 (Ticket Replies) — TicketReplyService
@@ -398,6 +578,7 @@ class TicketReplyService:
         reply_repository: TicketReplyRepositoryProtocol,
         attachment_repository: AttachmentRepositoryProtocol,
         rate_limit_cache: TicketReplyRateLimitCacheProtocol,
+        audit_service: AuditServiceProtocol,
         email_sender: EmailSender,
         user_service: UserServiceProtocol | None = None,
     ) -> None:
@@ -411,12 +592,15 @@ class TicketReplyService:
         absent, `_resolve_requester_email` falls back to a non-email
         placeholder rather than skipping the dispatch — the notification
         methods themselves are still Protocol-shaped exactly as this
-        module's tests require.
+        module's tests require. `audit_service` is new and required
+        (US-4.3 Decision 3, DR-4): every reply that reopens a ticket must be
+        audited, no code path may skip it.
         """
         self._ticket_repository = ticket_repository
         self._reply_repository = reply_repository
         self._attachment_repository = attachment_repository
         self._rate_limit_cache = rate_limit_cache
+        self._audit_service = audit_service
         self._email_sender = email_sender
         self._user_service = user_service
 
@@ -512,10 +696,31 @@ class TicketReplyService:
             # Internal notes are not customer-facing communication (FR-3) -
             # no status transition, no first_response_at stamp, regardless
             # of the ticket's prior status.
-        elif ticket.status in ("waiting_on_customer", "resolved"):
-            # Resolution OD-8: the resolved-ticket case reopens the ticket
-            # to the same target status the ordinary case already produces.
+        elif ticket.status == "waiting_on_customer":
             status_update = "waiting_on_support"
+        elif ticket.status == "resolved":
+            # US-4.3 FR-4/DR-4/Decision 2: Resolution OD-8's resolved-ticket
+            # reopen now goes through the same window-guarded conditional
+            # UPDATE /reopen uses (not update() - a plain update() ignoring
+            # the window would silently reopen a ticket outside the 7-day
+            # grace period) and writes the same audit_log entry FR-5 writes
+            # for its own direct reopen.
+            transitioned = await self._ticket_repository.transition_status(
+                ticket_id,
+                expected_statuses=["resolved"],
+                new_status="waiting_on_support",
+                clear_resolved_at=True,
+                require_resolved_within_window=True,
+            )
+            if transitioned is not None:
+                await self._audit_service.record_event(
+                    category="tickets",
+                    event="ticket_reopened",
+                    actor_id=actor_id,
+                    target_id=ticket_id,
+                    outcome="success",
+                    payload=None,
+                )
 
         if status_update is not None or first_response_at_update is not None:
             await self._ticket_repository.update(

@@ -4,7 +4,7 @@ from datetime import UTC, datetime, timedelta
 import jwt
 import pytest
 from httpx import AsyncClient
-from sqlalchemy import event, select, text
+from sqlalchemy import event, func, literal, select, text, update
 from sqlalchemy.ext.asyncio import AsyncConnection, AsyncSession
 
 from app.core.config import get_settings
@@ -25,6 +25,18 @@ def _replies_path(ticket_id: uuid.UUID) -> str:
 
 def _ticket_detail_path(ticket_id: uuid.UUID) -> str:
     return f"{_TICKETS_PATH}/{ticket_id}"
+
+
+def _resolve_path(ticket_id: uuid.UUID) -> str:
+    return f"{_TICKETS_PATH}/{ticket_id}/resolve"
+
+
+def _close_path(ticket_id: uuid.UUID) -> str:
+    return f"{_TICKETS_PATH}/{ticket_id}/close"
+
+
+def _reopen_path(ticket_id: uuid.UUID) -> str:
+    return f"{_TICKETS_PATH}/{ticket_id}/reopen"
 
 
 async def _seed_user(db_session: AsyncSession, *, email: str, status: str = "active") -> User:
@@ -117,7 +129,14 @@ def _create_payload(**overrides: object) -> dict[str, object]:
 
 
 async def _seed_ticket(
-    db_session: AsyncSession, *, requester_id: uuid.UUID, status: str = "open"
+    db_session: AsyncSession,
+    *,
+    requester_id: uuid.UUID,
+    status: str = "open",
+    resolved_at: datetime | None = None,
+    resolution_note: str | None = None,
+    closed_at: datetime | None = None,
+    closed_by: uuid.UUID | None = None,
 ) -> Ticket:
     ticket = Ticket(
         ticket_number=f"CP-2026-{uuid.uuid4().hex[:10]}",
@@ -127,6 +146,29 @@ async def _seed_ticket(
         category="billing",
         status=status,
     )
+    # US-4.3 db-design.md v3's CHECK constraints require both resolution
+    # fields together whenever status="resolved" (ck_tickets_resolved_
+    # requires_resolution_fields) and both closure fields together whenever
+    # status="closed" (ck_tickets_closed_requires_closed_fields, a full
+    # biconditional — a "closed" row with either field NULL violates it on
+    # INSERT once T3's migration lands). Callers that only care about status
+    # (most of this module's pre-existing US-4.1/US-4.2 seeds) get sane
+    # defaults here rather than each needing to know about these constraints;
+    # an explicit kwarg always wins.
+    if status == "resolved":
+        resolved_at = resolved_at or datetime.now(UTC)
+        resolution_note = resolution_note or "Seeded resolution."
+    if status == "closed":
+        closed_at = closed_at or datetime.now(UTC)
+        closed_by = closed_by or requester_id
+    if resolved_at is not None:
+        ticket.resolved_at = resolved_at
+    if resolution_note is not None:
+        ticket.resolution_note = resolution_note
+    if closed_at is not None:
+        ticket.closed_at = closed_at
+    if closed_by is not None:
+        ticket.closed_by = closed_by
     db_session.add(ticket)
     await db_session.flush()
     return ticket
@@ -1642,3 +1684,584 @@ async def test_get_ticket_detail_reply_thread_statement_count_independent_of_rep
     assert len(small_response.json()["replies"]["items"]) == 2
     assert len(large_response.json()["replies"]["items"]) == 20
     assert counts["small"] == counts["large"]
+
+
+# =============================================================================
+# US-4.3 (Ticket Resolution)
+# =============================================================================
+
+_RESOLUTION_NOTE = "Restarted the affected service; confirmed the customer's report is fixed."
+_RESOLUTION_WINDOW_DAYS = 7  # implementation_plan.md Decision 7's shared constant
+
+
+def _resolve_payload(**overrides: object) -> dict[str, object]:
+    payload: dict[str, object] = {"resolution_note": _RESOLUTION_NOTE}
+    payload.update(overrides)
+    return payload
+
+
+# --- FR-1: agent resolves a ticket ------------------------------------------
+
+
+@pytest.mark.parametrize("status_before", ["open", "waiting_on_support", "waiting_on_customer"])
+async def test_resolve_ticket_agent_from_eligible_status_returns_200_and_persists(
+    client: AsyncClient, db_session: AsyncSession, status_before: str
+) -> None:
+    # Arrange: OD-5's resolve-eligible source-status set.
+    requester = await _seed_user(db_session, email=f"resolve.{uuid.uuid4().hex}@example.com")
+    ticket = await _seed_ticket(db_session, requester_id=requester.id, status=status_before)
+    _, token = await _seed_agent(db_session, email=f"agent.{uuid.uuid4().hex}@example.com")
+
+    # Act
+    response = await client.post(
+        _resolve_path(ticket.id), json=_resolve_payload(), headers=_auth_headers(token)
+    )
+
+    # Assert
+    assert response.status_code == 200
+    body = response.json()
+    assert body["status"] == "resolved"
+    assert body["resolved_at"] is not None
+    assert "resolution_note" not in body
+    assert "closed_by" not in body
+    await db_session.refresh(ticket)
+    assert ticket.status == "resolved"
+    assert ticket.resolution_note == _RESOLUTION_NOTE
+    audit_result = await db_session.execute(
+        select(AuditLog).where(AuditLog.target_id == ticket.id, AuditLog.event == "ticket_resolved")
+    )
+    audit_row = audit_result.scalar_one()
+    assert audit_row.outcome == "success"
+
+
+# --- FR-10: missing/empty resolution_note -----------------------------------
+
+
+@pytest.mark.parametrize(
+    "overrides",
+    [
+        pytest.param({"resolution_note": ""}, id="empty_note"),
+        pytest.param({}, id="missing_note"),
+    ],
+)
+async def test_resolve_ticket_invalid_resolution_note_returns_422_and_leaves_ticket_unchanged(
+    client: AsyncClient, db_session: AsyncSession, overrides: dict[str, object]
+) -> None:
+    # Arrange
+    requester = await _seed_user(db_session, email=f"resolve422.{uuid.uuid4().hex}@example.com")
+    ticket = await _seed_ticket(db_session, requester_id=requester.id, status="open")
+    _, token = await _seed_agent(db_session, email=f"agent422.{uuid.uuid4().hex}@example.com")
+
+    # Act
+    response = await client.post(
+        _resolve_path(ticket.id), json=overrides, headers=_auth_headers(token)
+    )
+
+    # Assert
+    assert response.status_code == 422
+    assert response.json()["type"].endswith("validation-failed")
+    await db_session.refresh(ticket)
+    assert ticket.status == "open"
+
+
+# --- FR-7: customer attempts to resolve, and check-order vs. FR-6 ----------
+
+
+async def test_resolve_ticket_customer_on_open_ticket_returns_403(
+    client: AsyncClient, db_session: AsyncSession
+) -> None:
+    # Arrange
+    requester = await _seed_user(db_session, email="resolve403@example.com")
+    ticket = await _seed_ticket(db_session, requester_id=requester.id, status="open")
+    token = await _seed_session_and_token(db_session, user_id=requester.id)
+
+    # Act
+    response = await client.post(
+        _resolve_path(ticket.id), json=_resolve_payload(), headers=_auth_headers(token)
+    )
+
+    # Assert
+    assert response.status_code == 403
+    assert response.json()["type"].endswith("insufficient-permission")
+
+
+async def test_resolve_ticket_customer_on_closed_ticket_returns_409_not_403(
+    client: AsyncClient, db_session: AsyncSession
+) -> None:
+    # Arrange: the spec's own NFR — state checked before actor.
+    requester = await _seed_user(db_session, email="resolve409actor@example.com")
+    ticket = await _seed_ticket(
+        db_session, requester_id=requester.id, status="closed", closed_at=datetime.now(UTC)
+    )
+    token = await _seed_session_and_token(db_session, user_id=requester.id)
+
+    # Act
+    response = await client.post(
+        _resolve_path(ticket.id), json=_resolve_payload(), headers=_auth_headers(token)
+    )
+
+    # Assert
+    assert response.status_code == 409
+    body = response.json()
+    assert body["type"].endswith("invalid-state-transition")
+    assert body["allowed_events"] == []
+
+
+# --- FR-6: illegal transition rejected --------------------------------------
+
+
+@pytest.mark.parametrize(
+    "path_factory,status_before,expected_allowed",
+    [
+        pytest.param(_resolve_path, "closed", [], id="resolve_from_closed"),
+        pytest.param(_reopen_path, "open", ["resolve", "close"], id="reopen_from_open"),
+        pytest.param(_reopen_path, "closed", [], id="reopen_from_closed"),
+        pytest.param(_close_path, "closed", [], id="close_from_closed"),
+    ],
+)
+async def test_transition_endpoints_ineligible_status_returns_409_with_allowed_events(
+    client: AsyncClient,
+    db_session: AsyncSession,
+    path_factory: object,
+    status_before: str,
+    expected_allowed: list[str],
+) -> None:
+    # Arrange
+    requester = await _seed_user(db_session, email=f"transition409.{uuid.uuid4().hex}@example.com")
+    ticket = await _seed_ticket(
+        db_session,
+        requester_id=requester.id,
+        status=status_before,
+        closed_at=datetime.now(UTC) if status_before == "closed" else None,
+    )
+    _, token = await _seed_agent(db_session, email=f"agent409.{uuid.uuid4().hex}@example.com")
+
+    # Act
+    response = await client.post(
+        path_factory(ticket.id),  # type: ignore[operator]
+        json=_resolve_payload() if path_factory is _resolve_path else {},
+        headers=_auth_headers(token),
+    )
+
+    # Assert
+    assert response.status_code == 409
+    body = response.json()
+    assert body["type"].endswith("invalid-state-transition")
+    assert body["allowed_events"] == expected_allowed
+
+
+# --- FR-9: concurrent resolution (conditional UPDATE, second caller loses) --
+
+
+async def test_resolve_ticket_second_concurrent_caller_returns_409_first_note_intact(
+    client: AsyncClient, db_session: AsyncSession
+) -> None:
+    # Arrange: two agents "simultaneously" resolving the same ticket —
+    # exercised sequentially against the real conditional UPDATE (the
+    # second call's WHERE no longer matches once the first has committed),
+    # which is what actually proves FR-9's "exactly one succeeds."
+    requester = await _seed_user(db_session, email="concurrent409@example.com")
+    ticket = await _seed_ticket(db_session, requester_id=requester.id, status="open")
+    _, first_token = await _seed_agent(db_session, email="agent-first@example.com")
+    _, second_token = await _seed_agent(db_session, email="agent-second@example.com")
+
+    # Act
+    first = await client.post(
+        _resolve_path(ticket.id),
+        json=_resolve_payload(resolution_note="First agent's note."),
+        headers=_auth_headers(first_token),
+    )
+    second = await client.post(
+        _resolve_path(ticket.id),
+        json=_resolve_payload(resolution_note="Second agent's note — must not win."),
+        headers=_auth_headers(second_token),
+    )
+
+    # Assert
+    assert first.status_code == 200
+    assert second.status_code == 409
+    await db_session.refresh(ticket)
+    assert ticket.resolution_note == "First agent's note."
+
+
+# --- FR-8: acting on someone else's ticket ----------------------------------
+
+
+@pytest.mark.parametrize(
+    "path_factory,status_before",
+    [
+        pytest.param(_resolve_path, "open", id="resolve"),
+        pytest.param(_close_path, "open", id="close"),
+        pytest.param(_reopen_path, "resolved", id="reopen"),
+    ],
+)
+async def test_transition_endpoints_different_customer_returns_404(
+    client: AsyncClient, db_session: AsyncSession, path_factory: object, status_before: str
+) -> None:
+    # Arrange
+    owner = await _seed_user(db_session, email=f"txowner.{uuid.uuid4().hex}@example.com")
+    other = await _seed_user(db_session, email=f"txother.{uuid.uuid4().hex}@example.com")
+    ticket = await _seed_ticket(
+        db_session,
+        requester_id=owner.id,
+        status=status_before,
+        resolved_at=datetime.now(UTC) if status_before == "resolved" else None,
+    )
+    other_token = await _seed_session_and_token(db_session, user_id=other.id)
+
+    # Act
+    response = await client.post(
+        path_factory(ticket.id),  # type: ignore[operator]
+        json=_resolve_payload() if path_factory is _resolve_path else {},
+        headers=_auth_headers(other_token),
+    )
+
+    # Assert
+    assert response.status_code == 404
+    assert response.json()["type"].endswith("not-found")
+
+
+# --- FR-2: ticket closed by requester or agent ------------------------------
+
+
+async def test_close_ticket_requester_returns_200_and_persists_closed_by(
+    client: AsyncClient, db_session: AsyncSession
+) -> None:
+    # Arrange
+    requester = await _seed_user(db_session, email="closebyself@example.com")
+    ticket = await _seed_ticket(db_session, requester_id=requester.id, status="open")
+    token = await _seed_session_and_token(db_session, user_id=requester.id)
+
+    # Act
+    response = await client.post(_close_path(ticket.id), json={}, headers=_auth_headers(token))
+
+    # Assert
+    assert response.status_code == 200
+    body = response.json()
+    assert body["status"] == "closed"
+    assert body["closed_at"] is not None
+    await db_session.refresh(ticket)
+    assert ticket.closed_by == requester.id
+    audit_result = await db_session.execute(
+        select(AuditLog).where(AuditLog.target_id == ticket.id, AuditLog.event == "ticket_closed")
+    )
+    audit_row = audit_result.scalar_one()
+    assert audit_row.actor_id == requester.id
+
+
+async def test_close_ticket_agent_returns_200_and_persists_closed_by_agent(
+    client: AsyncClient, db_session: AsyncSession
+) -> None:
+    # Arrange
+    requester = await _seed_user(db_session, email="closebyagent@example.com")
+    ticket = await _seed_ticket(db_session, requester_id=requester.id, status="waiting_on_support")
+    agent, token = await _seed_agent(db_session, email="closingagent@example.com")
+
+    # Act
+    response = await client.post(
+        _close_path(ticket.id), json={"reason": "Duplicate."}, headers=_auth_headers(token)
+    )
+
+    # Assert
+    assert response.status_code == 200
+    await db_session.refresh(ticket)
+    assert ticket.closed_by == agent.id
+    audit_result = await db_session.execute(
+        select(AuditLog).where(AuditLog.target_id == ticket.id, AuditLog.event == "ticket_closed")
+    )
+    audit_row = audit_result.scalar_one()
+    assert audit_row.actor_id == agent.id
+
+
+async def test_close_ticket_from_resolved_returns_200(
+    client: AsyncClient, db_session: AsyncSession
+) -> None:
+    # Arrange: FR-2's "any non-closed status" scope includes "resolved".
+    requester = await _seed_user(db_session, email="closefromresolved@example.com")
+    ticket = await _seed_ticket(
+        db_session,
+        requester_id=requester.id,
+        status="resolved",
+        resolved_at=datetime.now(UTC),
+        resolution_note="Already resolved.",
+    )
+    token = await _seed_session_and_token(db_session, user_id=requester.id)
+
+    # Act
+    response = await client.post(_close_path(ticket.id), json={}, headers=_auth_headers(token))
+
+    # Assert
+    assert response.status_code == 200
+    assert response.json()["status"] == "closed"
+
+
+# --- FR-5: direct reopen of a resolved ticket -------------------------------
+
+
+async def test_reopen_ticket_requester_within_window_returns_200_and_clears_resolved_at(
+    client: AsyncClient, db_session: AsyncSession
+) -> None:
+    # Arrange
+    requester = await _seed_user(db_session, email="reopenself@example.com")
+    ticket = await _seed_ticket(
+        db_session,
+        requester_id=requester.id,
+        status="resolved",
+        resolved_at=datetime.now(UTC) - timedelta(days=1),
+        resolution_note="Thought it was fixed.",
+    )
+    token = await _seed_session_and_token(db_session, user_id=requester.id)
+
+    # Act
+    response = await client.post(_reopen_path(ticket.id), json={}, headers=_auth_headers(token))
+
+    # Assert
+    assert response.status_code == 200
+    body = response.json()
+    assert body["status"] == "waiting_on_support"
+    assert body["resolved_at"] is None
+    await db_session.refresh(ticket)
+    assert ticket.status == "waiting_on_support"
+    assert ticket.resolved_at is None
+    audit_result = await db_session.execute(
+        select(AuditLog).where(AuditLog.target_id == ticket.id, AuditLog.event == "ticket_reopened")
+    )
+    audit_row = audit_result.scalar_one()
+    assert audit_row.actor_id == requester.id
+
+
+async def test_reopen_ticket_agent_within_window_returns_200(
+    client: AsyncClient, db_session: AsyncSession
+) -> None:
+    # Arrange
+    requester = await _seed_user(db_session, email="reopenagentowner@example.com")
+    ticket = await _seed_ticket(
+        db_session,
+        requester_id=requester.id,
+        status="resolved",
+        resolved_at=datetime.now(UTC) - timedelta(hours=1),
+        resolution_note="Fixed.",
+    )
+    agent, token = await _seed_agent(db_session, email="reopeningagent@example.com")
+
+    # Act
+    response = await client.post(_reopen_path(ticket.id), json={}, headers=_auth_headers(token))
+
+    # Assert
+    assert response.status_code == 200
+    audit_result = await db_session.execute(
+        select(AuditLog).where(AuditLog.target_id == ticket.id, AuditLog.event == "ticket_reopened")
+    )
+    audit_row = audit_result.scalar_one()
+    assert audit_row.actor_id == agent.id
+
+
+async def test_reopen_ticket_outside_window_returns_409(
+    client: AsyncClient, db_session: AsyncSession
+) -> None:
+    # Arrange: OD-4 — the reopen guard is inclusive at exactly 7 days. A
+    # 5-minute margin past the boundary (not the 1-second margin the OD-4
+    # boundary test itself uses) — the guard is evaluated by Postgres against
+    # its own transaction-start now() (frozen for the whole transaction,
+    # per _seed_reply's own docstring), which is always earlier than this
+    # Arrange block's `datetime.now(UTC)` call by however long fixture setup
+    # (including this test's own password hashing) took. A 1-second margin
+    # would make this assertion flaky against that setup gap; 5 minutes is
+    # unambiguously outside the window under any realistic setup latency.
+    requester = await _seed_user(db_session, email="reopenoutside@example.com")
+    ticket = await _seed_ticket(
+        db_session,
+        requester_id=requester.id,
+        status="resolved",
+        resolved_at=datetime.now(UTC) - timedelta(days=_RESOLUTION_WINDOW_DAYS, minutes=5),
+        resolution_note="Old fix.",
+    )
+    token = await _seed_session_and_token(db_session, user_id=requester.id)
+
+    # Act
+    response = await client.post(_reopen_path(ticket.id), json={}, headers=_auth_headers(token))
+
+    # Assert
+    assert response.status_code == 409
+    assert response.json()["type"].endswith("invalid-state-transition")
+    await db_session.refresh(ticket)
+    assert ticket.status == "resolved"
+
+
+async def _seed_ticket_resolved_at_exact_window_boundary(
+    db_session: AsyncSession, *, requester_id: uuid.UUID
+) -> Ticket:
+    """Seeds a "resolved" ticket whose `resolved_at` is exactly
+    `_RESOLUTION_WINDOW_DAYS` ago as computed by Postgres itself, not Python's
+    wall clock. The reopen guard's own `now() - make_interval(...)` predicate
+    reads the same transaction-frozen `now()` this UPDATE does (`db_session`
+    runs the whole test in one transaction), so this seed and that predicate
+    can never disagree on which side of the boundary they're on - unlike a
+    Python-computed `datetime.now(UTC) - timedelta(...)`, whose comparison
+    against Postgres's `now()` depends on real elapsed wall-clock time between
+    Arrange and Act.
+    """
+    ticket = await _seed_ticket(
+        db_session,
+        requester_id=requester_id,
+        status="resolved",
+        resolution_note="Right at the edge.",
+    )
+    await db_session.execute(
+        update(Ticket)
+        .where(Ticket.id == ticket.id)
+        .values(
+            resolved_at=func.now() - func.make_interval(0, 0, 0, literal(_RESOLUTION_WINDOW_DAYS))
+        )
+    )
+    await db_session.flush()
+    await db_session.refresh(ticket)
+    return ticket
+
+
+async def test_reopen_ticket_at_exactly_7_days_boundary_succeeds(
+    client: AsyncClient, db_session: AsyncSession
+) -> None:
+    # Arrange: OD-4 — the reply/reopen guard is inclusive
+    # (`now - resolved_at <= 7 days`); exactly 7 days ago must still succeed.
+    # This is the one pairing no existing test in this codebase exercises
+    # (implementation_plan.md Testing Strategy's own called-out gap).
+    # resolved_at is seeded server-side (see helper docstring) so the boundary
+    # comparison is deterministic regardless of wall-clock timing.
+    requester = await _seed_user(db_session, email="reopenboundary@example.com")
+    ticket = await _seed_ticket_resolved_at_exact_window_boundary(
+        db_session, requester_id=requester.id
+    )
+    token = await _seed_session_and_token(db_session, user_id=requester.id)
+
+    # Act
+    response = await client.post(_reopen_path(ticket.id), json={}, headers=_auth_headers(token))
+
+    # Assert
+    assert response.status_code == 200
+    assert response.json()["status"] == "waiting_on_support"
+
+
+# --- Authentication matrix (AGENTS.md §5) -----------------------------------
+
+
+@pytest.mark.parametrize(
+    "path_factory,status_before",
+    [
+        pytest.param(_resolve_path, "open", id="resolve"),
+        pytest.param(_close_path, "open", id="close"),
+        pytest.param(_reopen_path, "resolved", id="reopen"),
+    ],
+)
+@pytest.mark.parametrize(
+    "token_factory_name",
+    ["no_token", "malformed", "expired", "revoked"],
+)
+async def test_transition_endpoints_auth_matrix_returns_401(
+    client: AsyncClient,
+    db_session: AsyncSession,
+    path_factory: object,
+    status_before: str,
+    token_factory_name: str,
+) -> None:
+    # Arrange
+    requester = await _seed_user(db_session, email=f"authmatrix.{uuid.uuid4().hex}@example.com")
+    ticket = await _seed_ticket(
+        db_session,
+        requester_id=requester.id,
+        status=status_before,
+        resolved_at=datetime.now(UTC) if status_before == "resolved" else None,
+    )
+    headers: dict[str, str] = {}
+    if token_factory_name == "malformed":
+        headers = _auth_headers("not-a-real-jwt")
+    elif token_factory_name == "expired":
+        headers = _auth_headers(await _expired_token(db_session, user_id=requester.id))
+    elif token_factory_name == "revoked":
+        headers = _auth_headers(await _revoked_session_token(db_session, user_id=requester.id))
+    # "no_token": headers stays {}
+
+    # Act
+    response = await client.post(
+        path_factory(ticket.id),  # type: ignore[operator]
+        json=_resolve_payload() if path_factory is _resolve_path else {},
+        headers=headers,
+    )
+
+    # Assert
+    assert response.status_code == 401
+
+
+# --- FR-4 (modified): reply reopens a resolved ticket, now audited (DR-4) --
+
+
+async def test_create_reply_customer_on_resolved_within_window_writes_reopened_audit_entry(
+    client: AsyncClient, db_session: AsyncSession
+) -> None:
+    # Arrange: DESIGN_REVIEW v2 DR-4 — this reopening path (via the existing
+    # US-4.2 replies endpoint) must now also write `audit_log`
+    # (`event=ticket_reopened`), matching FR-5's direct `/reopen` audit.
+    requester = await _seed_user(db_session, email="fr4audit@example.com")
+    ticket = await _seed_ticket(
+        db_session,
+        requester_id=requester.id,
+        status="resolved",
+        resolved_at=datetime.now(UTC) - timedelta(hours=1),
+        resolution_note="Thought it was fixed.",
+    )
+    token = await _seed_session_and_token(db_session, user_id=requester.id)
+
+    # Act
+    response = await client.post(
+        _replies_path(ticket.id),
+        json=_reply_payload(body="It broke again."),
+        headers=_auth_headers(token),
+    )
+
+    # Assert
+    assert response.status_code == 201
+    await db_session.refresh(ticket)
+    assert ticket.status == "waiting_on_support"
+    assert ticket.resolved_at is None
+    audit_result = await db_session.execute(
+        select(AuditLog).where(AuditLog.target_id == ticket.id, AuditLog.event == "ticket_reopened")
+    )
+    audit_row = audit_result.scalar_one()
+    assert audit_row.actor_id == requester.id
+
+
+async def test_create_reply_customer_on_resolved_outside_window_makes_no_status_change(
+    client: AsyncClient, db_session: AsyncSession
+) -> None:
+    # Arrange: implementation_plan.md Decision 2 — the reply-driven reopen
+    # shares the same window-guarded conditional UPDATE as /reopen; a reply
+    # is still accepted (FR-6 does not gate replies) but the ticket does not
+    # transition once outside the window. A 5-minute margin past the
+    # boundary, not 1 second — see test_reopen_ticket_outside_window_returns_409's
+    # own comment on why (Postgres's frozen-per-transaction now() vs. this
+    # Arrange block's datetime.now(UTC) call).
+    requester = await _seed_user(db_session, email="fr4outsidewindow@example.com")
+    ticket = await _seed_ticket(
+        db_session,
+        requester_id=requester.id,
+        status="resolved",
+        resolved_at=datetime.now(UTC) - timedelta(days=_RESOLUTION_WINDOW_DAYS, minutes=5),
+        resolution_note="Old fix.",
+    )
+    token = await _seed_session_and_token(db_session, user_id=requester.id)
+
+    # Act
+    response = await client.post(
+        _replies_path(ticket.id),
+        json=_reply_payload(body="Still broken?"),
+        headers=_auth_headers(token),
+    )
+
+    # Assert
+    assert response.status_code == 201
+    await db_session.refresh(ticket)
+    assert ticket.status == "resolved"
+    audit_result = await db_session.execute(
+        select(AuditLog).where(AuditLog.target_id == ticket.id, AuditLog.event == "ticket_reopened")
+    )
+    assert audit_result.first() is None

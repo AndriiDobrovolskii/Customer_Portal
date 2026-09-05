@@ -1,5 +1,6 @@
 import uuid
 from datetime import datetime
+from typing import Final
 
 from sqlalchemy import (
     CheckConstraint,
@@ -14,6 +15,12 @@ from sqlalchemy import (
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db.base import Base
+
+# US-4.3 Decision 5: `closed_by`'s system-actor sentinel (OD-7) and the
+# auto-close job's `audit_log.actor_id` must be the same value. Declared here
+# (not service.py) so scripts/auto_close_resolved_tickets.py, which imports
+# models/repository only, need not import service.py just for this constant.
+SYSTEM_ACTOR_ID: Final = uuid.UUID("00000000-0000-0000-0000-000000000000")
 
 
 class Ticket(Base):
@@ -35,6 +42,27 @@ class Ticket(Base):
             "requester_id",
             "created_at",
             "id",
+        ),
+        # US-4.3 FR-3: the auto-close job's scan - partial index so it never
+        # scans tickets that aren't currently resolved.
+        Index(
+            "ix_tickets_resolved_at_pending_autoclose",
+            "resolved_at",
+            postgresql_where=text("status = 'resolved'"),
+        ),
+        # US-4.3: `"closed"` is terminal (US-4.3-db-design.md), so this stays
+        # a true biconditional without ever conflicting with a later update.
+        CheckConstraint(
+            "(status = 'closed') = (closed_at IS NOT NULL AND closed_by IS NOT NULL)",
+            name="ck_tickets_closed_requires_closed_fields",
+        ),
+        # US-4.3: one-directional implication, not a biconditional - FR-2/
+        # FR-3 both transition a resolved ticket to closed without clearing
+        # resolved_at/resolution_note (US-4.3-db-design.md "CHECK
+        # constraints" - the literal biconditional would break both).
+        CheckConstraint(
+            "status != 'resolved' OR (resolved_at IS NOT NULL AND resolution_note IS NOT NULL)",
+            name="ck_tickets_resolved_requires_resolution_fields",
         ),
     )
 
@@ -63,6 +91,21 @@ class Ticket(Base):
     first_response_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True
     )
+    # US-4.3 FR-1: set once by /resolve; cleared by /reopen (FR-5) or an
+    # FR-4 reopening reply; not cleared by /close or the auto-close job.
+    resolved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    # US-4.3 FR-1: set once by /resolve; never cleared. Length matches
+    # Ticket.body/TicketReply.body's existing String(5000) cap.
+    resolution_note: Mapped[str | None] = mapped_column(String(5000), nullable=True)
+    # US-4.3 FR-2/FR-3: set once, by /close or the auto-close job. Never
+    # cleared - "closed" is terminal.
+    closed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    # US-4.3 FR-2/FR-3, OD-7: the acting user's id (/close) or SYSTEM_ACTOR_ID
+    # (auto-close job). Deliberately no ForeignKey, unlike every other
+    # "acting user" column here - a real FK would reject the sentinel value,
+    # since no `users` row exists for "the system" (mirrors
+    # audit_log.actor_id's existing no-FK convention).
+    closed_by: Mapped[uuid.UUID | None] = mapped_column(nullable=True)
 
 
 class TicketReply(Base):

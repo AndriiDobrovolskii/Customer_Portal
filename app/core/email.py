@@ -29,6 +29,10 @@ class EmailSender(Protocol):
 
     async def send_ticket_reply_queue_notification(self, *, ticket_number: str) -> None: ...
 
+    async def send_ticket_resolved_email(
+        self, *, to: str, ticket_number: str, resolution_note: str
+    ) -> None: ...
+
 
 class LoggingEmailSender:
     """No-op sender that logs dispatch without a real mail provider.
@@ -78,6 +82,15 @@ class LoggingEmailSender:
             "ticket reply queue notification dispatched to %s",
             get_settings().support_queue_email,
         )
+
+    async def send_ticket_resolved_email(
+        self, *, to: str, ticket_number: str, resolution_note: str
+    ) -> None:
+        # US-4.3 FR-1/OD-8: the resolution note plus a link to the ticket
+        # detail page. Never logs `to` or `resolution_note` (customer-
+        # authored/visible content), matching this class's existing
+        # discipline for every other recipient-bearing method.
+        logger.info("ticket resolved email dispatched")
 
 
 def get_email_sender() -> EmailSender:

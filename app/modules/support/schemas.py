@@ -105,3 +105,51 @@ class TicketDetailRead(BaseModel):
     created_at: datetime
     updated_at: datetime
     replies: ReplyThreadPage
+
+
+class ResolveTicketRequest(BaseModel):
+    """`US-4.3-openapi.yaml` `ResolveTicketRequest`. `max_length=5000` matches
+    `US-4.3-db-design.md`'s `resolution_note` column (`String(5000)`); FR-10's
+    non-empty requirement is `min_length=1`.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    resolution_note: str = Field(min_length=1, max_length=5000)
+
+
+class CloseTicketRequest(BaseModel):
+    """`US-4.3-openapi.yaml` `CloseTicketRequest`. `reason` is accepted but not
+    persisted anywhere (`US-4.3-db-design.md` "not persisted" section) —
+    unconstrained per API_DESIGN Open Questions #4.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    reason: str | None = None
+
+
+class ReopenTicketRequest(BaseModel):
+    """`US-4.3-openapi.yaml` `ReopenTicketRequest`. `reason` is accepted but
+    not persisted anywhere, same as `CloseTicketRequest`.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    reason: str | None = None
+
+
+class TicketStateRead(BaseModel):
+    """`US-4.3-openapi.yaml` `TicketStateRead` field list verbatim —
+    deliberately minimal: `closed_by`/`resolution_note` are not exposed
+    (API_DESIGN Open Questions #5, data-minimization).
+    """
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: uuid.UUID
+    ticket_number: str
+    status: str
+    resolved_at: datetime | None = None
+    closed_at: datetime | None = None
+    updated_at: datetime
