@@ -162,8 +162,14 @@ stories:
     path: docs/stories/US-4.2-ticket-replies.md
     epic: EPIC-4
     title: Ticket Replies
-    state: IN_PROGRESS
-    note: "Activated 2026-09-04 via /so:start. Draft specification predates the current codebase; depends on US-4.1 (archived, PR #16)."
+    state: ARCHIVED
+    delivered_by: { pr: 17, note: "Merged 2026-09-05T00:16:27Z (44587b7)" }
+    note: >
+      Delivered through the full pipeline 2026-09-04/06 and archived
+      2026-09-06. See docs/evidence/US-4.2-delivery-summary.md. OD-8's
+      resolution (customer reply reopens a resolved ticket) covers only the
+      reply-side transition; BR-017's 7-day auto-close job remains US-4.3's
+      responsibility.
 
   - id: US-4.3
     retired_id: US-016

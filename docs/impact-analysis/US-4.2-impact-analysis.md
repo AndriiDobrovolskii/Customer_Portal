@@ -2,7 +2,7 @@
 artifact_type: impact_analysis
 story: US-4.2
 version: 2
-status: DRAFT
+status: ARCHIVED
 created_at: "2026-09-05T13:00:00Z"
 updated_at: "2026-09-05T13:00:00Z"
 produced_by: impact-analyzer

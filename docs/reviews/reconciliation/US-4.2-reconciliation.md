@@ -2,7 +2,7 @@
 artifact_type: reconciliation
 story: US-4.2
 version: 1
-status: DRAFT
+status: ARCHIVED
 created_at: "2026-09-06T02:00:00Z"
 updated_at: "2026-09-06T02:00:00Z"
 produced_by: reconciliation-reviewer

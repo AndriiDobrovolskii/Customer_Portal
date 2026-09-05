@@ -5,8 +5,8 @@
 
 version: 1
 
-active_story: US-4.2
-story_path: docs/stories/US-4.2-ticket-replies.md
+active_story: null
+story_path: null
 
 source:
   type: local_only
@@ -14,15 +14,13 @@ source:
   issue_number: null
   issue_url: null
 
-activated_at: "2026-09-04T16:00:00Z"
-activated_by: sbruhov@gmail.com
+activated_at: null
+activated_by: null
 
-status: IN_PROGRESS
+status: ARCHIVED
 
 note: >
-  US-4.2 (Ticket Replies) activated via /so:start. A pre-existing draft
-  specification (docs/specifications/US-4.2-spec.md) and spec review
-  (docs/reviews/specifications/US-4.2-spec-review.md) exist for this Story but
-  predate the current codebase; treated as context only, not evidence
-  CLARIFICATION or SPECIFICATION already ran. Depends on US-4.1 (archived,
-  PR #16).
+  US-4.2 (Ticket Replies) archived 2026-09-06 via /so:archive (PR #17,
+  merged 2026-09-05T00:16:27Z). See docs/evidence/US-4.2-delivery-summary.md.
+  No Story is currently active. `/so:start US-4.3` is the recommended next
+  activation (EPIC-4's remaining BACKLOG story).

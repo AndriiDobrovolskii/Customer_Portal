@@ -2,7 +2,7 @@
 artifact_type: entity_model
 story: US-4.2
 version: 3
-status: DRAFT
+status: ARCHIVED
 created_at: "2026-09-04T21:00:00Z"
 updated_at: "2026-09-05T11:00:00Z"
 produced_by: db-designer

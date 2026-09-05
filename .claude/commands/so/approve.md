@@ -19,6 +19,13 @@ Requirements:
 - confirm every artifact in the gate's `required_artifacts` exists, is current
   (not SUPERSEDED or ARCHIVED), and that its recorded automated verdict is PASS
   with no blocking findings; if not, refuse and report what is missing;
+- if current_stage is COMPLETED (stage-map.yaml `approval_precondition`): verify
+  against the actual repository, not the approver's stated word, that the
+  story's Pull Request is merged into the default branch - e.g. `git fetch`
+  then `git merge-base --is-ancestor <tip-commit> origin/<default-branch>`, or
+  `gh pr view --json state,mergedAt`. If the branch/PR cannot be found, the
+  check fails, or it is inconclusive, refuse the approval and report exactly
+  what was checked and what was found, per AGENTS.md section 10;
 - set pending_human_gate.status = APPROVED, decided_at (runtime), decided_by;
   store the comment;
 - append a docs/workflow/history.jsonl event with verdict "HUMAN_APPROVED";

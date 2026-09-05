@@ -2,7 +2,7 @@
 artifact_type: specification
 story: US-4.2
 version: 6
-status: DRAFT
+status: ARCHIVED
 created_at: "2026-09-04T17:00:00Z"
 updated_at: "2026-09-05T09:30:00Z"
 produced_by: story-spec-writer

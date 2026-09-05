@@ -2,7 +2,7 @@
 artifact_type: open_decisions
 story: US-4.2
 version: 3
-status: DRAFT
+status: ARCHIVED
 created_at: "2026-09-04T16:30:00Z"
 updated_at: "2026-09-05T09:15:00Z"
 produced_by: us-clarifier
