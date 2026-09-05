@@ -46,6 +46,17 @@ class Settings(BaseSettings):
     geoip_database_path: str = "app/core/data/GeoLite2-City.mmdb"
     invitation_token_ttl_hours: int = 24
     invitation_resend_hourly_limit: int = 5
+    # OD-2: no assignment concept exists yet, so every unassigned ticket's
+    # customer-reply notification (FR-2) goes to this one shared address.
+    support_queue_email: str = "support-queue@portal.internal"
+    # US-4.2 Architectural Change #12: the connection string the running
+    # application uses to serve requests (non-superuser app_runtime role),
+    # distinct from `database_url` (which narrows to "the migration/owner
+    # role's URL"). Dev-only default; every real deployment MUST override
+    # this via env, same discipline as jwt_secret_key.
+    runtime_database_url: str = (
+        "postgresql+asyncpg://app_runtime:CHANGE_ME_IN_PRODUCTION@localhost:5432/customer_portal"
+    )
 
 
 @lru_cache

@@ -10,11 +10,15 @@ from app.modules.support.exceptions import (
     AccountDeactivatedError,
     AttachmentNotOwnedError,
     IdempotencyKeyReuseError,
+    InsufficientPermissionError,
+    TicketClosedError,
     TicketCreationRateLimitError,
+    TicketNotFoundError,
+    TicketReplyRateLimitError,
 )
-from app.modules.support.models import Attachment, Ticket
-from app.modules.support.repository import TicketListPage
-from app.modules.support.service import TicketService, _hash_request
+from app.modules.support.models import Attachment, Ticket, TicketReply
+from app.modules.support.repository import ReplyListPage, TicketListPage
+from app.modules.support.service import TicketReplyService, TicketService, _hash_request
 
 pytestmark = pytest.mark.unit
 
@@ -46,11 +50,34 @@ def _make_attachment(
     attachment_id: uuid.UUID | None = None,
     uploaded_by: uuid.UUID,
     ticket_id: uuid.UUID | None = None,
+    ticket_reply_id: uuid.UUID | None = None,
 ) -> Attachment:
     attachment = Attachment(uploaded_by=uploaded_by, ticket_id=ticket_id)
     attachment.id = attachment_id or uuid.uuid4()
     attachment.created_at = _FIXED_NOW
+    attachment.ticket_reply_id = ticket_reply_id
     return attachment
+
+
+def _make_reply(
+    *,
+    reply_id: uuid.UUID | None = None,
+    ticket_id: uuid.UUID,
+    author_id: uuid.UUID,
+    author_kind: str,
+    visibility: str = "public",
+    body: str = "We're looking into it.",
+) -> TicketReply:
+    reply = TicketReply(
+        ticket_id=ticket_id,
+        author_id=author_id,
+        author_kind=author_kind,
+        body=body,
+        visibility=visibility,
+    )
+    reply.id = reply_id or uuid.uuid4()
+    reply.created_at = _FIXED_NOW
+    return reply
 
 
 class FakeTicketRepository:
@@ -60,6 +87,7 @@ class FakeTicketRepository:
         self.commit_count = 0
         self.list_calls: list[dict[str, Any]] = []
         self.list_page: TicketListPage | None = TicketListPage(items=[], next_cursor=None)
+        self.update_calls: list[dict[str, Any]] = []
 
     async def create(
         self, *, requester_id: uuid.UUID, subject: str, body: str, category: str
@@ -80,6 +108,28 @@ class FakeTicketRepository:
         self.list_calls.append({"requester_id": requester_id, "cursor": cursor, "limit": limit})
         return self.list_page
 
+    async def update(
+        self,
+        ticket_id: uuid.UUID,
+        *,
+        status: str | None = None,
+        first_response_at: datetime | None = None,
+    ) -> Ticket | None:
+        # US-4.2-implementation-plan.md Architectural Change #3: both fields
+        # optional, `None` means "leave unchanged" — never used to clear a
+        # value, since no FR in this story ever clears either one.
+        self.update_calls.append(
+            {"ticket_id": ticket_id, "status": status, "first_response_at": first_response_at}
+        )
+        ticket = self.existing.get(ticket_id)
+        if ticket is None:
+            return None
+        if status is not None:
+            ticket.status = status
+        if first_response_at is not None:
+            ticket.first_response_at = first_response_at
+        return ticket
+
     async def commit(self) -> None:
         self.commit_count += 1
 
@@ -88,6 +138,7 @@ class FakeAttachmentRepository:
     def __init__(self, *, attachments: dict[uuid.UUID, Attachment] | None = None) -> None:
         self.attachments = attachments or {}
         self.bind_calls: list[tuple[uuid.UUID, uuid.UUID]] = []
+        self.bind_reply_calls: list[tuple[uuid.UUID, uuid.UUID]] = []
         self.bind_returns_none = False
         self.commit_count = 0
 
@@ -102,6 +153,19 @@ class FakeAttachmentRepository:
             return None
         attachment = self.attachments[attachment_id]
         attachment.ticket_id = ticket_id
+        return attachment
+
+    async def bind_to_reply(
+        self, *, attachment_id: uuid.UUID, ticket_reply_id: uuid.UUID
+    ) -> Attachment | None:
+        # US-4.2-implementation-plan.md Architectural Change #11: a distinct
+        # method from `bind_to_ticket`, checking `ticket_reply_id IS NULL`
+        # against the independent nullable binding column (Resolution OD-1).
+        self.bind_reply_calls.append((attachment_id, ticket_reply_id))
+        if self.bind_returns_none:
+            return None
+        attachment = self.attachments[attachment_id]
+        attachment.ticket_reply_id = ticket_reply_id
         return attachment
 
     async def commit(self) -> None:
@@ -239,11 +303,27 @@ class FakeEmailSender:
     def __init__(self, *, raises: bool = False) -> None:
         self.raises = raises
         self.sent: list[dict[str, str]] = []
+        self.reply_notifications_sent: list[dict[str, str]] = []
+        self.queue_notifications_sent: list[dict[str, str]] = []
 
     async def send_ticket_created_email(self, *, to: str, ticket_number: str) -> None:
         if self.raises:
             raise RuntimeError("email dispatch failed")
         self.sent.append({"to": to, "ticket_number": ticket_number})
+
+    async def send_ticket_reply_notification(self, *, to: str, ticket_number: str) -> None:
+        # FR-1: best-effort notification to the requester on an agent reply.
+        if self.raises:
+            raise RuntimeError("email dispatch failed")
+        self.reply_notifications_sent.append({"to": to, "ticket_number": ticket_number})
+
+    async def send_ticket_reply_queue_notification(self, *, ticket_number: str) -> None:
+        # FR-2: best-effort notification to the fixed support-queue address
+        # (Resolution OD-2) — no `to` parameter; the recipient is read from
+        # settings inside the real implementation, not passed by the caller.
+        if self.raises:
+            raise RuntimeError("email dispatch failed")
+        self.queue_notifications_sent.append({"ticket_number": ticket_number})
 
     async def send_verification_email(self, *, to: str, raw_token: str) -> None:
         raise NotImplementedError
@@ -313,6 +393,108 @@ def _make_service(
         rate_limit_cache,
         audit_service,
         user_service,
+        email_sender,
+    )
+
+
+class FakeTicketReplyRepository:
+    """`TicketReplyRepositoryProtocol` fake — mirrors `FakeTicketRepository`'s
+    real-ORM-instance convention (`mypy --strict` Protocol return-type
+    covariance).
+    """
+
+    def __init__(self) -> None:
+        self.created: list[dict[str, Any]] = []
+        self.commit_count = 0
+        self.list_calls: list[dict[str, Any]] = []
+        self.list_page: ReplyListPage | None = ReplyListPage(items=[], next_cursor=None)
+
+    async def create(
+        self,
+        *,
+        ticket_id: uuid.UUID,
+        author_id: uuid.UUID,
+        author_kind: str,
+        body: str,
+        visibility: str,
+    ) -> TicketReply:
+        self.created.append(
+            {
+                "ticket_id": ticket_id,
+                "author_id": author_id,
+                "author_kind": author_kind,
+                "body": body,
+                "visibility": visibility,
+            }
+        )
+        return _make_reply(
+            ticket_id=ticket_id,
+            author_id=author_id,
+            author_kind=author_kind,
+            visibility=visibility,
+            body=body,
+        )
+
+    async def list_for_ticket(
+        self, *, ticket_id: uuid.UUID, cursor: str | None, limit: int
+    ) -> ReplyListPage | None:
+        self.list_calls.append({"ticket_id": ticket_id, "cursor": cursor, "limit": limit})
+        return self.list_page
+
+    async def commit(self) -> None:
+        self.commit_count += 1
+
+
+class FakeTicketReplyRateLimitCache:
+    """Distinct Valkey-counter fake from `FakeRateLimitCache` (ticket
+    creation's) — Risk 6's two-independent-counters requirement.
+    """
+
+    def __init__(self, *, count: int = 1) -> None:
+        self.count = count
+        self.record_calls: list[dict[str, Any]] = []
+
+    async def record_and_check(self, user_id: uuid.UUID, *, window_seconds: int) -> int:
+        self.record_calls.append({"user_id": user_id, "window_seconds": window_seconds})
+        return self.count
+
+    async def get_retry_after_seconds(self, user_id: uuid.UUID) -> int:
+        return 1800
+
+
+def _make_reply_service(
+    *,
+    ticket_repository: FakeTicketRepository | None = None,
+    reply_repository: FakeTicketReplyRepository | None = None,
+    attachment_repository: FakeAttachmentRepository | None = None,
+    rate_limit_cache: FakeTicketReplyRateLimitCache | None = None,
+    email_sender: FakeEmailSender | None = None,
+) -> tuple[
+    TicketReplyService,
+    FakeTicketRepository,
+    FakeTicketReplyRepository,
+    FakeAttachmentRepository,
+    FakeTicketReplyRateLimitCache,
+    FakeEmailSender,
+]:
+    ticket_repository = ticket_repository or FakeTicketRepository()
+    reply_repository = reply_repository or FakeTicketReplyRepository()
+    attachment_repository = attachment_repository or FakeAttachmentRepository()
+    rate_limit_cache = rate_limit_cache or FakeTicketReplyRateLimitCache(count=1)
+    email_sender = email_sender or FakeEmailSender()
+    service = TicketReplyService(
+        ticket_repository,
+        reply_repository,
+        attachment_repository,
+        rate_limit_cache,
+        email_sender,
+    )
+    return (
+        service,
+        ticket_repository,
+        reply_repository,
+        attachment_repository,
+        rate_limit_cache,
         email_sender,
     )
 
@@ -749,3 +931,759 @@ async def test_list_own_tickets_scopes_to_requester_and_passes_through_paging() 
     assert ticket_repo.list_calls == [
         {"requester_id": requester_id, "cursor": "prev-cursor", "limit": 25}
     ]
+
+
+# =============================================================================
+# US-4.2 (Ticket Replies) — TicketReplyService.create_reply / get_ticket_detail
+#
+# Test-writer's own collaborator-shape assumption (docs/tests/US-4.2-test-
+# strategy.md "Shipped contract this suite is written against"): a new
+# `TicketReplyService` class, not new methods on `TicketService` — the plan
+# (docs/plans/US-4.2-implementation-plan.md Architectural Change #4) leaves
+# this file-internal split open; if service-and-router-builder ships a
+# different shape, a reconciliation TEST_WRITING pass updates this file the
+# same way US-4.1's v2 pass reconciled test_support_service.py against its
+# own shipped collaborator shapes.
+# =============================================================================
+
+
+# --- TR-AC1/FR-1: agent public reply --------------------------------------
+
+
+async def test_create_reply_agent_public_on_open_ticket_sets_waiting_on_customer() -> None:
+    # Arrange
+    ticket_id = uuid.uuid4()
+    requester_id = uuid.uuid4()
+    agent_id = uuid.uuid4()
+    ticket = _make_ticket(requester_id=requester_id)
+    ticket.id = ticket_id
+    ticket.status = "open"
+    ticket.first_response_at = None
+    ticket_repo = FakeTicketRepository(existing={ticket_id: ticket})
+    service, ticket_repo, reply_repo, *_ = _make_reply_service(ticket_repository=ticket_repo)
+
+    # Act
+    result = await service.create_reply(
+        ticket_id=ticket_id,
+        actor_id=agent_id,
+        actor_kind="agent",
+        body="We're looking into it.",
+        visibility="public",
+        attachment_ids=[],
+    )
+
+    # Assert
+    assert result.author_kind == "agent"
+    assert result.visibility == "public"
+    assert ticket_repo.update_calls[-1]["status"] == "waiting_on_customer"
+    assert reply_repo.commit_count == 1
+
+
+async def test_create_reply_agent_public_on_resolved_ticket_status_unchanged() -> None:
+    # Arrange: Resolution OD-5 — an agent's public reply on a resolved ticket
+    # does not reopen it.
+    ticket_id = uuid.uuid4()
+    ticket = _make_ticket(requester_id=uuid.uuid4())
+    ticket.id = ticket_id
+    ticket.status = "resolved"
+    ticket_repo = FakeTicketRepository(existing={ticket_id: ticket})
+    service, ticket_repo, *_ = _make_reply_service(ticket_repository=ticket_repo)
+
+    # Act
+    await service.create_reply(
+        ticket_id=ticket_id,
+        actor_id=uuid.uuid4(),
+        actor_kind="agent",
+        body="Still resolved.",
+        visibility="public",
+        attachment_ids=[],
+    )
+
+    # Assert: no status write at all — the "leave unchanged" branch.
+    assert all(call["status"] is None for call in ticket_repo.update_calls)
+
+
+async def test_create_reply_agent_internal_note_status_unchanged() -> None:
+    # Arrange: an internal note is not customer-facing communication —
+    # no status transition regardless of the ticket's prior status.
+    ticket_id = uuid.uuid4()
+    ticket = _make_ticket(requester_id=uuid.uuid4())
+    ticket.id = ticket_id
+    ticket.status = "open"
+    ticket_repo = FakeTicketRepository(existing={ticket_id: ticket})
+    service, ticket_repo, *_ = _make_reply_service(ticket_repository=ticket_repo)
+
+    # Act
+    await service.create_reply(
+        ticket_id=ticket_id,
+        actor_id=uuid.uuid4(),
+        actor_kind="agent",
+        body="Internal note.",
+        visibility="internal",
+        attachment_ids=[],
+    )
+
+    # Assert
+    assert all(call["status"] is None for call in ticket_repo.update_calls)
+
+
+async def test_create_reply_first_response_at_stamped_once_on_first_public_agent_reply() -> None:
+    # Arrange
+    ticket_id = uuid.uuid4()
+    ticket = _make_ticket(requester_id=uuid.uuid4())
+    ticket.id = ticket_id
+    ticket.status = "open"
+    ticket.first_response_at = None
+    ticket_repo = FakeTicketRepository(existing={ticket_id: ticket})
+    service, ticket_repo, *_ = _make_reply_service(ticket_repository=ticket_repo)
+
+    # Act
+    await service.create_reply(
+        ticket_id=ticket_id,
+        actor_id=uuid.uuid4(),
+        actor_kind="agent",
+        body="First reply.",
+        visibility="public",
+        attachment_ids=[],
+    )
+
+    # Assert
+    stamped_calls = [c for c in ticket_repo.update_calls if c["first_response_at"] is not None]
+    assert len(stamped_calls) == 1
+
+
+async def test_create_reply_first_response_at_not_restamped_on_second_public_agent_reply() -> None:
+    # Arrange: `first_response_at` already set — stamped exactly once (FR-1).
+    ticket_id = uuid.uuid4()
+    ticket = _make_ticket(requester_id=uuid.uuid4())
+    ticket.id = ticket_id
+    ticket.status = "waiting_on_customer"
+    ticket.first_response_at = _FIXED_NOW
+    ticket_repo = FakeTicketRepository(existing={ticket_id: ticket})
+    service, ticket_repo, *_ = _make_reply_service(ticket_repository=ticket_repo)
+
+    # Act
+    await service.create_reply(
+        ticket_id=ticket_id,
+        actor_id=uuid.uuid4(),
+        actor_kind="agent",
+        body="Second reply.",
+        visibility="public",
+        attachment_ids=[],
+    )
+
+    # Assert
+    assert all(c["first_response_at"] is None for c in ticket_repo.update_calls)
+
+
+async def test_create_reply_agent_notifies_requester() -> None:
+    # Arrange
+    ticket_id = uuid.uuid4()
+    ticket = _make_ticket(requester_id=uuid.uuid4())
+    ticket.id = ticket_id
+    ticket.status = "open"
+    ticket_repo = FakeTicketRepository(existing={ticket_id: ticket})
+    service, *_, email_sender = _make_reply_service(ticket_repository=ticket_repo)
+
+    # Act
+    await service.create_reply(
+        ticket_id=ticket_id,
+        actor_id=uuid.uuid4(),
+        actor_kind="agent",
+        body="Reply body.",
+        visibility="public",
+        attachment_ids=[],
+    )
+
+    # Assert: FR-1's requester notification, best-effort after commit.
+    assert len(email_sender.reply_notifications_sent) == 1
+    assert email_sender.queue_notifications_sent == []
+
+
+# --- TR-AC2/FR-2: customer reply --------------------------------------------
+
+
+async def test_create_reply_customer_on_waiting_on_customer_sets_waiting_on_support() -> None:
+    # Arrange
+    ticket_id = uuid.uuid4()
+    requester_id = uuid.uuid4()
+    ticket = _make_ticket(requester_id=requester_id)
+    ticket.id = ticket_id
+    ticket.status = "waiting_on_customer"
+    ticket_repo = FakeTicketRepository(existing={ticket_id: ticket})
+    service, ticket_repo, *_ = _make_reply_service(ticket_repository=ticket_repo)
+
+    # Act
+    result = await service.create_reply(
+        ticket_id=ticket_id,
+        actor_id=requester_id,
+        actor_kind="customer",
+        body="Any update?",
+        visibility=None,
+        attachment_ids=[],
+    )
+
+    # Assert
+    assert result.author_kind == "customer"
+    assert ticket_repo.update_calls[-1]["status"] == "waiting_on_support"
+
+
+async def test_create_reply_customer_on_resolved_reopens_to_waiting_on_support() -> None:
+    # Arrange: Resolution OD-8 — a customer reply on a resolved ticket
+    # reopens it to the same target status FR-2's ordinary case produces.
+    ticket_id = uuid.uuid4()
+    requester_id = uuid.uuid4()
+    ticket = _make_ticket(requester_id=requester_id)
+    ticket.id = ticket_id
+    ticket.status = "resolved"
+    ticket_repo = FakeTicketRepository(existing={ticket_id: ticket})
+    service, ticket_repo, *_ = _make_reply_service(ticket_repository=ticket_repo)
+
+    # Act
+    await service.create_reply(
+        ticket_id=ticket_id,
+        actor_id=requester_id,
+        actor_kind="customer",
+        body="Actually it's still broken.",
+        visibility=None,
+        attachment_ids=[],
+    )
+
+    # Assert
+    assert ticket_repo.update_calls[-1]["status"] == "waiting_on_support"
+
+
+@pytest.mark.parametrize("status_before", ["open", "waiting_on_support"])
+async def test_create_reply_customer_on_other_status_makes_no_status_write(
+    status_before: str,
+) -> None:
+    # Arrange: API_DESIGN v3 Open Question #1 (carried non-blocking through
+    # DESIGN_REVIEW/IMPACT_ANALYSIS) — not stated by any FR/AC. The
+    # implementation plan's own conservative default (Architectural Change
+    # #4): reply still accepted, no status write.
+    ticket_id = uuid.uuid4()
+    requester_id = uuid.uuid4()
+    ticket = _make_ticket(requester_id=requester_id)
+    ticket.id = ticket_id
+    ticket.status = status_before
+    ticket_repo = FakeTicketRepository(existing={ticket_id: ticket})
+    service, ticket_repo, _reply_repo, *_ = _make_reply_service(ticket_repository=ticket_repo)
+
+    # Act
+    result = await service.create_reply(
+        ticket_id=ticket_id,
+        actor_id=requester_id,
+        actor_kind="customer",
+        body="Just checking in.",
+        visibility=None,
+        attachment_ids=[],
+    )
+
+    # Assert: still accepted (a created reply is returned)...
+    assert result.body == "Just checking in."
+    # ...but no status write at all.
+    assert all(c["status"] is None for c in ticket_repo.update_calls)
+
+
+async def test_create_reply_customer_notifies_queue_not_requester() -> None:
+    # Arrange
+    ticket_id = uuid.uuid4()
+    requester_id = uuid.uuid4()
+    ticket = _make_ticket(requester_id=requester_id)
+    ticket.id = ticket_id
+    ticket.status = "waiting_on_customer"
+    ticket_repo = FakeTicketRepository(existing={ticket_id: ticket})
+    service, *_, email_sender = _make_reply_service(ticket_repository=ticket_repo)
+
+    # Act
+    await service.create_reply(
+        ticket_id=ticket_id,
+        actor_id=requester_id,
+        actor_kind="customer",
+        body="Any update?",
+        visibility=None,
+        attachment_ids=[],
+    )
+
+    # Assert: FR-2 — no assignment concept (OD-2), always the fixed queue.
+    assert len(email_sender.queue_notifications_sent) == 1
+    assert email_sender.reply_notifications_sent == []
+
+
+# --- FR-6: closed and resolved tickets --------------------------------------
+
+
+@pytest.mark.parametrize("actor_kind", ["agent", "customer"])
+async def test_create_reply_any_actor_on_closed_ticket_raises_ticket_closed(
+    actor_kind: str,
+) -> None:
+    # Arrange
+    ticket_id = uuid.uuid4()
+    requester_id = uuid.uuid4()
+    ticket = _make_ticket(requester_id=requester_id)
+    ticket.id = ticket_id
+    ticket.status = "closed"
+    ticket_repo = FakeTicketRepository(existing={ticket_id: ticket})
+    service, ticket_repo, reply_repo, *_ = _make_reply_service(ticket_repository=ticket_repo)
+    actor_id = requester_id if actor_kind == "customer" else uuid.uuid4()
+
+    # Act & Assert
+    with pytest.raises(TicketClosedError):
+        await service.create_reply(
+            ticket_id=ticket_id,
+            actor_id=actor_id,
+            actor_kind=actor_kind,
+            body="Reopening attempt.",
+            visibility="public",
+            attachment_ids=[],
+        )
+    assert reply_repo.created == []
+    assert ticket_repo.update_calls == []
+
+
+# --- TR-AC5/FR-5: internal notes restricted to agents -----------------------
+
+
+async def test_create_reply_customer_internal_raises_from_service_not_integrity() -> None:
+    # Arrange: the service's own explicit check must raise before any insert
+    # is attempted — never a caught `IntegrityError` translated after the
+    # fact (implementation-plan Architectural Change #5 / db-design v3's
+    # explicit layering note).
+    ticket_id = uuid.uuid4()
+    requester_id = uuid.uuid4()
+    ticket = _make_ticket(requester_id=requester_id)
+    ticket.id = ticket_id
+    ticket.status = "open"
+    ticket_repo = FakeTicketRepository(existing={ticket_id: ticket})
+    service, ticket_repo, reply_repo, *_ = _make_reply_service(ticket_repository=ticket_repo)
+
+    # Act & Assert
+    with pytest.raises(InsufficientPermissionError):
+        await service.create_reply(
+            ticket_id=ticket_id,
+            actor_id=requester_id,
+            actor_kind="customer",
+            body="Let me sneak an internal note.",
+            visibility="internal",
+            attachment_ids=[],
+        )
+    # No insert was ever attempted — the fake never even had the chance to
+    # raise an IntegrityError, proving the rejection happens before any
+    # repository call, not by catching a constraint violation.
+    assert reply_repo.created == []
+
+
+async def test_create_reply_customer_omitted_visibility_defaults_to_public() -> None:
+    # Arrange
+    ticket_id = uuid.uuid4()
+    requester_id = uuid.uuid4()
+    ticket = _make_ticket(requester_id=requester_id)
+    ticket.id = ticket_id
+    ticket.status = "waiting_on_customer"
+    ticket_repo = FakeTicketRepository(existing={ticket_id: ticket})
+    service, *_ = _make_reply_service(ticket_repository=ticket_repo)
+
+    # Act
+    result = await service.create_reply(
+        ticket_id=ticket_id,
+        actor_id=requester_id,
+        actor_kind="customer",
+        body="No visibility given.",
+        visibility=None,
+        attachment_ids=[],
+    )
+
+    # Assert
+    assert result.visibility == "public"
+
+
+async def test_create_reply_agent_omitted_visibility_defaults_to_public() -> None:
+    # Arrange: Resolution OD-6 — same default for both actor kinds.
+    ticket_id = uuid.uuid4()
+    ticket = _make_ticket(requester_id=uuid.uuid4())
+    ticket.id = ticket_id
+    ticket.status = "open"
+    ticket_repo = FakeTicketRepository(existing={ticket_id: ticket})
+    service, *_ = _make_reply_service(ticket_repository=ticket_repo)
+
+    # Act
+    result = await service.create_reply(
+        ticket_id=ticket_id,
+        actor_id=uuid.uuid4(),
+        actor_kind="agent",
+        body="No visibility given.",
+        visibility=None,
+        attachment_ids=[],
+    )
+
+    # Assert
+    assert result.visibility == "public"
+
+
+# --- TR-AC4/FR-4: ownership/scope authorization -----------------------------
+
+
+async def test_create_reply_different_customer_raises_ticket_not_found() -> None:
+    # Arrange
+    ticket_id = uuid.uuid4()
+    ticket = _make_ticket(requester_id=uuid.uuid4())
+    ticket.id = ticket_id
+    ticket_repo = FakeTicketRepository(existing={ticket_id: ticket})
+    service, ticket_repo, reply_repo, *_ = _make_reply_service(ticket_repository=ticket_repo)
+
+    # Act & Assert
+    with pytest.raises(TicketNotFoundError):
+        await service.create_reply(
+            ticket_id=ticket_id,
+            actor_id=uuid.uuid4(),
+            actor_kind="customer",
+            body="Not my ticket.",
+            visibility=None,
+            attachment_ids=[],
+        )
+    assert reply_repo.created == []
+
+
+async def test_create_reply_caller_neither_owner_nor_agent_raises_ticket_not_found() -> None:
+    # Arrange: API_DESIGN v3 Open Question #2 — generalizes FR-4's GET-
+    # specific rule to POST. Not reachable under the shipped role seed
+    # (tickets:read/tickets:write always travel together), asserted here at
+    # the unit level where `actor_kind` is injected directly rather than
+    # derived from a real JWT scope list.
+    ticket_id = uuid.uuid4()
+    ticket = _make_ticket(requester_id=uuid.uuid4())
+    ticket.id = ticket_id
+    ticket_repo = FakeTicketRepository(existing={ticket_id: ticket})
+    service, ticket_repo, reply_repo, *_ = _make_reply_service(ticket_repository=ticket_repo)
+
+    # Act & Assert
+    with pytest.raises(TicketNotFoundError):
+        await service.create_reply(
+            ticket_id=ticket_id,
+            actor_id=uuid.uuid4(),
+            actor_kind="customer",
+            body="Neither owner nor agent.",
+            visibility=None,
+            attachment_ids=[],
+        )
+    assert reply_repo.created == []
+
+
+async def test_create_reply_unknown_ticket_raises_ticket_not_found() -> None:
+    # Arrange
+    service, _ticket_repo, reply_repo, *_ = _make_reply_service()
+
+    # Act & Assert
+    with pytest.raises(TicketNotFoundError):
+        await service.create_reply(
+            ticket_id=uuid.uuid4(),
+            actor_id=uuid.uuid4(),
+            actor_kind="agent",
+            body="No such ticket.",
+            visibility="public",
+            attachment_ids=[],
+        )
+    assert reply_repo.created == []
+
+
+# --- OD-1/FR-1/FR-2: attachment reply-binding (IDOR) ------------------------
+
+
+async def test_create_reply_attachment_owned_and_unbound_is_bound_to_the_reply() -> None:
+    # Arrange
+    ticket_id = uuid.uuid4()
+    agent_id = uuid.uuid4()
+    attachment_id = uuid.uuid4()
+    ticket = _make_ticket(requester_id=uuid.uuid4())
+    ticket.id = ticket_id
+    ticket.status = "open"
+    ticket_repo = FakeTicketRepository(existing={ticket_id: ticket})
+    attachment_repo = FakeAttachmentRepository(
+        attachments={
+            attachment_id: _make_attachment(
+                attachment_id=attachment_id, uploaded_by=agent_id, ticket_reply_id=None
+            )
+        }
+    )
+    service, _, _reply_repo, attachment_repo, *_ = _make_reply_service(
+        ticket_repository=ticket_repo, attachment_repository=attachment_repo
+    )
+
+    # Act
+    result = await service.create_reply(
+        ticket_id=ticket_id,
+        actor_id=agent_id,
+        actor_kind="agent",
+        body="See attached.",
+        visibility="public",
+        attachment_ids=[attachment_id],
+    )
+
+    # Assert
+    assert attachment_repo.bind_reply_calls == [(attachment_id, result.id)]
+    assert attachment_repo.attachments[attachment_id].ticket_reply_id == result.id
+
+
+@pytest.mark.parametrize(
+    "attachment_factory",
+    [
+        pytest.param(
+            lambda actor_id, other_id: {
+                other_id: _make_attachment(attachment_id=other_id, uploaded_by=uuid.uuid4())
+            },
+            id="owned_by_another_user",
+        ),
+        pytest.param(
+            lambda actor_id, other_id: {
+                other_id: _make_attachment(
+                    attachment_id=other_id, uploaded_by=actor_id, ticket_reply_id=uuid.uuid4()
+                )
+            },
+            id="already_bound_to_another_reply",
+        ),
+        pytest.param(lambda actor_id, other_id: {}, id="unknown_attachment_id"),
+    ],
+)
+async def test_create_reply_attachment_not_owned_raises_indistinguishable_error(
+    attachment_factory: Callable[[uuid.UUID, uuid.UUID], dict[uuid.UUID, Attachment]],
+) -> None:
+    # Arrange: FR-1/BR-016 — same non-disclosure rule as US-4.1's own
+    # attachment-ownership check (US-4.1 FR-7).
+    ticket_id = uuid.uuid4()
+    agent_id = uuid.uuid4()
+    attachment_id = uuid.uuid4()
+    ticket = _make_ticket(requester_id=uuid.uuid4())
+    ticket.id = ticket_id
+    ticket.status = "open"
+    ticket_repo = FakeTicketRepository(existing={ticket_id: ticket})
+    attachment_repo = FakeAttachmentRepository(
+        attachments=attachment_factory(agent_id, attachment_id)
+    )
+    service, _, reply_repo, attachment_repo, *_ = _make_reply_service(
+        ticket_repository=ticket_repo, attachment_repository=attachment_repo
+    )
+
+    # Act & Assert
+    with pytest.raises(AttachmentNotOwnedError):
+        await service.create_reply(
+            ticket_id=ticket_id,
+            actor_id=agent_id,
+            actor_kind="agent",
+            body="See attached.",
+            visibility="public",
+            attachment_ids=[attachment_id],
+        )
+    assert reply_repo.created == []
+    assert attachment_repo.bind_reply_calls == []
+
+
+# --- NFR: reply rate limit (30/hour), independent of ticket-creation's -----
+
+
+async def test_create_reply_rate_limit_exceeded_raises_429_with_retry_after() -> None:
+    # Arrange
+    ticket_id = uuid.uuid4()
+    ticket = _make_ticket(requester_id=uuid.uuid4())
+    ticket.id = ticket_id
+    ticket.status = "open"
+    ticket_repo = FakeTicketRepository(existing={ticket_id: ticket})
+    rate_limit_cache = FakeTicketReplyRateLimitCache(count=31)
+    service, ticket_repo, reply_repo, *_ = _make_reply_service(
+        ticket_repository=ticket_repo, rate_limit_cache=rate_limit_cache
+    )
+
+    # Act & Assert
+    with pytest.raises(TicketReplyRateLimitError) as exc_info:
+        await service.create_reply(
+            ticket_id=ticket_id,
+            actor_id=uuid.uuid4(),
+            actor_kind="agent",
+            body="Reply 31.",
+            visibility="public",
+            attachment_ids=[],
+        )
+    assert exc_info.value.headers is not None
+    assert "Retry-After" in exc_info.value.headers
+    assert reply_repo.created == []
+
+
+async def test_create_reply_at_rate_limit_boundary_succeeds() -> None:
+    # Arrange
+    ticket_id = uuid.uuid4()
+    ticket = _make_ticket(requester_id=uuid.uuid4())
+    ticket.id = ticket_id
+    ticket.status = "open"
+    ticket_repo = FakeTicketRepository(existing={ticket_id: ticket})
+    rate_limit_cache = FakeTicketReplyRateLimitCache(count=30)
+    service, *_ = _make_reply_service(
+        ticket_repository=ticket_repo, rate_limit_cache=rate_limit_cache
+    )
+
+    # Act
+    result = await service.create_reply(
+        ticket_id=ticket_id,
+        actor_id=uuid.uuid4(),
+        actor_kind="agent",
+        body="Reply 30.",
+        visibility="public",
+        attachment_ids=[],
+    )
+
+    # Assert
+    assert result.body == "Reply 30."
+
+
+def test_ticket_reply_rate_key_never_collides_with_ticket_create_rate_key() -> None:
+    # Arrange: Risk 6 — an implementation accidentally sharing one Valkey
+    # counter between ticket creation and replies would silently exhaust one
+    # user-facing limit against the other's traffic.
+    from app.core.cache_keys import ticket_create_rate_key, ticket_reply_rate_key
+
+    user_id = uuid.uuid4()
+
+    # Act
+    create_key = ticket_create_rate_key(user_id)
+    reply_key = ticket_reply_rate_key(user_id)
+
+    # Assert
+    assert create_key != reply_key
+
+
+# --- Transaction boundary ----------------------------------------------------
+
+
+async def test_create_reply_commits_exactly_once() -> None:
+    # Arrange
+    ticket_id = uuid.uuid4()
+    ticket = _make_ticket(requester_id=uuid.uuid4())
+    ticket.id = ticket_id
+    ticket.status = "open"
+    ticket_repo = FakeTicketRepository(existing={ticket_id: ticket})
+    service, ticket_repo, reply_repo, *_ = _make_reply_service(ticket_repository=ticket_repo)
+
+    # Act
+    await service.create_reply(
+        ticket_id=ticket_id,
+        actor_id=uuid.uuid4(),
+        actor_kind="agent",
+        body="Reply body.",
+        visibility="public",
+        attachment_ids=[],
+    )
+
+    # Assert
+    assert reply_repo.commit_count == 1
+
+
+async def test_create_reply_email_dispatch_failure_does_not_fail_the_request() -> None:
+    # Arrange: the reply is already committed by the time email dispatch
+    # runs — a dispatch failure must not undo it or propagate (matches
+    # `create_ticket`'s own best-effort-after-commit precedent).
+    ticket_id = uuid.uuid4()
+    ticket = _make_ticket(requester_id=uuid.uuid4())
+    ticket.id = ticket_id
+    ticket.status = "open"
+    ticket_repo = FakeTicketRepository(existing={ticket_id: ticket})
+    service, ticket_repo, reply_repo, *_ = _make_reply_service(
+        ticket_repository=ticket_repo, email_sender=FakeEmailSender(raises=True)
+    )
+
+    # Act
+    result = await service.create_reply(
+        ticket_id=ticket_id,
+        actor_id=uuid.uuid4(),
+        actor_kind="agent",
+        body="Reply body.",
+        visibility="public",
+        attachment_ids=[],
+    )
+
+    # Assert
+    assert result.body == "Reply body."
+    assert reply_repo.commit_count == 1
+
+
+# --- FR-3/FR-4/GET Thread Pagination: get_ticket_detail ---------------------
+
+
+async def test_get_ticket_detail_owner_customer_returns_ticket_and_thread() -> None:
+    # Arrange
+    ticket_id = uuid.uuid4()
+    requester_id = uuid.uuid4()
+    ticket = _make_ticket(requester_id=requester_id)
+    ticket.id = ticket_id
+    ticket_repo = FakeTicketRepository(existing={ticket_id: ticket})
+    reply = _make_reply(ticket_id=ticket_id, author_id=requester_id, author_kind="customer")
+    reply_repo = FakeTicketReplyRepository()
+    reply_repo.list_page = ReplyListPage(items=[reply], next_cursor="next-page")
+    service, *_ = _make_reply_service(ticket_repository=ticket_repo, reply_repository=reply_repo)
+
+    # Act
+    result = await service.get_ticket_detail(
+        ticket_id=ticket_id,
+        actor_id=requester_id,
+        actor_kind="customer",
+        cursor=None,
+        limit=50,
+    )
+
+    # Assert
+    assert result.id == ticket_id
+    assert [item.id for item in result.replies.items] == [reply.id]
+    assert result.replies.next_cursor == "next-page"
+
+
+async def test_get_ticket_detail_agent_scopes_thread_query_by_ticket_id() -> None:
+    # Arrange
+    ticket_id = uuid.uuid4()
+    ticket = _make_ticket(requester_id=uuid.uuid4())
+    ticket.id = ticket_id
+    ticket_repo = FakeTicketRepository(existing={ticket_id: ticket})
+    reply_repo = FakeTicketReplyRepository()
+    service, *_ = _make_reply_service(ticket_repository=ticket_repo, reply_repository=reply_repo)
+
+    # Act
+    await service.get_ticket_detail(
+        ticket_id=ticket_id,
+        actor_id=uuid.uuid4(),
+        actor_kind="agent",
+        cursor="prev-cursor",
+        limit=25,
+    )
+
+    # Assert
+    assert reply_repo.list_calls == [{"ticket_id": ticket_id, "cursor": "prev-cursor", "limit": 25}]
+
+
+async def test_get_ticket_detail_different_customer_raises_ticket_not_found() -> None:
+    # Arrange
+    ticket_id = uuid.uuid4()
+    ticket = _make_ticket(requester_id=uuid.uuid4())
+    ticket.id = ticket_id
+    ticket_repo = FakeTicketRepository(existing={ticket_id: ticket})
+    service, *_ = _make_reply_service(ticket_repository=ticket_repo)
+
+    # Act & Assert
+    with pytest.raises(TicketNotFoundError):
+        await service.get_ticket_detail(
+            ticket_id=ticket_id,
+            actor_id=uuid.uuid4(),
+            actor_kind="customer",
+            cursor=None,
+            limit=50,
+        )
+
+
+async def test_get_ticket_detail_unknown_ticket_raises_ticket_not_found() -> None:
+    # Arrange
+    service, *_ = _make_reply_service()
+
+    # Act & Assert
+    with pytest.raises(TicketNotFoundError):
+        await service.get_ticket_detail(
+            ticket_id=uuid.uuid4(),
+            actor_id=uuid.uuid4(),
+            actor_kind="agent",
+            cursor=None,
+            limit=50,
+        )

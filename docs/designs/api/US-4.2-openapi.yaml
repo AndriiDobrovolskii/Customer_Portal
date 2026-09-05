@@ -1,0 +1,429 @@
+openapi: 3.0.3
+info:
+  title: Ticket Replies (US-4.2 / spec US-4.2) — fragment
+  version: "3"
+x-story: US-4.2
+x-source-specification: docs/specifications/US-4.2-spec.md
+x-source-specification-version: 6
+x-produced-by: openapi-designer
+paths:
+  /v1/support/tickets/{id}/replies:
+    post:
+      operationId: createTicketReply
+      summary: Post a reply on a ticket
+      tags: [support, tickets, replies]
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateReplyRequest"
+      responses:
+        "201":
+          description: >
+            Reply created (FR-1 agent / FR-2 customer). Authorization is
+            actor-kind-dependent: agent branch requires tickets:write
+            (require_scope); customer branch requires the caller to be the
+            ticket's requester (ownership only, no scope) — see
+            US-4.2-api-design.md. Status-transition side effects (not part of
+            this response body) are described in that document's table; not
+            all status/actor combinations are defined by any FR/AC — see
+            Open Questions #1.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ReplyRead"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          description: >
+            Customer submitted visibility: "internal" (FR-5). Agent-omitted
+            and customer-omitted visibility both default to "public"
+            (Resolution OD-6), so this is only reachable via an explicit
+            internal request from a non-agent caller.
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/InsufficientPermissionProblem"
+        "404":
+          description: >
+            Ticket belongs to a different customer, does not exist, or the
+            caller is authenticated but holds neither ownership of the
+            ticket nor tickets:write (FR-4's enumeration-prevention rule,
+            generalized to POST — see US-4.2-api-design.md Open Questions
+            #2). Never 403, to avoid confirming the ticket id exists.
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/NotFoundProblem"
+        "409":
+          description: >
+            Ticket status is "closed" (FR-6). detail points the caller to
+            creating a new ticket. Does not apply to a "resolved" ticket,
+            which is accepted per FR-6 (agent, Resolution OD-5, status
+            unchanged) / FR-2 (customer, Resolution OD-8, status transitions
+            to "waiting_on_support", reopening the ticket — see
+            US-4.2-api-design.md Revision Note).
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/TicketClosedProblem"
+        "422":
+          description: >
+            Empty body or body exceeding 5000 characters (FR-7), or an
+            attachment_id not owned by / not yet bound for the caller
+            (FR-1/FR-2, BR-016) — the response never reveals which of the
+            three attachment cases applied.
+          content:
+            application/problem+json:
+              schema:
+                oneOf:
+                  - $ref: "#/components/schemas/ValidationFailedProblem"
+                  - $ref: "#/components/schemas/AttachmentNotOwnedProblem"
+        "429":
+          description: >
+            30 replies already posted by this caller in the last hour (NFR),
+            following US-4.1 FR-6's shipped 429/Retry-After pattern.
+          headers:
+            Retry-After:
+              schema:
+                type: integer
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/TooManyRequestsProblem"
+  /v1/support/tickets/{id}:
+    get:
+      operationId: getTicketDetail
+      summary: Get a ticket and its reply thread
+      tags: [support, tickets, replies]
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - name: cursor
+          in: query
+          required: false
+          schema:
+            type: string
+          description: >
+            Opaque pagination cursor over the reply thread, from a previous
+            response's replies.next_cursor (Resolution OD-3).
+        - name: limit
+          in: query
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+            default: 50
+          description: >
+            Not stated by the spec; default 50 matches the NFR's own
+            "paginated at 50" example — see US-4.2-api-design.md Open
+            Questions #6.
+      responses:
+        "200":
+          description: >
+            Ticket detail plus its reply thread (FR-3, FR-4, GET Thread
+            Pagination). Customer branch: caller is the ticket's requester,
+            internal replies excluded (application filter and, independently,
+            PostgreSQL Row Level Security on ticket_replies — FR-3). Agent
+            branch: caller holds tickets:read, every reply returned including
+            internal ones, each marked as such.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TicketDetailRead"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          description: >
+            Ticket belongs to a different customer, does not exist, or the
+            caller is an authenticated agent lacking tickets:read (FR-4).
+            Never 403, to avoid confirming the ticket id exists (same
+            rationale as TR-AC4's own citation of US-1.3 UP-AC7).
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/NotFoundProblem"
+        "422":
+          description: "Malformed cursor or out-of-range limit (Resolution OD-3)."
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ValidationFailedProblem"
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+  responses:
+    Unauthorized:
+      description: No valid access token (Resolution OD-7).
+      content:
+        application/problem+json:
+          schema:
+            $ref: "#/components/schemas/UnauthorizedProblem"
+  schemas:
+    ReplyRead:
+      type: object
+      required: [id, ticket_id, author_id, author_kind, visibility, body, created_at]
+      properties:
+        id:
+          type: string
+          format: uuid
+        ticket_id:
+          type: string
+          format: uuid
+        author_id:
+          type: string
+          format: uuid
+        author_kind:
+          type: string
+          enum: [customer, agent]
+          description: >
+            Stated explicitly by the service, not defaulted (see
+            US-4.2-api-design.md's entity-model note carried from
+            db-designer's stale v1 draft, to be reconfirmed by DB_DESIGN).
+        visibility:
+          type: string
+          enum: [public, internal]
+          description: >
+            Defaults to "public" for both actor kinds when omitted on create
+            (Resolution OD-6). A customer-submitted "internal" value never
+            reaches this state — rejected 403 before creation (FR-5).
+        body:
+          type: string
+          description: Plain text, never rendered as HTML (Resolution OD-4; NFR).
+        created_at:
+          type: string
+          format: date-time
+      description: >
+        No attachment references are exposed on this schema — see
+        US-4.2-api-design.md Open Questions #5 (matches US-4.1's own
+        write-only attachment_ids precedent).
+    TicketDetailRead:
+      type: object
+      required: [id, ticket_number, status, requester_id, subject, body, category, created_at, updated_at, replies]
+      properties:
+        id:
+          type: string
+          format: uuid
+        ticket_number:
+          type: string
+          example: "CP-2026-0000431"
+        status:
+          type: string
+          enum: [open, waiting_on_support, waiting_on_customer, resolved, closed]
+        requester_id:
+          type: string
+          format: uuid
+        subject:
+          type: string
+        body:
+          type: string
+        category:
+          type: string
+          maxLength: 50
+        first_response_at:
+          type: string
+          format: date-time
+          nullable: true
+          description: >
+            Stamped once, on the first public agent reply (FR-1). A plain
+            timestamp for later reporting — no SLA target is evaluated.
+            Absent (null) until then.
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+        replies:
+          $ref: "#/components/schemas/ReplyThreadPage"
+      description: >
+        No resolved_at field is present — this codebase has no such column
+        and this story does not add one; FR-2/FR-6's "resolved_at is not
+        cleared" statement is vacuously true, not a reference to a field this
+        contract exposes (see US-4.2-api-design.md Open Questions #3).
+    ReplyThreadPage:
+      type: object
+      required: [items]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/ReplyRead"
+        next_cursor:
+          type: string
+          nullable: true
+          description: >
+            Present when another page of replies exists. Envelope field
+            names reused from US-4.1-openapi.yaml's TicketListResponse shape
+            (Resolution OD-3), applied here to a ticket's reply
+            sub-collection.
+    CreateReplyRequest:
+      type: object
+      required: [body]
+      additionalProperties: false
+      properties:
+        body:
+          type: string
+          minLength: 1
+          maxLength: 5000
+        visibility:
+          type: string
+          enum: [public, internal]
+          description: >
+            Optional; defaults to "public" when omitted for both actor kinds
+            (Resolution OD-6). A customer supplying "internal" explicitly is
+            rejected 403 insufficient-permission (FR-5), not defaulted away.
+        attachment_ids:
+          type: array
+          default: []
+          items:
+            type: string
+            format: uuid
+          description: >
+            Same shape as US-4.1's CreateTicketRequest.attachment_ids;
+            reply-scoped binding (Resolution OD-1). Each id must be uploaded
+            by the caller and not yet bound to another ticket or reply, or
+            the request is rejected attachment-not-owned (FR-1/FR-2/BR-016).
+      description: >
+        additionalProperties: false rejects any field outside this schema,
+        same convention as US-4.1's CreateTicketRequest.
+    UnauthorizedProblem:
+      allOf:
+        - $ref: "#/components/schemas/ProblemBase"
+      properties:
+        type:
+          type: string
+          example: ".../errors/unauthorized"
+        status:
+          type: integer
+          example: 401
+      description: Cross-cutting slug shared by every authenticated endpoint in this project.
+    InsufficientPermissionProblem:
+      allOf:
+        - $ref: "#/components/schemas/ProblemBase"
+      properties:
+        type:
+          type: string
+          example: ".../errors/insufficient-permission"
+        status:
+          type: integer
+          example: 403
+      description: >
+        Reuses app/modules/roles/exceptions.py's InsufficientPermissionError
+        slug/shape (FR-5), not a new one.
+    NotFoundProblem:
+      allOf:
+        - $ref: "#/components/schemas/ProblemBase"
+      properties:
+        type:
+          type: string
+          example: ".../errors/not-found"
+        status:
+          type: integer
+          example: 404
+      description: >
+        Cross-cutting slug this project already uses (e.g.
+        admin_users/exceptions.py, users/exceptions.py) for a
+        deliberately-generic "no such resource, or you cannot see it" case
+        (FR-4).
+    TicketClosedProblem:
+      allOf:
+        - $ref: "#/components/schemas/ProblemBase"
+      properties:
+        type:
+          type: string
+          example: ".../errors/ticket-closed"
+        status:
+          type: integer
+          example: 409
+      description: >
+        Introduced by this story (FR-6). detail example per the spec's own
+        Error Envelope Schema: "This ticket is closed. Create a new ticket
+        if you still need help."
+    ValidationFailedProblem:
+      allOf:
+        - $ref: "#/components/schemas/ProblemBase"
+      properties:
+        type:
+          type: string
+          example: ".../errors/validation-failed"
+        status:
+          type: integer
+          example: 422
+        errors:
+          type: array
+          items:
+            type: object
+            required: [field, message, code]
+            properties:
+              field:
+                type: string
+              message:
+                type: string
+              code:
+                type: string
+      description: Reused cross-project slug and shape (app/core/exceptions.py's FieldError), not new here.
+    AttachmentNotOwnedProblem:
+      allOf:
+        - $ref: "#/components/schemas/ProblemBase"
+      properties:
+        type:
+          type: string
+          example: ".../errors/attachment-not-owned"
+        status:
+          type: integer
+          example: 422
+      description: >
+        Same slug/shape as US-4.1-openapi.yaml's AttachmentNotOwnedProblem
+        (FR-1/FR-2, BR-016). Response never reveals whether the
+        attachment_id was owned by another user, already bound, or unknown
+        (IDOR prevention).
+    TooManyRequestsProblem:
+      allOf:
+        - $ref: "#/components/schemas/ProblemBase"
+      properties:
+        type:
+          type: string
+          example: ".../errors/too-many-requests"
+        status:
+          type: integer
+          example: 429
+      description: >
+        Same slug/shape as US-4.1-openapi.yaml's TooManyRequestsProblem
+        (30/hour reply rate limit, NFR).
+    ProblemBase:
+      type: object
+      description: RFC 7807 problem body. `type` is an absolute/relative URI ending in the slug named per response.
+      required: [type, title, status, detail, instance]
+      properties:
+        type:
+          type: string
+        title:
+          type: string
+        status:
+          type: integer
+        detail:
+          type: string
+        instance:
+          type: string
+          example: /v1/support/tickets/{id}/replies

@@ -1,9 +1,22 @@
+import uuid
 from typing import Annotated, Literal
 
-from fastapi import APIRouter, Depends, Header, status
+from fastapi import APIRouter, Depends, Header, Query, status
 
-from app.modules.support.dependencies import TicketServiceDep, reject_agent_queue_access
-from app.modules.support.schemas import CreateTicketRequest, TicketListResponse, TicketRead
+from app.modules.support.dependencies import (
+    TicketReplyServiceDep,
+    TicketServiceDep,
+    reject_agent_queue_access,
+    resolve_actor_kind,
+)
+from app.modules.support.schemas import (
+    CreateReplyRequest,
+    CreateTicketRequest,
+    ReplyRead,
+    TicketDetailRead,
+    TicketListResponse,
+    TicketRead,
+)
 from app.modules.users.dependencies import CurrentUserDep
 
 router = APIRouter(prefix="/support/tickets", tags=["support", "tickets"])
@@ -60,4 +73,67 @@ async def list_own_tickets(
     """
     return await service.list_own_tickets(
         requester_id=current_user.user_id, status=status, cursor=cursor, limit=limit
+    )
+
+
+# =============================================================================
+# US-4.2 (Ticket Replies)
+# =============================================================================
+
+
+@router.post(
+    "/{id}/replies",
+    response_model=ReplyRead,
+    status_code=status.HTTP_201_CREATED,
+)
+async def create_ticket_reply(
+    id: uuid.UUID,
+    body: CreateReplyRequest,
+    current_user: CurrentUserDep,
+    service: TicketReplyServiceDep,
+) -> ReplyRead:
+    """FR-1/FR-2/FR-4/FR-5/FR-6/FR-7. Path parameter named `id`, matching
+    `US-4.2-openapi.yaml`'s declared parameter name exactly (same precedent
+    as `app/modules/admin_users/router.py::get_user`). Authorization is
+    actor-kind-dependent (US-4.2-api-design.md): the agent branch
+    (`tickets:write`) and the customer/ownership branch are both resolved by
+    `resolve_actor_kind` and enforced by `TicketReplyService.create_reply`
+    itself, which raises 404 (never 403) for a caller who is neither the
+    requester nor an agent - unlike `require_scope`'s 403, this endpoint
+    must never confirm the ticket id exists to an unauthorized caller.
+    """
+    return await service.create_reply(
+        ticket_id=id,
+        actor_id=current_user.user_id,
+        actor_kind=resolve_actor_kind(current_user),
+        body=body.body,
+        visibility=body.visibility,
+        attachment_ids=body.attachment_ids,
+    )
+
+
+@router.get(
+    "/{id}",
+    response_model=TicketDetailRead,
+    status_code=status.HTTP_200_OK,
+)
+async def get_ticket_detail(
+    id: uuid.UUID,
+    current_user: CurrentUserDep,
+    service: TicketReplyServiceDep,
+    cursor: str | None = None,
+    limit: Annotated[int, Query(ge=1, le=100)] = 50,
+) -> TicketDetailRead:
+    """FR-3/FR-4/GET Thread Pagination. Same actor-kind-dependent
+    authorization as `create_ticket_reply` above; internal-visibility
+    replies are excluded from a customer caller's response both by RLS
+    (FR-3, database layer) and by never being written to a row that
+    layer would return in the first place.
+    """
+    return await service.get_ticket_detail(
+        ticket_id=id,
+        actor_id=current_user.user_id,
+        actor_kind=resolve_actor_kind(current_user),
+        cursor=cursor,
+        limit=limit,
     )
