@@ -17,7 +17,7 @@ from app.modules.users.exceptions import DuplicateEmailError, RegistrationValida
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     settings = get_settings()
-    engine, session_factory = create_engine_and_sessionmaker(settings.database_url)
+    engine, session_factory = create_engine_and_sessionmaker(settings.runtime_database_url)
     app.state.db_engine = engine
     app.state.db_session_factory = session_factory
     valkey_client: Redis = Redis.from_url(settings.valkey_url, decode_responses=True)

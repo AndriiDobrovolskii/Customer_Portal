@@ -42,3 +42,6 @@ node_modules/
 *.generated.py
 graphify-out/
 .claude/*.graphify-bak
+
+# Adding the knowlege folder to .gitignore to avoid committing large files
+docs\knowledge

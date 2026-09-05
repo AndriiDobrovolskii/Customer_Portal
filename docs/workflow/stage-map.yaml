@@ -270,6 +270,12 @@ stages:
       partial: IMPLEMENTATION
       blocked_by_plan: IMPLEMENTATION_PLANNING
       blocked_by_architecture: ARCHITECTURE_PLANNING
+      changes_required_tests: TEST_WRITING   # added 2026-09-05, sbruhov@gmail.com:
+        # a builder sub-step finding a defect confined to test-file setup
+        # (a seeder missing required RLS session context, a non-deterministic
+        # timestamp/ordering assumption) routes here directly instead of
+        # holding BLOCKED for a manual HUMAN_REDIRECTED decision every time -
+        # see the US-4.2 T3/T4/T5-T6 BLOCKED precedents this key replaces.
 
   QUALITY_GATE:
     type: automated_skill

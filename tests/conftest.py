@@ -1,6 +1,7 @@
 import asyncio
 import os
 from collections.abc import AsyncIterator, Iterator
+from pathlib import Path
 
 import pytest
 from alembic import command
@@ -8,13 +9,62 @@ from alembic.config import Config
 from httpx import ASGITransport, AsyncClient
 from redis.asyncio import Redis
 from sqlalchemy import text
-from sqlalchemy.ext.asyncio import AsyncConnection, AsyncSession
+from sqlalchemy.engine import make_url
+from sqlalchemy.ext.asyncio import AsyncConnection, AsyncEngine, AsyncSession
 from testcontainers.community.postgres import PostgresContainer
 from testcontainers.community.redis import RedisContainer
 
 from app.db.dependencies import get_db_session
 from app.db.session import create_engine_and_sessionmaker
 from app.main import app
+
+# Matches scripts/db/provision_runtime_role.sql's own placeholder — an
+# obvious dev/test-only value, same discipline as Settings.jwt_secret_key.
+_APP_RUNTIME_PASSWORD = "CHANGE_ME_IN_PRODUCTION"
+_PROVISION_RUNTIME_ROLE_SQL = (
+    Path(__file__).resolve().parent.parent / "scripts" / "db" / "provision_runtime_role.sql"
+)
+
+
+def _split_sql_statements(script: str) -> list[str]:
+    """Split on top-level ';' only, treating `$$ ... $$` blocks (DO $$ ...
+    END $$;) as atomic so semicolons inside them aren't mistaken for
+    statement boundaries."""
+    statements: list[str] = []
+    buffer: list[str] = []
+    in_dollar_block = False
+    i = 0
+    while i < len(script):
+        if script[i : i + 2] == "$$":
+            in_dollar_block = not in_dollar_block
+            buffer.append("$$")
+            i += 2
+            continue
+        char = script[i]
+        if char == ";" and not in_dollar_block:
+            statement = "".join(buffer).strip()
+            if statement:
+                statements.append(statement)
+            buffer = []
+        else:
+            buffer.append(char)
+        i += 1
+    tail = "".join(buffer).strip()
+    if tail:
+        statements.append(tail)
+    return statements
+
+
+async def _provision_runtime_role(engine: AsyncEngine) -> None:
+    script = _PROVISION_RUNTIME_ROLE_SQL.read_text()
+    async with engine.begin() as connection:
+        for statement in _split_sql_statements(script):
+            await connection.execute(text(statement))
+
+
+def _runtime_database_url(owner_url: str) -> str:
+    url = make_url(owner_url).set(username="app_runtime", password=_APP_RUNTIME_PASSWORD)
+    return url.render_as_string(hide_password=False)
 
 
 @pytest.fixture(scope="session")
@@ -67,12 +117,26 @@ def _database(postgres_url: str) -> Iterator[None]:
     # here instead — same objects, same app.state attributes, test-only entry
     # point. See ARCHITECTURE.md §3.6 (singletons live on app.state).
     os.environ["DATABASE_URL"] = postgres_url
-    engine, session_factory = create_engine_and_sessionmaker(postgres_url)
-    app.state.db_engine = engine
-    app.state.db_session_factory = session_factory
 
     alembic_cfg = Config("alembic.ini")
     command.upgrade(alembic_cfg, "head")
+
+    # Provision the non-superuser app_runtime role every test request is
+    # served through below — matching app/main.py's lifespan in a real
+    # deployment (US-4.2 Architectural Change #12). Left unfixed, this
+    # fixture would keep serving requests as the container's bootstrap
+    # superuser, the same role FORCE ROW LEVEL SECURITY cannot constrain
+    # (docs/catalog/US-4.2-pipeline-status.md T3). The owner-role engine is
+    # only needed for this provisioning step; app.state.db_engine below is
+    # the app_runtime-credentialed one everything else (including
+    # cleanup_users' DELETE, which app_runtime also has) runs through.
+    owner_engine, _owner_session_factory = create_engine_and_sessionmaker(postgres_url)
+    asyncio.run(_provision_runtime_role(owner_engine))
+    asyncio.run(owner_engine.dispose())
+
+    engine, session_factory = create_engine_and_sessionmaker(_runtime_database_url(postgres_url))
+    app.state.db_engine = engine
+    app.state.db_session_factory = session_factory
 
     yield
 

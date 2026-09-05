@@ -4,7 +4,7 @@ from typing import NamedTuple
 
 from redis.asyncio import Redis
 
-from app.core.cache_keys import idempotency_key, ticket_create_rate_key
+from app.core.cache_keys import idempotency_key, ticket_create_rate_key, ticket_reply_rate_key
 
 
 class IdempotencyEnvelope(NamedTuple):
@@ -104,4 +104,27 @@ class TicketCreationRateLimitCache:
 
     async def get_retry_after_seconds(self, user_id: uuid.UUID) -> int:
         ttl = await self._client.ttl(ticket_create_rate_key(user_id))
+        return max(int(ttl), 0)
+
+
+class TicketReplyRateLimitCache:
+    """NFR (30/hour): `ticket_reply_rate:{user_id}`, the identical pipelined
+    `INCR`+`EXPIRE` shape as `TicketCreationRateLimitCache` - a distinct
+    Valkey key so this reply rate limit never shares a counter with ticket
+    creation's own 30/hour limit (Risk 6's independence requirement).
+    """
+
+    def __init__(self, client: Redis) -> None:
+        self._client = client
+
+    async def record_and_check(self, user_id: uuid.UUID, *, window_seconds: int) -> int:
+        key = ticket_reply_rate_key(user_id)
+        async with self._client.pipeline(transaction=True) as pipe:
+            pipe.incr(key)
+            pipe.expire(key, window_seconds)
+            count, _ = await pipe.execute()
+        return int(count)
+
+    async def get_retry_after_seconds(self, user_id: uuid.UUID) -> int:
+        ttl = await self._client.ttl(ticket_reply_rate_key(user_id))
         return max(int(ttl), 0)

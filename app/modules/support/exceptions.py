@@ -79,3 +79,58 @@ class AgentQueueNotAvailableError(ProblemError):
     title = "Agent Queue Not Available"
     status = 403
     detail = "Agent queue views are not available through this endpoint yet."
+
+
+class TicketNotFoundError(ProblemError):
+    """FR-4 (US-4.2): unknown ticket id, a different customer's ticket, or an
+    authenticated caller who is neither the ticket's requester nor an agent —
+    always 404, never 403, so the response never confirms the ticket id exists.
+    """
+
+    type_slug = "not-found"
+    title = "Ticket Not Found"
+    status = 404
+    detail = "No ticket was found with that identifier."
+
+
+class InsufficientPermissionError(ProblemError):
+    """FR-5 (US-4.2): a customer submitted `visibility: "internal"`. Own
+    subclass per module (implementation-plan Architectural Change #6) —
+    same `type_slug`/`status` as `app/modules/roles/exceptions.py`'s class of
+    the same name, since it is the same condition observed from a different
+    endpoint, but never imported from there directly (module ownership,
+    matching `AccountDeactivatedError`'s existing precedent).
+    """
+
+    type_slug = "insufficient-permission"
+    title = "Insufficient Permission"
+    status = 403
+    detail = "Your access token does not carry the required permission."
+
+
+class TicketClosedError(ProblemError):
+    """FR-6 (US-4.2): the ticket's status is `"closed"`. New slug, first use
+    in this codebase — a `"resolved"` ticket is accepted, not rejected here
+    (Resolution OD-5/OD-8).
+    """
+
+    type_slug = "ticket-closed"
+    title = "Ticket Closed"
+    status = 409
+    detail = "This ticket is closed. Create a new ticket if you still need help."
+
+
+class TicketReplyRateLimitError(ProblemError):
+    """NFR (US-4.2): 30 replies already posted by this caller in the last
+    hour — a distinct Valkey counter from `TicketCreationRateLimitError`'s
+    (Risk 6).
+    """
+
+    type_slug = "too-many-requests"
+    title = "Too Many Requests"
+    status = 429
+    detail = "Too many replies posted recently. Try again later."
+
+    def __init__(self, *, retry_after_seconds: int) -> None:
+        super().__init__()
+        self.headers = {"Retry-After": str(retry_after_seconds)}

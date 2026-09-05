@@ -6,7 +6,7 @@ from typing import NamedTuple
 from sqlalchemy import delete, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.modules.support.models import Attachment, Ticket
+from app.modules.support.models import Attachment, Ticket, TicketReply
 
 
 class TicketListPage(NamedTuple):
@@ -84,6 +84,30 @@ class TicketRepository:
 
         return TicketListPage(items=rows, next_cursor=next_cursor)
 
+    async def update(
+        self,
+        ticket_id: uuid.UUID,
+        *,
+        status: str | None = None,
+        first_response_at: datetime | None = None,
+    ) -> Ticket | None:
+        """Both fields optional; `None` means "leave unchanged" - no FR in
+        this story ever clears either one back to `None`
+        (US-4.2-implementation-plan.md Architectural Change #3). When both
+        are `None`, no `UPDATE` is issued.
+        """
+        values: dict[str, object] = {}
+        if status is not None:
+            values["status"] = status
+        if first_response_at is not None:
+            values["first_response_at"] = first_response_at
+        if not values:
+            return await self.get_by_id(ticket_id)
+        result = await self._session.execute(
+            update(Ticket).where(Ticket.id == ticket_id).values(**values).returning(Ticket)
+        )
+        return result.scalar_one_or_none()
+
     async def commit(self) -> None:
         await self._session.commit()
 
@@ -117,6 +141,22 @@ class AttachmentRepository:
         )
         return result.scalar_one_or_none()
 
+    async def bind_to_reply(
+        self, *, attachment_id: uuid.UUID, ticket_reply_id: uuid.UUID
+    ) -> Attachment | None:
+        """Same atomic check-and-bind pattern as `bind_to_ticket`, guarding
+        the independent nullable `ticket_reply_id` column (Resolution OD-1)
+        rather than `ticket_id` - the two bindings are separate and this
+        story does not touch `ticket_id`.
+        """
+        result = await self._session.execute(
+            update(Attachment)
+            .where(Attachment.id == attachment_id, Attachment.ticket_reply_id.is_(None))
+            .values(ticket_reply_id=ticket_reply_id)
+            .returning(Attachment)
+        )
+        return result.scalar_one_or_none()
+
     async def find_unbound_older_than(self, cutoff: datetime) -> list[Attachment]:
         """FR-7's last sentence: the 24h unbound-attachment purge job's
         scan, served by the partial index on `created_at WHERE ticket_id IS
@@ -137,6 +177,82 @@ class AttachmentRepository:
             delete(Attachment).where(Attachment.id.in_(attachment_ids)).returning(Attachment.id)
         )
         return len(result.scalars().all())
+
+    async def commit(self) -> None:
+        await self._session.commit()
+
+
+class ReplyListPage(NamedTuple):
+    items: list[TicketReply]
+    next_cursor: str | None
+
+
+class TicketReplyRepository:
+    def __init__(self, session: AsyncSession) -> None:
+        self._session = session
+
+    async def create(
+        self,
+        *,
+        ticket_id: uuid.UUID,
+        author_id: uuid.UUID,
+        author_kind: str,
+        body: str,
+        visibility: str,
+    ) -> TicketReply:
+        """`created_at` is server-computed (`server_default=func.now()`, see
+        models.py) - never set here. The CHECK constraint is a service-
+        layer-unreachable backstop (US-4.2-db-design.md's layering note), so
+        this has no expected failure path to guard - raises rather than
+        swallowing, matching `TicketRepository.create`'s own precedent.
+        """
+        reply = TicketReply(
+            ticket_id=ticket_id,
+            author_id=author_id,
+            author_kind=author_kind,
+            body=body,
+            visibility=visibility,
+        )
+        self._session.add(reply)
+        await self._session.flush()
+        return reply
+
+    async def list_for_ticket(
+        self, *, ticket_id: uuid.UUID, cursor: str | None, limit: int
+    ) -> ReplyListPage | None:
+        """Oldest-first (thread reads chronologically, per the API design's
+        `ReplyThreadPage` description) - the reverse ordering of
+        `TicketRepository.list_for_requester`'s newest-first ticket list.
+        Returns None for a malformed cursor, resolved to 422
+        validation-failed at the service layer, matching `list_for_requester`'s
+        own precedent.
+        """
+        stmt = select(TicketReply).where(TicketReply.ticket_id == ticket_id)
+
+        if cursor is not None:
+            decoded = _decode_cursor(cursor)
+            if decoded is None:
+                return None
+            cursor_created_at, cursor_reply_id = decoded
+            stmt = stmt.where(
+                or_(
+                    TicketReply.created_at > cursor_created_at,
+                    (TicketReply.created_at == cursor_created_at)
+                    & (TicketReply.id > cursor_reply_id),
+                )
+            )
+
+        stmt = stmt.order_by(TicketReply.created_at.asc(), TicketReply.id.asc()).limit(limit + 1)
+        result = await self._session.execute(stmt)
+        rows = list(result.scalars().all())
+
+        next_cursor = None
+        if len(rows) > limit:
+            rows = rows[:limit]
+            last = rows[-1]
+            next_cursor = _encode_cursor(last.created_at, last.id)
+
+        return ReplyListPage(items=rows, next_cursor=next_cursor)
 
     async def commit(self) -> None:
         await self._session.commit()

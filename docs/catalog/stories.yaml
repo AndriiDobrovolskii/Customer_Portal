@@ -162,8 +162,8 @@ stories:
     path: docs/stories/US-4.2-ticket-replies.md
     epic: EPIC-4
     title: Ticket Replies
-    state: BACKLOG
-    note: "Draft specification predates the current codebase; depends on US-4.1."
+    state: IN_PROGRESS
+    note: "Activated 2026-09-04 via /so:start. Draft specification predates the current codebase; depends on US-4.1 (archived, PR #16)."
 
   - id: US-4.3
     retired_id: US-016

@@ -51,3 +51,7 @@ def idempotency_key(user_id: uuid.UUID, key: str) -> str:
 
 def ticket_create_rate_key(user_id: uuid.UUID) -> str:
     return f"ticket_create_rate:{user_id}"
+
+
+def ticket_reply_rate_key(user_id: uuid.UUID) -> str:
+    return f"ticket_reply_rate:{user_id}"

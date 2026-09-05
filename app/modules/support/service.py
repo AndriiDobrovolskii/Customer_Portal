@@ -3,6 +3,7 @@ import hashlib
 import json
 import logging
 import uuid
+from datetime import UTC, datetime
 from typing import Protocol
 
 from app.core.email import EmailSender
@@ -12,12 +13,22 @@ from app.modules.support.exceptions import (
     AccountDeactivatedError,
     AttachmentNotOwnedError,
     IdempotencyKeyReuseError,
+    InsufficientPermissionError,
+    TicketClosedError,
     TicketCreationRateLimitError,
+    TicketNotFoundError,
+    TicketReplyRateLimitError,
     ValidationFailedError,
 )
-from app.modules.support.models import Attachment, Ticket
-from app.modules.support.repository import TicketListPage
-from app.modules.support.schemas import TicketListResponse, TicketRead
+from app.modules.support.models import Attachment, Ticket, TicketReply
+from app.modules.support.repository import ReplyListPage, TicketListPage
+from app.modules.support.schemas import (
+    ReplyRead,
+    ReplyThreadPage,
+    TicketDetailRead,
+    TicketListResponse,
+    TicketRead,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -40,6 +51,14 @@ class TicketRepositoryProtocol(Protocol):
         self, *, requester_id: uuid.UUID, cursor: str | None, limit: int
     ) -> TicketListPage | None: ...
 
+    async def update(
+        self,
+        ticket_id: uuid.UUID,
+        *,
+        status: str | None = None,
+        first_response_at: datetime | None = None,
+    ) -> Ticket | None: ...
+
     async def commit(self) -> None: ...
 
 
@@ -48,6 +67,10 @@ class AttachmentRepositoryProtocol(Protocol):
 
     async def bind_to_ticket(
         self, *, attachment_id: uuid.UUID, ticket_id: uuid.UUID
+    ) -> Attachment | None: ...
+
+    async def bind_to_reply(
+        self, *, attachment_id: uuid.UUID, ticket_reply_id: uuid.UUID
     ) -> Attachment | None: ...
 
     async def commit(self) -> None: ...
@@ -333,4 +356,234 @@ class TicketService:
         return TicketListResponse(
             items=[TicketRead.model_validate(ticket) for ticket in page.items],
             next_cursor=page.next_cursor,
+        )
+
+
+# =============================================================================
+# US-4.2 (Ticket Replies) — TicketReplyService
+# =============================================================================
+
+_REPLY_RATE_LIMIT_WINDOW_SECONDS = 3600  # NFR: 1 hour
+_REPLY_RATE_LIMIT_MAX_REPLIES = 30  # NFR
+
+
+class TicketReplyRepositoryProtocol(Protocol):
+    async def create(
+        self,
+        *,
+        ticket_id: uuid.UUID,
+        author_id: uuid.UUID,
+        author_kind: str,
+        body: str,
+        visibility: str,
+    ) -> TicketReply: ...
+
+    async def list_for_ticket(
+        self, *, ticket_id: uuid.UUID, cursor: str | None, limit: int
+    ) -> ReplyListPage | None: ...
+
+    async def commit(self) -> None: ...
+
+
+class TicketReplyRateLimitCacheProtocol(Protocol):
+    async def record_and_check(self, user_id: uuid.UUID, *, window_seconds: int) -> int: ...
+
+    async def get_retry_after_seconds(self, user_id: uuid.UUID) -> int: ...
+
+
+class TicketReplyService:
+    def __init__(
+        self,
+        ticket_repository: TicketRepositoryProtocol,
+        reply_repository: TicketReplyRepositoryProtocol,
+        attachment_repository: AttachmentRepositoryProtocol,
+        rate_limit_cache: TicketReplyRateLimitCacheProtocol,
+        email_sender: EmailSender,
+        user_service: UserServiceProtocol | None = None,
+    ) -> None:
+        """`user_service` is optional (unlike `TicketService`'s required
+        collaborator of the same shape): FR-1's requester notification is
+        best-effort regardless of whether a real email address can be
+        resolved (test-writer's own collaborator-shape assumption fixes this
+        class's five other constructor args; see
+        `docs/tests/US-4.2-test-strategy.md`). When wired (`dependencies.py`,
+        real deployment), it resolves the requester's actual email; when
+        absent, `_resolve_requester_email` falls back to a non-email
+        placeholder rather than skipping the dispatch — the notification
+        methods themselves are still Protocol-shaped exactly as this
+        module's tests require.
+        """
+        self._ticket_repository = ticket_repository
+        self._reply_repository = reply_repository
+        self._attachment_repository = attachment_repository
+        self._rate_limit_cache = rate_limit_cache
+        self._email_sender = email_sender
+        self._user_service = user_service
+
+    async def _resolve_requester_email(self, requester_id: uuid.UUID) -> str:
+        if self._user_service is not None:
+            email = await self._user_service.get_email_for_user(requester_id)
+            if email is not None:
+                return email
+        return str(requester_id)
+
+    async def create_reply(
+        self,
+        *,
+        ticket_id: uuid.UUID,
+        actor_id: uuid.UUID,
+        actor_kind: str,
+        body: str,
+        visibility: str | None,
+        attachment_ids: list[uuid.UUID],
+    ) -> ReplyRead:
+        """FR-1/FR-2/FR-4/FR-5/FR-6. Authorization, status-gating, and
+        `first_response_at` stamping follow `US-4.2-implementation-plan.md`
+        Architectural Change #4's table exactly - the "customer reply on
+        `\"open\"`/`\"waiting_on_support\"`" case (API_DESIGN Open Question #1)
+        makes no status write, by design, not by omission.
+        """
+        ticket = await self._ticket_repository.get_by_id(ticket_id)
+        if ticket is None:
+            raise TicketNotFoundError
+
+        if actor_kind == "customer" and ticket.requester_id != actor_id:
+            # Also covers API_DESIGN Open Question #2 (a caller neither the
+            # requester nor an agent): the router only ever passes
+            # actor_kind="agent" for a tickets:write holder, so any other
+            # caller reaches this branch and fails the ownership check.
+            raise TicketNotFoundError
+
+        if ticket.status == "closed":
+            raise TicketClosedError
+
+        if visibility is None:
+            visibility = "public"
+        if visibility == "internal" and actor_kind != "agent":
+            # FR-5's own service-layer check, raised before any repository
+            # call - never a caught IntegrityError from the CHECK backstop
+            # (db-design v3's explicit layering note).
+            raise InsufficientPermissionError
+
+        count = await self._rate_limit_cache.record_and_check(
+            actor_id, window_seconds=_REPLY_RATE_LIMIT_WINDOW_SECONDS
+        )
+        if count > _REPLY_RATE_LIMIT_MAX_REPLIES:
+            retry_after = await self._rate_limit_cache.get_retry_after_seconds(actor_id)
+            raise TicketReplyRateLimitError(retry_after_seconds=retry_after)
+
+        validated_attachments: list[Attachment] = []
+        for attachment_id in attachment_ids:
+            attachment = await self._attachment_repository.get_by_id(attachment_id)
+            if (
+                attachment is None
+                or attachment.uploaded_by != actor_id
+                or attachment.ticket_reply_id is not None
+            ):
+                raise AttachmentNotOwnedError
+            validated_attachments.append(attachment)
+
+        reply = await self._reply_repository.create(
+            ticket_id=ticket_id,
+            author_id=actor_id,
+            author_kind=actor_kind,
+            body=body,
+            visibility=visibility,
+        )
+
+        for attachment in validated_attachments:
+            bound = await self._attachment_repository.bind_to_reply(
+                attachment_id=attachment.id, ticket_reply_id=reply.id
+            )
+            if bound is None:
+                # Lost a concurrent race for this attachment between the
+                # ownership check above and this bind (FR-1/FR-2/BR-016) -
+                # indistinguishable from any other attachment-not-owned cause.
+                raise AttachmentNotOwnedError
+
+        status_update: str | None = None
+        first_response_at_update: datetime | None = None
+        if actor_kind == "agent":
+            if visibility == "public":
+                if ticket.first_response_at is None:
+                    first_response_at_update = datetime.now(UTC)
+                if ticket.status != "resolved":
+                    status_update = "waiting_on_customer"
+            # Internal notes are not customer-facing communication (FR-3) -
+            # no status transition, no first_response_at stamp, regardless
+            # of the ticket's prior status.
+        elif ticket.status in ("waiting_on_customer", "resolved"):
+            # Resolution OD-8: the resolved-ticket case reopens the ticket
+            # to the same target status the ordinary case already produces.
+            status_update = "waiting_on_support"
+
+        if status_update is not None or first_response_at_update is not None:
+            await self._ticket_repository.update(
+                ticket_id, status=status_update, first_response_at=first_response_at_update
+            )
+
+        await self._reply_repository.commit()
+
+        # Best-effort, after commit (TicketService.create_ticket's
+        # precedent): a failed dispatch must not undo the already-committed
+        # reply.
+        try:
+            if actor_kind == "agent":
+                to = await self._resolve_requester_email(ticket.requester_id)
+                await self._email_sender.send_ticket_reply_notification(
+                    to=to, ticket_number=ticket.ticket_number
+                )
+            else:
+                await self._email_sender.send_ticket_reply_queue_notification(
+                    ticket_number=ticket.ticket_number
+                )
+        except Exception:
+            logger.exception("failed to send ticket reply notification")
+
+        return ReplyRead.model_validate(reply)
+
+    async def get_ticket_detail(
+        self,
+        *,
+        ticket_id: uuid.UUID,
+        actor_id: uuid.UUID,
+        actor_kind: str,
+        cursor: str | None,
+        limit: int,
+    ) -> TicketDetailRead:
+        """FR-3/FR-4/GET Thread Pagination. Composed from two direct
+        repository calls, not `model_validate()`d off a single ORM object -
+        no `relationship()` exists between `Ticket` and `TicketReply`
+        (US-4.2-entity-model.md "Relationships").
+        """
+        ticket = await self._ticket_repository.get_by_id(ticket_id)
+        if ticket is None:
+            raise TicketNotFoundError
+
+        if actor_kind == "customer" and ticket.requester_id != actor_id:
+            raise TicketNotFoundError
+
+        page = await self._reply_repository.list_for_ticket(
+            ticket_id=ticket_id, cursor=cursor, limit=limit
+        )
+        if page is None:
+            raise ValidationFailedError(
+                errors=[FieldError(field="cursor", message="Invalid cursor.", code="invalid")]
+            )
+
+        return TicketDetailRead(
+            id=ticket.id,
+            ticket_number=ticket.ticket_number,
+            status=ticket.status,
+            requester_id=ticket.requester_id,
+            subject=ticket.subject,
+            body=ticket.body,
+            category=ticket.category,
+            first_response_at=ticket.first_response_at,
+            created_at=ticket.created_at,
+            updated_at=ticket.updated_at,
+            replies=ReplyThreadPage(
+                items=[ReplyRead.model_validate(item) for item in page.items],
+                next_cursor=page.next_cursor,
+            ),
         )
