@@ -379,6 +379,16 @@ stages:
       A human confirms the Pull Request has been merged, or the delivery has
       otherwise been explicitly marked complete. Archive mode may run only from
       this stage.
+    approval_precondition: >
+      Not satisfied by a human's statement alone. Before recording APPROVED,
+      verify against the actual repository that the story's Pull Request is
+      merged into the default branch (e.g. `git fetch` + `git merge-base
+      --is-ancestor <tip-commit> origin/<default-branch>`, or `gh pr view
+      --json state,mergedAt`). If the check fails, is inconclusive, or no
+      Pull Request/branch is found, refuse the approval and report what was
+      found - see AGENTS.md section 10. (Added after a US-4.2 incident where
+      COMPLETED was approved and advanced to ARCHIVED on an unverified claim
+      while no branch or PR existed on the remote; the approval was retracted.)
     approve_command: "/so:approve"
     on_approve: ARCHIVED
     on_reject: PR_PREPARATION

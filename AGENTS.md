@@ -173,7 +173,9 @@ Only `story-orchestrator` writes `workflow-state.yaml` and appends `history.json
 
 **A review skill returning `PASS` is not human approval.** Approval is recorded only via `/so:approve` (or `/so:reject`). Never infer one from the other, and never pass a gate automatically — including when asked to advance several stages at once.
 
-This is §1's "propose, never execute unilaterally" applied to the pipeline: the harness assembles evidence, a person decides. Skills do not push, open, or merge Pull Requests; `pr-preparer` drafts the content and a human acts on it.
+This is §1's "propose, never execute unilaterally" applied to the pipeline: the harness assembles evidence, a person decides. `pr-preparer` drafts the content only; creating a local branch and commit for the story happens later, on the human's separate explicit instruction, never as part of `PR_PREPARATION` itself. Pushing that branch and opening the Pull Request each require their own separate explicit instruction — approving one of these actions does not carry approval for the next.
+
+**The `COMPLETED` gate records that a Pull Request is merged — this must be verified, not assumed.** Before `/so:approve` accepts `COMPLETED`, check the actual repository (`git fetch` + `git merge-base --is-ancestor`, or `gh pr view --json state,mergedAt`) that the story's Pull Request is merged into the default branch. A human's verbal "it's merged" is not sufficient by itself — verify it, and if verification fails or is inconclusive, refuse the approval and report what was found instead of what was claimed. (Added after US-4.2: a `COMPLETED` approval was recorded and the workflow advanced to `ARCHIVED` on this claim alone, while no branch or Pull Request existed on the remote at all; the approval had to be retracted.)
 
 ## 11. Open Decisions Policy
 

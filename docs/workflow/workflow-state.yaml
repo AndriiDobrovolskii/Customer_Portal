@@ -15,11 +15,11 @@ version: 1
 story: US-4.2
 workflow: story-delivery
 
-current_stage: COMPLETED
-previous_stage: READY_FOR_PR
-last_completed_stage: READY_FOR_PR
+current_stage: ARCHIVED
+previous_stage: COMPLETED
+last_completed_stage: COMPLETED
 
-status: WAITING_FOR_HUMAN
+status: ARCHIVED
 attempt: 1
 
 last_invoked_skill: pr-preparer
@@ -36,19 +36,7 @@ last_artifacts:
 
 implementation_substep: null
 
-pending_human_gate:
-  stage: COMPLETED
-  status: PENDING
-  required_artifacts:
-    - type: pr_summary
-      path: docs/pr/US-4.2-pr-summary.md
-      version: 1
-  automated_verdict: PASS
-  blocking_findings: []
-  requested_at: "2026-09-06T02:30:00Z"
-  decided_at: null
-  decided_by: null
-  comment: null
+pending_human_gate: null
 
 blocking_issues: []
 
@@ -69,9 +57,9 @@ non_blocking_findings:
   - "ARCHITECTURE_PLANNING (v2, PASS): implementation_plan v2 adds Architectural Change #12 (dedicated non-superuser app_runtime DB role) - widens this story's file footprint to app/main.py and tests/conftest.py (outside app/modules/support/ and app/core/), and requires a full-suite regression pass (not just support's tests) once tests/conftest.py switches to the new role, since every module now runs its requests through app_runtime. New operational artifact scripts/db/provision_runtime_role.sql is not an Alembic migration and its per-environment execution/documentation is out of this plan's scope (flagged for documentation-and-adrs). tests/conftest.py's fixture change doesn't fit any of the four IMPLEMENTATION builder skills' usual footprint - IMPLEMENTATION_PLANNING must assign it explicitly. docs/plans/US-4.2-implementation-plan.md v2."
 
 started_at: "2026-09-04T16:30:00Z"
-updated_at: "2026-09-06T03:30:00Z"
+updated_at: "2026-09-06T05:00:00Z"
 completed_at: "2026-09-06T02:30:00Z"
-archived_at: null
+archived_at: "2026-09-06T05:00:00Z"
 
 note: >
   plan-reviewer reviewed implementation_plan v1 and task_breakdown v1 against
@@ -501,3 +489,54 @@ note: >
   cleared. The corresponding history.jsonl HUMAN_APPROVED event is left
   in place per the append-only rule; this event supersedes it. Awaiting an
   actual merged PR before /so:approve can validly re-run on this gate.
+
+  COMPLETED (/so:approve, 2026-09-06T04:00:00Z, decided_by: sbruhov@gmail.com,
+  no comment): required artifact pr_summary v1 (docs/pr/US-4.2-pr-summary.md)
+  reconfirmed current (status DRAFT, not SUPERSEDED/ARCHIVED), automated_verdict
+  PASS, no blocking findings. Per the COMPLETED gate's approval_precondition,
+  the merge claim was independently verified against the actual repository
+  (not taken on the approver's word): `git fetch origin` then
+  `git merge-base --is-ancestor 34a0e7d origin/main` returned true, and
+  `gh pr view 17 --json state,mergedAt,baseRefName,headRefName` confirmed
+  state=MERGED, mergedAt=2026-09-05T00:16:27Z, base=main,
+  head=feat/us-4.2-ticket-replies. origin/main's tip (44587b7) is that PR's
+  merge commit. This supersedes the 03:30 RETRACTED entry above - the
+  underlying condition it flagged (no merged PR found) no longer holds.
+  Advanced current_stage COMPLETED -> ARCHIVED per stage-map.yaml on_approve;
+  pending_human_gate cleared; status set to ARCHIVED. No Pull Request was
+  created, pushed, or merged by the harness in this step - PR #17 was already
+  merged prior to this approval. Archive-mode consolidation (delivery_summary,
+  project_state) is /so:archive's responsibility, not yet run.
+
+  ARCHIVED (/so:archive, 2026-09-06T05:00:00Z): re-verified PR #17's merge
+  independently (git fetch + merge-base --is-ancestor + gh pr view - same
+  result as the 04:00 approval). archived_at moved from 04:00 (the mechanical
+  COMPLETED->ARCHIVED transition per stage-map.yaml on_approve) to 05:00 (this
+  consolidation run actually completing), mirroring US-4.1's precedent where
+  the two coincided in one session. Note also: archive-flow.md's own stated
+  precondition ("current_stage == COMPLETED") was already stale on entry to
+  this run - current_stage was already ARCHIVED per the 04:00 mechanical
+  transition above, exactly the same two-step pattern US-4.1's history.jsonl
+  (254-255) recorded; treated as the document being stale, not the state
+  being wrong. Wrote docs/evidence/US-4.2-delivery-summary.md (v1); set
+  docs/catalog/stories.yaml US-4.2 state to ARCHIVED (delivered_by.pr: 17);
+  backfilled 22 US-4.2 story-level artifacts' front-matter status from DRAFT
+  straight to ARCHIVED (story and story_catalog carry no front matter;
+  delivery_summary was created ARCHIVED directly, never DRAFT; pipeline_status
+  stays DRAFT, preserved as a historical cross-story artifact) - no skill this
+  story ever wrote APPROVED, same gap US-4.1's archive run flagged; updated
+  docs/knowledge/project-state.md (Delivered Capabilities row, two new Known
+  Constraints for the app_runtime role and BR-017's unbuilt auto-close half,
+  Archived Stories row) - applied directly per archive-flow step 5. Proposed
+  (NOT applied) one docs/product/business-rules.md entry (ticket reply status
+  transitions) and one docs/ARCHITECTURE.md entry (dedicated non-superuser
+  app_runtime runtime-DB-role pattern) for human review. No GitHub sync
+  (source local_only). Cleared active-story.yaml (active_story: null,
+  status: ARCHIVED). Five pre-existing uncommitted working-tree edits
+  (AGENTS.md, docs/workflow/stage-map.yaml, .claude/commands/so/approve.md,
+  plus this file and history.jsonl) are outside this skill's ownership and
+  were left untouched. Known limitations (API_DESIGN OQ-2's untested scope
+  combination, BR-017's unbuilt auto-close half, app_runtime provisioning
+  requirement, ticket_number guessability) all carried in the delivery
+  summary. Recommends /so:start US-4.3 next (sole remaining EPIC-4 BACKLOG
+  story).
