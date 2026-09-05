@@ -120,6 +120,26 @@ class TicketClosedError(ProblemError):
     detail = "This ticket is closed. Create a new ticket if you still need help."
 
 
+class InvalidStateTransitionError(ProblemError):
+    """US-4.3 FR-6/FR-9: the ticket's current status does not permit the
+    requested transition, or the transition lost a concurrency race (an
+    indistinguishable zero-rows-affected conditional UPDATE). Additively
+    shaped beyond `app/modules/admin_users/exceptions.py`'s same-slug US-3.1
+    class (adds `allowed_events`) — this module's own subclass, not imported
+    from there (module-ownership convention, matching
+    `AccountDeactivatedError`'s existing precedent).
+    """
+
+    type_slug = "invalid-state-transition"
+    title = "Invalid State Transition"
+    status = 409
+    detail = "This ticket's current status does not permit this transition."
+
+    def __init__(self, *, allowed_events: list[str]) -> None:
+        super().__init__()
+        self.allowed_events = allowed_events
+
+
 class TicketReplyRateLimitError(ProblemError):
     """NFR (US-4.2): 30 replies already posted by this caller in the last
     hour — a distinct Valkey counter from `TicketCreationRateLimitError`'s

@@ -12,14 +12,14 @@
 
 version: 1
 
-story: US-4.2
+story: US-4.3
 workflow: story-delivery
 
-current_stage: ARCHIVED
-previous_stage: COMPLETED
-last_completed_stage: COMPLETED
+current_stage: COMPLETED
+previous_stage: READY_FOR_PR
+last_completed_stage: READY_FOR_PR
 
-status: ARCHIVED
+status: WAITING_FOR_HUMAN
 attempt: 1
 
 last_invoked_skill: pr-preparer
@@ -27,516 +27,68 @@ last_invoked_skill: pr-preparer
 last_result:
   verdict: PASS
   stage: PR_PREPARATION
-  recorded_at: "2026-09-06T02:15:00Z"
+  recorded_at: "2026-09-07T09:30:00Z"
 
 last_artifacts:
-  - type: pr_summary
-    path: docs/pr/US-4.2-pr-summary.md
-    version: 1
+  - docs/pr/US-4.3-pr-summary.md
 
 implementation_substep: null
 
-pending_human_gate: null
+pending_human_gate:
+  stage: COMPLETED
+  status: PENDING
+  required_artifacts:
+    - type: pr_summary
+      path: docs/pr/US-4.3-pr-summary.md
+      version: 1
+  automated_verdict: PASS
+  blocking_findings: []
+  requested_at: "2026-09-07T10:00:00Z"
+  decided_at: null
+  decided_by: null
+  comment: null
 
 blocking_issues: []
 
 non_blocking_findings:
-  - "PR_PREPARATION (PASS): .gitignore's addition of docs/knowledge has no traceable connection to this story's spec/plan/impact-analysis - flagged for confirmation before merge, not blocking (working-tree hygiene concern, not a gate finding). docs/pr/US-4.2-pr-summary.md v1."
-  - "TEST_WRITING (v2, PASS, re-entry): implementation_plan/task_breakdown/plan_review advanced v1->v2 (Architectural Change #12, app_runtime role) while this story sat at TEST_WRITING - test-writer re-verified rather than regenerated: grep count match (60/42/12 test functions) confirms zero test file drift from v1, since implementation_plan v2's own Testing Strategy section states the unit suite is unaffected and the integration suite needs no rewrite. test_strategy/ac_test_matrix/test_generation_report bumped to v2 for input provenance only. docs/tests/US-4.2-test-strategy.md v2."
-  - "TEST_WRITING (v2, PASS): implementation_plan v2 Risk 7 / Testing Strategy adds a full-suite regression re-run requirement (every other module's existing integration tests, once tests/conftest.py serves app_runtime) as proof the new role's GRANT list is complete - this is IMPLEMENTATION T4/T7's (migration-manager / gate-enforcer) responsibility per task_breakdown v2, not new test-writer content. docs/evidence/US-4.2-test-generation-report.md v2."
-  - "PLAN_REVIEW (v2, PASS): Architectural Change #12's four files (scripts/db/provision_runtime_role.sql, app/main.py, tests/conftest.py, app/core/config.py's runtime_database_url) have no impact_analysis v2 origin - traced instead to the HUMAN_REDIRECTED transition (history.jsonl, 2026-09-05T18:30:00Z) and TR-AC3 itself. Not scope creep; plan-reviewer recommends impact_analysis be refreshed on a future story touching this area for retrospective consistency. docs/reviews/plans/US-4.2-plan-review.md v2."
-  - "PLAN_REVIEW (v2, PASS): T4 (migration-manager) and app/main.py folded into T5 (service-and-router-builder) both exceed those skills' usual footprint - judged acceptable (domain overlap for T4's PostgreSQL role/DDL provisioning; precedent from this story's own v1 for T5's config-line fold). If disputed, correct loop-back is changes_required_sequencing (stays within IMPLEMENTATION_PLANNING), not ARCHITECTURE_PLANNING. docs/reviews/plans/US-4.2-plan-review.md v2."
-  - "IMPLEMENTATION_PLANNING (v2, PASS): task_breakdown v1 was stale (referenced implementation_plan v1; implementation_plan v2 added Architectural Change #12 - the app_runtime role). Regenerated as v2. Assigned scripts/db/provision_runtime_role.sql + tests/conftest.py's fixture change to migration-manager (new T4, depends on T3) and app/main.py's one-line lifespan change to service-and-router-builder (folded into T5) - both assignments are wider than those skills' usual file footprint since implementation_plan v2 explicitly deferred the assignment to this stage rather than naming an owning skill itself. Flagged for plan-reviewer and HUMAN_PLAN_APPROVAL to weigh in; correct loop-back if disputed is changes_required_sequencing (stays within IMPLEMENTATION_PLANNING), not another ARCHITECTURE_PLANNING pass. docs/plans/US-4.2-task-breakdown.md v2."
-  - "IMPLEMENTATION_PLANNING (v2, PASS): docs/catalog/US-4.2-pipeline-status.md v2 still records task_breakdown v1 as its input - stale once v2 lands. Not this stage's output; surfaced for IMPLEMENTATION's re-entry (T4 onward) to update pipeline_status rather than being discovered mid-composite."
-  - "IMPLEMENTATION T3 (migration-manager, BLOCKED): DR-2 (attachments.ticket_reply_id index CONCURRENTLY question) is now resolved, not open - plain CREATE INDEX, since US-4.1 shipped attachment binding without an upload endpoint so the table has no production write path populating it yet. See migrations/versions/9132a68b73c8_add_ticket_replies.py."
-  - "IMPLEMENTATION T3 (migration-manager, BLOCKED): revision 9132a68b73c8 is applied to the local dev database and present in the working tree, uncommitted. Suite red-state character changed - the two direct RLS integration tests now fail on assertion (not the expected pre-IMPLEMENTATION collection ImportError) because of the blocker above, not an implementation bug; a later QUALITY_GATE run needs this context."
-  - "IMPLEMENTATION_PLANNING (v1, PASS): one item remains deferred to execution time per the plan's own note - the final TicketService/TicketReplyService file-internal split (T4, service-and-router-builder's call) - docs/plans/US-4.2-task-breakdown.md"
-  - "TEST_WRITING (v1, PASS): test-writer's own collaborator-shape assumption - a new TicketReplyService class (not new methods on TicketService), with a single actor_kind: Literal['customer','agent'] parameter reused across create_reply and get_ticket_detail, derived per implementation-plan Architectural Change #2's tickets:write check for both routes. If service-and-router-builder (T4/T5) ships a different shape, a reconciliation TEST_WRITING pass is needed, mirroring US-4.1's own v2 reconciliation pass - docs/tests/US-4.2-test-strategy.md"
-  - "TEST_WRITING (v1, PASS): API_DESIGN OQ-2's POST-side 'agent-shaped but missing tickets:write' combination is unit-tested only, not reachable via real HTTP under the shipped role seed - docs/tests/US-4.2-ac-test-matrix.md"
-  - "TEST_WRITING (v1, PASS): all reply-related tests are red (ImportError) until IMPLEMENTATION lands the missing app/modules/support symbols - expected TDD state, not a regression; adding these imports also breaks collection of the 12/22 pre-existing US-4.1 tests in the same two files until T1/T2/T4 land, self-resolving once IMPLEMENTATION completes - docs/evidence/US-4.2-test-generation-report.md"
-  - "ARCHITECTURE_PLANNING (v2, PASS): implementation_plan v2 adds Architectural Change #12 (dedicated non-superuser app_runtime DB role) - widens this story's file footprint to app/main.py and tests/conftest.py (outside app/modules/support/ and app/core/), and requires a full-suite regression pass (not just support's tests) once tests/conftest.py switches to the new role, since every module now runs its requests through app_runtime. New operational artifact scripts/db/provision_runtime_role.sql is not an Alembic migration and its per-environment execution/documentation is out of this plan's scope (flagged for documentation-and-adrs). tests/conftest.py's fixture change doesn't fit any of the four IMPLEMENTATION builder skills' usual footprint - IMPLEMENTATION_PLANNING must assign it explicitly. docs/plans/US-4.2-implementation-plan.md v2."
+  - "SPECIFICATION rework (PASS, v2, supersedes v1): OD-1 through OD-8 resolved per the HUMAN_SPEC_APPROVAL rejection comment (2026-09-06T08:15:00Z) rather than the open-decisions doc's own defaults - notably OD-4's strict/inclusive assignment is the human's, which is the inverse of docs/decisions/US-4.3-open-decisions.md v1's recommendation. FR-4 now targets \"waiting_on_support\"; new FR-5 covers the direct /reopen success path (no covering source AC - derived from the normative API Contract/State Machine table plus OD-3); FR-1 resolve-scope (OD-5), /close audit actor and closed_by (OD-6, OD-7), and the reopen-link target (OD-8) all updated. Two source-native Open Questions (agent-reply-without-reopen default; related_ticket_id) remain, unrelated to OD-1-8."
+  - "SPEC_REVIEW re-run (PASS, v3, supersedes v2 of the review): reviewed spec v2 rather than the pre-rejection v1. FR-4/FR-5's departure from TC-AC4's literal \"reopened\" wording and \"previously assigned agent\" notification were confirmed as authorized, human-traced corrections (OD-1, OD-2), not contradictions. One new Low finding, inherited from the source: the response for /resolve or /reopen on a \"resolved\" ticket outside /reopen's 7-day window but not yet auto-closed is unstated by any FR."
+  - "API_DESIGN (PASS, v1): 3 endpoints designed (/resolve, /close, /reopen); FR-4's status-transition side effect on the existing US-4.2 POST .../replies endpoint documented narratively, not re-emitted as a new operation. 5 open questions logged for DB_DESIGN/PLANNING: (1) undefined response for /resolve or /reopen on a resolved-but-expired-not-yet-auto-closed ticket, carried from SPEC_REVIEW v3's own Low finding; (2) FR-6's 409 invalid-state-transition generalized to every non-normative source state for all three endpoints, not just \"closed\" - flagged for DESIGN_REVIEW to confirm, same treatment as US-4.2-api-design.md's own analogous generalization; (3) resolution_note has no stated maxLength; (4) the source story's {\"reason\"?: str} field on /close and /reopen is carried through unconstrained, with no FR describing its purpose or persistence; (5) closed_by and resolution_note are not exposed on the 200 responses (data-minimization default, OD-7's system-actor sentinel not yet finalized)."
+  - "AUDIT-TRAIL ANOMALY (informational, not blocking): the HUMAN_SPEC_APPROVAL HUMAN_APPROVED event recorded in history.jsonl bears timestamp 2026-09-05T14:42:44Z, which is chronologically BEFORE the SPECIFICATION v2 (created_at 2026-09-06T07:00:00Z) and SPEC_REVIEW v3 (created_at 2026-09-06T08:00:00Z, updated_at 2026-09-06T10:00:00Z) artifacts it approves, and before the HUMAN_SPEC_APPROVAL rejection (2026-09-06T08:15:00Z) that triggered the rework producing those very artifacts. Very likely a date typo (2026-09-05 vs 2026-09-06) rather than a fabricated approval - decided_by/comment shape matches this project's normal /so:approve pattern - but the record as written is internally inconsistent and worth a human correction pass (history.jsonl is append-only; not rewritten here)."
+  - "DB_DESIGN (PASS, v1): 4 additive nullable tickets columns (resolved_at, resolution_note String(5000), closed_at, closed_by no-FK). Corrected the story's literal resolved_at/resolution_note CHECK from a biconditional to a one-directional implication (ck_tickets_resolved_requires_resolution_fields) - the literal form would fail every FR-2/FR-3 closure of an already-resolved ticket. closed_by resolves OD-7 via a system-actor sentinel UUID (no ForeignKey, mirrors audit_log.actor_id's existing no-FK convention) rather than a nullable-FK+discriminator. FR-2's audit_log event name (not stated by any FR) inferred as \"ticket_closed\" from the sibling FRs' naming pattern. No new table - 4 new audit_log event values via the existing record_event path, same architecture US-4.1/US-4.2 established. resolution_note sized String(5000) resolves API_DESIGN Open Questions #3; the /close, /reopen \"reason\" field (Open Questions #4) is not persisted anywhere. All flagged for DESIGN_REVIEW to confirm."
+  - "DESIGN_REVIEW (CHANGES_REQUIRED, v1): both API_DESIGN's Open Question #2 (409 generalization) and DB_DESIGN's own two self-flagged items (CHECK correction, ticket_closed event-name inference) were independently verified sound and need no rework. Three genuine defects found instead: DR-1 (Critical) - the auto-close job's stated predicate (resolved_at <= now() - interval '7 days') is inclusive, not the strict '>' FR-3/OD-4 require, so it collides with the reply/reopen guard's own inclusive boundary at exactly 7 days; DR-2 (Major) - the Concurrency section never states that /reopen's (and FR-4's) conditional UPDATE embeds the 7-day window in its own WHERE clause, leaving the spec's single-statement NFR unaddressed; DR-3 (Major) - resolution_note has no maxLength in US-4.3-openapi.yaml even though DB_DESIGN fixed the column to String(5000) and told schema-builder to match it - the contract itself was never updated. Routed back to API_DESIGN (changes_required_both: both API_DESIGN's openapi.yaml and DB_DESIGN's db-design.md need correction) per docs/reviews/designs/US-4.3-design-review.md."
+  - "API_DESIGN rework (PASS, v2, supersedes v1): resolved DR-3 only (the API_DESIGN-owned finding) - added maxLength: 5000 to ResolveTicketRequest.resolution_note in US-4.3-openapi.yaml (info.version bumped to \"2\" to mirror), and updated US-4.3-api-design.md Open Questions #3 to record it resolved by DB_DESIGN's String(5000) column. DR-1 and DR-2 are database-design-owned and are not addressed by this revision - DB_DESIGN must correct them next (auto-close predicate operator; /reopen and FR-4 UPDATE WHERE clause missing the 7-day window)."
+  - "DB_DESIGN rework (PASS, v2, supersedes v1): resolved DR-1 and DR-2 (the DB_DESIGN-owned findings). DR-1 - corrected the auto-close job's stated predicate from inclusive resolved_at <= now() - interval '7 days' to strict resolved_at < now() - interval '7 days', matching FR-3's literal text and OD-4's human-confirmed strict/inclusive assignment. DR-2 - the Concurrency (FR-9) section now states explicitly that /reopen (FR-5) and FR-4's reply-driven transition embed resolved_at >= now() - interval '7 days' (inclusive, OD-4) in the same conditional UPDATE's WHERE clause alongside the status predicate, satisfying the spec's single-statement NFR. entity_model.md bumped to v2 with no schema-shape change (both DR-1/DR-2 are narrative, not schema) - only its recorded input versions (api_design/openapi v1 to v2) were refreshed. All three of v1's self-confirmed-sound items (CHECK correction, ticket_closed event-name inference, partial index, no-FK closed_by) were left untouched, consistent with DESIGN_REVIEW v1's verdict that none need further loop-back. Advanced to DESIGN_REVIEW to re-verify DR-1/DR-2/DR-3 together."
+  - "DESIGN_REVIEW (CHANGES_REQUIRED, v2, supersedes v1): DR-1/DR-2/DR-3 from v1 all verified corrected - no further rework needed on any of the three. One new defect found: DR-4 (Critical) - db-design.md decided FR-4's reply-driven reopen transition (resolved -> waiting_on_support via the existing US-4.2 POST .../replies endpoint) writes no audit_log entry at all, contradicting both the source story's own Data Model Notes (\"ticket_audit_log records every transition\") and docs/product/non-functional-requirements.md's project-wide NFR-006 (\"every mutation... is audited\") - FR-5's identical transition (/reopen) IS audited (ticket_reopened) via the same design document, an inconsistency the design introduced rather than one the spec required. Routed back to DB_DESIGN (changes_required_database) to either add the missing audit write or explicitly log the exemption as a confirmable open item rather than deciding it silently. Two Minor, non-blocking findings also recorded: DR-5 (the resolved-but-expired-window response is undefined for the reply endpoint too, not just /resolve and /reopen as API_DESIGN's Open Questions #1 already covers) and DR-6 (new partial index on the existing tickets table silent on CREATE INDEX CONCURRENTLY per AGENTS.md section 4, same advisory treatment as US-4.2-design-review.md's own DR-2 precedent), plus DR-7 (reason field on /close and /reopen has no maxLength). See docs/reviews/designs/US-4.3-design-review.md."
+  - "DB_DESIGN rework (PASS, v3, supersedes v2): resolved DR-4 (the sole blocking finding from DESIGN_REVIEW v2). FR-4's reply-driven reopen transition now writes audit_log via event=ticket_reopened (reused from FR-5, not a new event string, since FR-4 performs the identical resolved -> waiting_on_support transition); actor_id is always the replying requester's id (FR-4's text has no agent-reply branch), actor_role resolves to self. Call-site is the existing US-4.2 reply-creation service path, same transaction as the conditional UPDATE. entity_model.md bumped to v3 to add the new audit_log write row - no tickets schema shape change. DR-1/DR-2 (v1) left untouched (already confirmed sound by DESIGN_REVIEW v2); DR-5/DR-6/DR-7 (Minor, non-blocking) intentionally not addressed, per the review's own advisory treatment. Advanced to DESIGN_REVIEW to re-verify DR-4's correction."
+  - "DESIGN_REVIEW (PASS, v3, supersedes v2): DR-4 verified corrected against db-design.md v3 - FR-4's audit_log write (event=ticket_reopened) confirmed compatible with the existing record_event/_resolve_actor_role code path (app/modules/audit/service.py:187-220; app/modules/roles/service.py:107), no signature change needed. DR-1/DR-2/DR-3 (v1) remain confirmed sound. One new Minor, non-blocking finding: DR-8 - api-design.md's FR-4 side-effect narrative was never updated to mention the now-decided audit_log write (every other endpoint's narrative states its write explicitly); advisory only, no OpenAPI schema/status-code/response-field impact. DR-5/DR-6/DR-7 (v2, Minor, non-blocking) carried forward unaddressed. Advanced to IMPACT_ANALYSIS per stage-map.yaml DESIGN_REVIEW.next."
+  - "IMPACT_ANALYSIS (PASS, v1): blast radius surveyed directly against app/modules/support/* source, not the designs' own citations. Key confirmed-by-direct-read findings: (1) TicketRepository.update() is unconditional (no status WHERE) - none of /resolve, /close, /reopen, or the auto-close job can reuse it; each needs a new status-(and for /reopen and FR-4, window-)scoped conditional UPDATE method. (2) TicketReplyService has no audit_service collaborator today, unlike TicketService - DR-4's FR-4 audit write requires a new constructor parameter plus new wiring in dependencies.py::get_ticket_reply_service (which does not inject AuditLogServiceDep today, unlike get_ticket_service). (3) Which class hosts /close and /reopen (TicketService's pattern vs. TicketReplyService's actor-kind-dependent ownership pattern, which /close and /reopen structurally need) is undecided by any design doc - flagged for ARCHITECTURE_PLANNING/IMPLEMENTATION_PLANNING, not decided here. (4) No script in scripts/ has ever called audit.service.record_event - the new scripts/auto_close_resolved_tickets.py (FR-3) is the first to combine a business-conditional batch UPDATE with a per-row audit write; no existing purge script is a drop-in template for that combination. One migration required: 4 additive nullable tickets columns, 2 CHECK constraints, 1 partial index - all safe against existing rows (no prior code path ever wrote status='resolved'/'closed'). No genuine upstream defect found; DR-5/DR-6/DR-7/DR-8 and API_DESIGN Open Questions #1/#2 carried forward as non-blocking, restated against the concrete files/methods they land on. Advanced to ARCHITECTURE_PLANNING per stage-map.yaml IMPACT_ANALYSIS.next."
+  - "ARCHITECTURE_PLANNING (PASS, v1): resolved all three structural questions IMPACT_ANALYSIS left open. /resolve, /close, /reopen land on TicketService (no new collaborator wiring - it already has audit_service/user_service/email_sender; TicketReplyService's ownership-check is duplicated inline per its own established style, not extracted into a shared helper, consistent with AGENTS.md 7.8's no-opportunistic-refactor rule). One new repository method, TicketRepository.transition_status(...), serves the conditional FR-9 update for /resolve, /close, /reopen, and FR-4's reply-driven reopen alike; the existing unconditional update() is left untouched and still serves create_reply's first_response_at stamping. TicketReplyService still gains a new required audit_service constructor parameter (DR-4's FR-4 audit fix needs it regardless of the hosting decision) - the only new wiring this story adds outside TicketService. A single _ALLOWED_EVENTS_BY_STATUS table in service.py satisfies FR-6's NFR (one explicit transition table); allowed_events uses the endpoint-verb vocabulary (resolve/close/reopen), a deliberate choice distinct from audit_log's past-tense event names, since no design doc states which vocabulary the field uses. The system-actor sentinel constant (OD-7) is declared in models.py, not service.py, so the auto-close script (which bypasses TicketService per the existing purge-script precedent) need not import service.py just for one constant. Confirmed the auto-close script is the first in this codebase needing both a Postgres and a Valkey connection (RoleService.get_role_grants_for_user's actor_role resolution, via PermissionEpochCache) - flagged as an operational risk, not resolved here. Two carried, still-undefined-response gaps (API_DESIGN Open Questions #1, DESIGN_REVIEW DR-5) are explicitly not resolved by this plan - a resolved-but-expired-not-yet-auto-closed ticket falls through to the same 409 a genuine concurrency-race loser gets, a defensible but FR-unstated default (plan's own Risk 1). migrations/env.py (AGENTS.md 7.9 protected) confirmed zero-diff expected (support.models already registered wholesale, env.py:22) - migration-manager to verify, not assume. Advanced to IMPLEMENTATION_PLANNING per stage-map.yaml ARCHITECTURE_PLANNING.next."
+  - "IMPLEMENTATION_PLANNING (PASS, v1): sequenced implementation_plan v1's nine Architectural Decisions into T1-T6 (schema-builder, data-layer-builder, migration-manager, service-and-router-builder service then router) plus T7 gate-enforcer. T1/T2 run in parallel; T3 depends on T2; T4 depends on T1+T3; T5 depends on T4. T6 (scripts/auto_close_resolved_tickets.py) has no execution skill whose stated contract literally covers scripts/ - assigned to service-and-router-builder (service script form) per the identical US-3.3 OD-15 precedent (verify_audit_chain.py, anonymize_erased_user.py); flagged for plan-reviewer/HUMAN_PLAN_APPROVAL, loop-back changes_required_sequencing if judged wrong. Risks 1-3 from the implementation plan carried forward as documented non-blocking items rather than separate tasks. No test-writer tasks included - TEST_WRITING is a separate stage preceding IMPLEMENTATION per stage-map.yaml, consistent with US-4.2's task breakdown. Advanced to PLAN_REVIEW per stage-map.yaml IMPLEMENTATION_PLANNING.next."
+  - "PLAN_REVIEW (PASS, v1): full impact_analysis v1 coverage confirmed (every affected file/module has a traceable plan section and task, including the two impact-analysis flags 'where /close and /reopen land' and 'FR-4 needs the same window-scoped method' - both resolved by Decision 1/2, not left open). Task breakdown T1-T7 ordering verified against AGENTS.md section 3's downward-only direction and the migration-before-model-use rule - no violation (T3 migration depends on T2 models; T4 service depends on T1 schemas + T3 migration; T5 router depends on T4 service; T6 script depends only on T2/T3, correctly bypassing service.py/router.py). Risk and Testing Strategy sections judged concrete, not boilerplate. No scope creep found. One open item confirmed rather than a fresh finding: task_breakdown's own T6 execution-skill-assignment flag (service-and-router-builder for scripts/auto_close_resolved_tickets.py, no execution skill's stated contract covers scripts/) is accepted as sound, same closest-fit reasoning this project already closed at US-3.3 OD-15 - not routed back via changes_required_sequencing. Advanced to HUMAN_PLAN_APPROVAL per stage-map.yaml PLAN_REVIEW.next."
+  - "TEST_WRITING (PASS, v1): wrote the TDD-red suite against openapi v2/entity_model v3/implementation_plan v1/task_breakdown v1 - 13 new unit schema tests (ResolveTicketRequest/CloseTicketRequest/ReopenTicketRequest/TicketStateRead), 21 new/extended unit service tests (TicketService.resolve_ticket/close_ticket/reopen_ticket's full check-order, the _ALLOWED_EVENTS_BY_STATUS table asserted verbatim, FR-9 concurrency-loss simulation via a new transition_returns_none fake flag, TicketReplyService's FR-4 branch extended for DR-4's audit write), 17 new integration router tests (/resolve, /close, /reopen end-to-end, the 12-case auth matrix, FR-9's real conditional-UPDATE race, FR-4's now-audited reply-reopen, the OD-4 exact-7-day inclusive-boundary case), and a new 8-test integration file for TicketRepository.auto_close_resolved_past_window (status/window predicates, idempotency, batch id-list shape, reopened-ticket survival) plus one full-loop AuditLogService/RoleService composition test. Verified: ruff check/format clean; mypy --strict shows 73 findings, all in three expected pre-IMPLEMENTATION categories (attr-defined on not-yet-built symbols, an arg-type mismatch on the TicketReplyService fixture call against its current 5-arg constructor, and unused-ignore noise from unresolved-import-as-Any) - zero unexplained findings; pytest --collect-only shows exactly 3 ImportErrors (schemas/service/script files, each breaking that whole file's collection per Python's all-or-nothing import) and a clean 100-test collection for the router file (new routes 404 at runtime instead, since it imports no new symbol at module scope). Two collaborator-shape assumptions flagged for reconciliation-reviewer: (1) TicketReplyService.create_reply's FR-4 branch is assumed to split into two sub-cases rather than the plan's literal single branch - applying the inclusive window guard to the ordinary waiting_on_customer case (NULL resolved_at) would silently break FR-2, since NULL >= x is not true in SQL; (2) EmailSender.send_ticket_resolved_email is a new Protocol method FR-1 requires that implementation_plan.md's Files To Modify table never lists (app/core/email.py absent from that table) - a plan gap, not an invented requirement, matching US-4.1's own get_email_for_user precedent. Self-caught before recording PASS and fixed same-pass: (a) _seed_ticket's bare status='closed'/'resolved' seeds would violate entity_model v3's two CHECK constraints once T3 lands, breaking three pre-existing US-4.2 tests as an unintended regression - fixed via defaults in _seed_ticket itself, explicit kwargs still win; (b) the ac_test_matrix's first draft mislabeled TC-AC3 and omitted the TC-AC4/TC-AC9 ids - corrected; (c) this report's own coverage-verification paragraph overstated what a failed collection run proves and miscounted the new-test total (39 vs the actual 59) - replaced with a real name diff; (d) three window-boundary tests seeded resolved_at only 1 second past the 7-day cutoff against python's clock rather than Postgres's own frozen-per-transaction now() the real predicate uses - narrower than fixture setup latency can plausibly be, risking flakiness against a correct implementation - widened to a 5-minute margin (the two exact-boundary tests are unaffected; the clock skew runs the safe direction there). Advanced to IMPLEMENTATION per stage-map.yaml TEST_WRITING.next."
+  - "IMPLEMENTATION (CHANGES_REQUIRED, attempt 1): all six code sub-steps (T1 schema-builder, T2 data-layer-builder, T3 migration-manager, T4/T5 service-and-router-builder service+router, T6 service-and-router-builder script form) completed and independently verified - see docs/catalog/US-4.3-pipeline-status.md v1 for full detail. Docker Desktop and its customer_portal_pg/customer_portal_valkey containers were stopped at session start and started for this pass (T3's migration proof and every integration-test run needed them). T3's migration (242e0dba5ba2_add_ticket_resolution_columns.py) proved via a real upgrade->downgrade->upgrade cycle; both CHECK constraints and the partial index's WHERE clause confirmed to render verbatim via pg_constraint/pg_indexes. Two own-code bugs found and fixed during T4-T6 verification (not loop-back-worthy): func.make_interval's kwarg-style call raised TypeError (SQLAlchemy's generic func.<name>() does not support named SQL arguments) - fixed to the positional form at both repository.py call sites. app/main.py's problem_error_handler needed a generic getattr(exc, \"allowed_events\", None) addition (a plan gap nobody flagged upstream) for FR-6's allowed_events field to actually reach the HTTP response body - test_support_router.py's own body[\"allowed_events\"] assertions require it. Four unrelated test fakes (profile/email_verification/admin_users/users) needed a matching send_ticket_resolved_email stub, mechanical EmailSender Protocol-extension fallout, same ripple US-4.2's pipeline status already recorded. Full repository suite: 773/774 passed. The one failure, test_auto_close_resolved_past_window_leaves_ticket_at_exactly_7_days_untouched, is a non-deterministic timestamp/ordering assumption (test seeds resolved_at from Python's wall clock, then compares against Postgres's transaction-frozen now() at Act time - the outcome depends on real elapsed time between the two, confirmed flaky by 5/5 passes in isolation vs. one failure under full-suite load) - not an implementation defect; its twin test_reopen_ticket_at_exactly_7_days_boundary_succeeds shares the identical zero-margin construction in the opposite direction and is equally fragile. Routed IMPLEMENTATION -> TEST_WRITING via stage-map.yaml's changes_required_tests loop-back key (added 2026-09-05 for exactly this class of finding) for test-writer to seed resolved_at server-side (the same transaction's frozen now()) in both named tests, preserving their exact-boundary intent rather than widening the margin. No code in app/ or scripts/ is expected to need further change once re-entered."
+  - "TEST_WRITING (PASS, v2, supersedes v1, attempt 2): fixed the two non-deterministic exact-7-day-boundary tests IMPLEMENTATION (attempt 1) flagged via changes_required_tests. Both now seed resolved_at server-side (UPDATE ... SET resolved_at = func.now() - func.make_interval(0, 0, 0, literal(7)), the identical expression repository.py's own guard uses) instead of from Python's wall clock, via new helpers _seed_resolved_ticket_at_exact_window_boundary (test_auto_close_resolved_tickets.py) and _seed_ticket_resolved_at_exact_window_boundary (test_support_router.py). Since db_session freezes transaction_timestamp() for the test's whole transaction, the seed and the guard's predicate now read the identical frozen now() - deterministic in both directions, boundary intent preserved (no margin widened). No other test or any application code changed. Verified: ruff/mypy --strict clean on both files; the 2 named tests pass 5/5 in isolation; full support suite (211 tests) and full repository suite (774/774, up from 773/774) pass. Advanced to IMPLEMENTATION per stage-map.yaml TEST_WRITING.next - T1-T6 are not expected to need further code change on re-entry."
+  - "IMPLEMENTATION (PASS, v2, re-entry, attempt 1): T1-T6 (docs/catalog/US-4.3-pipeline-status.md v1) were already complete and needed no code change - the only blocker was the two boundary tests TEST_WRITING v2 fixed. No builder sub-step was re-invoked; instead re-verified directly: full repository suite re-run under full-suite load (the load-dependent condition that originally discriminated the flake, unlike an isolated run) - 774/774 passed. Also confirmed by reading tests/conftest.py that the client fixture depends on db_session and the app's get_db_session dependency is overridden to the same AsyncSession bound to one connection-level transaction (app commits via SAVEPOINTs) - so the HTTP-driven test_reopen_ticket_at_exactly_7_days_boundary_succeeds shares the identical frozen transaction_timestamp() as the repository-direct test_auto_close_resolved_past_window_leaves_ticket_at_exactly_7_days_untouched, confirming the fix's premise holds for both, not just the one that had actually failed. pipeline_status bumped to v2 (status: APPROVED, inputs refreshed to test_strategy/ac_test_matrix v2). Advanced to QUALITY_GATE per stage-map.yaml IMPLEMENTATION.next. T7 (gate-enforcer) has not run."
+  - "QUALITY_GATE (PASS, v1): pre-commit run --all-files, mypy app tests, lint-imports, and pytest --cov=app --cov-fail-under=85 all re-run fresh (not trusted from IMPLEMENTATION's own capture) - 774/774 tests passed, 96.29% coverage (support/service.py 94%, router.py 100%, both above the 90% story-module bar). Migration upgrade->downgrade->upgrade re-proven independently against the live Docker Postgres. Two first-run pre-commit failures were environment/tooling artifacts, not code defects, both fixed without any bypass: (1) lint-imports failed to spawn with WinError 4551 (Windows Smart App Control blocking the compiled binary, this machine's known constraint) - fixed by rebuilding import-linter from source via uv pip install --no-binary import-linter --reinstall-package import-linter, which produced 6/6 contracts kept on retry; (2) detect-secrets' own baseline auto-update (one hashed-secret line-number shift, no new secret) - staged and re-ran per AGENTS.md section 6's documented auto-fix pattern. Part B runtime checks: ORM containment clean (no model/repository import in router.py, all three new service methods return -> TicketStateRead); eager loading N/A (transition_status's UPDATE...RETURNING touches no relationship, TicketStateRead is all scalar columns); cache TTL N/A (cache.py untouched by this story); cross-module discipline clean; no banned idioms in the diff; all three new routes declare response_model/status_code, all three new inbound schemas set extra=\"forbid\", no sensitive field on TicketStateRead, .env.example correctly N/A (no new setting added), OpenAPI renders. Wrote docs/evidence/US-4.3-implementation-report.md and docs/evidence/US-4.3-quality-gate-report.md (both v1). Advanced to IMPLEMENTATION_VERIFICATION per stage-map.yaml QUALITY_GATE.next."
+  - "IMPLEMENTATION_VERIFICATION (PASS, v1): independently re-verified AGENTS.md section 6 items 5-7 (migration guards/real downgrade, ORM containment, eager-loading N/A, cache-TTL N/A, service->service cross-module calls, response_model/status_code, extra=\"forbid\"+no privilege field, .env.example N/A, no sensitive *Read field) and section 5's five security cases against the actual code and tests, not gate-enforcer's/the implementation report's own characterization - no Critical/Major finding. The insufficient-permission case is a literal 403 for /resolve (customer, non-agent) and a 404 ownership check for /close and /reopen, since those two share one success path between the requester and any agent by design (no permission differential beyond ownership) - correctly IDOR-shaped, matching create_ticket_reply's existing precedent, and proven at both integration (12-case auth matrix plus the different-customer-404 test) and unit level. Wrote docs/verification/US-4.3-implementation-verification.md (v1). Advanced to SECURITY_REVIEW per stage-map.yaml IMPLEMENTATION_VERIFICATION.next."
+  - "SECURITY_REVIEW (PASS, v1): audited against AGENTS.md section 7's six non-negotiable rules across every file this story touches - password/credential storage rows N/A (no credential field introduced); no token/hash/PII in any new or touched log call (service.py's new logger.exception for the resolved-email failure path, email.py's new send_ticket_resolved_email logger.info, and the auto-close script's count-only logger.info are all static or non-sensitive); all three new inbound schemas (Resolve/Close/ReopenTicketRequest) set extra=\"forbid\" with no privilege field client-writable - every transition field is computed server-side, never taken from the request body; all SQL (transition_status, auto_close_resolved_past_window, the migration's check-constraint/index DDL) uses SQLAlchemy bound constructs, no string interpolation; auth-failure responses are uniform - TicketNotFoundError (404) covers both unknown-ticket and wrong-customer cases identically across all three new service methods, and /close and /reopen's shared requester/agent success path is confirmed IDOR-preventing by IMPLEMENTATION_VERIFICATION's own auth-matrix testing. One Low advisory finding carried forward unchanged from US-4.1/US-4.2 (ticket_number sequentially guessable) - not re-triggered by this story's UUID-keyed routes. Wrote docs/reviews/security/US-4.3-security-review.md (v1). Advanced to RECONCILIATION per stage-map.yaml SECURITY_REVIEW.next."
+  - "RECONCILIATION (PASS, v1): every AC in specification.md v2 (TC-AC1 through TC-AC9) plus FR-5's source-uncovered direct-/reopen path confirmed to have exactly one ac_test_matrix v2 row, an existing test function (47 named functions independently grepped, one match each), and a test body (directly read, not sampled by name) asserting the AC's actual stated behavior - status code, persisted field, audit actor/event, and the relevant negative case (e.g. 'ticket unchanged', 'first agent's note intact', 'no audit write'). Direct comparison of service.py/schemas.py/exceptions.py/scripts/auto_close_resolved_tickets.py against the approved spec/api-design/db-design found no drift: _ALLOWED_EVENTS_BY_STATUS, OD-4's inclusive/strict boundary split, OD-5/OD-6/OD-7's eligibility and audit-actor rules, resolution_note's 5000-char bound, and every problem+json type slug all match exactly. The two approved deviations from the source story's literal text (OD-1's waiting_on_support target instead of a literal 'reopened' status; DESIGN_REVIEW v2 DR-4's added audit write on FR-4) were confirmed as human/review-traced corrections, not undocumented drift. Wrote docs/reviews/reconciliation/US-4.3-reconciliation.md and docs/reconciliation/US-4.3-traceability.md (both v1). Advanced to HUMAN_PR_APPROVAL per stage-map.yaml RECONCILIATION.next."
+  - "PR_PREPARATION (PASS, v1): all four required gates (gate-enforcer, implementation-verifier, security-reviewer, reconciliation-reviewer) reconfirmed Pass by reading their actual reports, not a verbal summary. No stale_reconciliation condition - the entire US-4.3 implementation and every upstream artifact exist only in the uncommitted working tree, which is exactly the state RECONCILIATION v1 already reviewed; nothing moved afterward. .env.example confirmed N/A (no new setting; git diff on app/core/config.py is empty). One commit-hygiene item flagged, not silently resolved: docs/docs/hooks/tool-usage.jsonl is an untracked stray session-hook log unrelated to this story, recommended for exclusion from the eventual commit. Wrote docs/pr/US-4.3-pr-summary.md (v1) with title, summary, AC-by-AC test-plan checklist, risk/rollback notes, and the explicit not-yet-pushed statement. Advanced to READY_FOR_PR per stage-map.yaml PR_PREPARATION.next - a human gate; pending_human_gate built, status WAITING_FOR_HUMAN."
 
-started_at: "2026-09-04T16:30:00Z"
-updated_at: "2026-09-06T05:00:00Z"
-completed_at: "2026-09-06T02:30:00Z"
-archived_at: "2026-09-06T05:00:00Z"
+started_at: "2026-09-06T06:15:00Z"
+updated_at: "2026-09-07T10:00:00Z"
+completed_at: "2026-09-07T10:00:00Z"
+archived_at: null
 
 note: >
-  plan-reviewer reviewed implementation_plan v1 and task_breakdown v1 against
-  impact_analysis v2, specification v6, api_design v3/openapi v3, and
-  db_design v3/entity_model v3. Full impact-analysis coverage (every affected
-  file/decision item traced to a plan section or Files-To-Modify row),
-  correct AGENTS.md section 3 task-breakdown ordering (T1/T2 parallel, T3
-  migration before T4/T5 service/router, matching the migration-before-
-  model-use rule), concrete risk and test-strategy sections aligned with
-  AGENTS.md sections 4/5, and no untraceable scope creep. No blocking or
-  non-blocking findings - PASS. docs/reviews/plans/US-4.2-plan-review.md v1.
-  Advanced to HUMAN_PLAN_APPROVAL - awaiting /so:approve or /so:reject.
-
-  HUMAN_PLAN_APPROVAL: human approved via /so:approve at 2026-09-05T16:30:00Z
-  (decided_by: sbruhov@gmail.com). Required artifacts implementation_plan v1,
-  task_breakdown v1, plan_review v1 all current with recorded verdict PASS
-  and no blocking issues. Advanced to TEST_WRITING.
-
-  TEST_WRITING: test-writer wrote docs/tests/US-4.2-test-strategy.md v1,
-  docs/tests/US-4.2-ac-test-matrix.md v1, docs/evidence/US-4.2-test-
-  generation-report.md v1 against specification v6, openapi v3,
-  entity_model v3, impact_analysis v2, implementation_plan v1,
-  task_breakdown v1, plan_review v1. Added tests/unit/modules/support/
-  test_support_schemas.py (new, 12 tests), extended test_support_service.py
-  (+30 tests, additive-only fake extensions) and test_support_router.py
-  (+38 tests, incl. 3 direct RLS tests and a statement-count-independence
-  test), covering every TR-AC1-TR-AC7 plus the carried API_DESIGN OQ-1
-  no-op branch and Risk 6's rate-limit key independence. ruff check/format
-  clean; py_compile clean; pytest --collect-only fails only on ImportError
-  against not-yet-built app/modules/support symbols (expected pre-
-  IMPLEMENTATION red state - see test-generation-report). No application
-  code changed. PASS, no blocking issues. Advanced to IMPLEMENTATION.
-
-  IMPLEMENTATION T1 (schema-builder, PASS): app/modules/support/schemas.py
-  extended (CreateReplyRequest, ReplyRead, ReplyThreadPage, TicketDetailRead)
-  against openapi v3/api_design v3/db_design v3/entity_model v3. ruff/mypy
-  --strict clean; all 13 tests in test_support_schemas.py pass.
-
-  IMPLEMENTATION T2 (data-layer-builder, PASS): app/modules/support/models.py
-  (TicketReply, Ticket.first_response_at, Attachment.ticket_reply_id),
-  repository.py (TicketRepository.update, AttachmentRepository.bind_to_reply,
-  new TicketReplyRepository), cache.py (TicketReplyRateLimitCache),
-  app/core/cache_keys.py (ticket_reply_rate_key) against db_design v3/
-  entity_model v3. ruff/mypy --strict clean on all four files. migrations/
-  env.py's existing wholesale support-module import confirmed to already
-  cover TicketReply (zero-diff registration).
-
-  IMPLEMENTATION T3 (migration-manager, BLOCKED): migrations/versions/
-  9132a68b73c8_add_ticket_replies.py written, guarded, and proven via a real
-  upgrade->downgrade->upgrade cycle - the migration DDL itself is correct.
-  DR-2 resolved (plain CREATE INDEX, not CONCURRENTLY). BLOCKED on a
-  deployment-level finding, not a migration defect: the configured database
-  role (postgres) is a PostgreSQL superuser (rolsuper=True,
-  rolbypassrls=True), which unconditionally bypasses row security regardless
-  of FORCE ROW LEVEL SECURITY - db_design v3/entity_model v3's RLS reasoning
-  never considered this. Proven via the story's own integration tests
-  (2 of 3 direct RLS tests FAIL against this role) and via a scratch
-  NOSUPERUSER role (created, exercised, dropped this session) proving the
-  CREATE POLICY predicates are themselves correct. See
-  docs/catalog/US-4.2-pipeline-status.md v1 for full detail. Holds at
-  IMPLEMENTATION pending a human decision. CORRECTION (recorded at the
-  HUMAN_REDIRECTED transition below): the BLOCKED note's own claim that "no
-  loop_back key under IMPLEMENTATION reaches ... ARCHITECTURE_PLANNING" was
-  wrong - stage-map.yaml IMPLEMENTATION.loop_back.blocked_by_architecture
-  mechanically reaches it. Only the DB_DESIGN branch has no loop_back key.
-
-  HUMAN_REDIRECTED (2026-09-05T18:30:00Z, decided_by: sbruhov@gmail.com): user
-  chose to route via the existing blocked_by_architecture loop_back key
-  (stage-map.yaml IMPLEMENTATION.loop_back.blocked_by_architecture) rather
-  than the DB_DESIGN branch, over the DR-1(v2)-adjacent alternative of
-  revising db_design v3/entity_model v3's RLS claim in place. Direction:
-  provision a dedicated non-superuser runtime role (config/session/
-  provisioning changes) so TR-AC3's RLS guarantee holds as designed; the two
-  currently-failing direct-RLS integration tests
-  (test_internal_reply_hidden_from_customer_context_by_rls_alone,
-  test_no_actor_kind_set_defaults_to_hiding_internal_reply) are expected to
-  pass unchanged once the deployment role changes - implementation_plan v1
-  Architectural Change #1 already owns the RLS mechanism decision, and
-  provisioning the new role is itself architectural. Recorded as
-  HUMAN_REDIRECTED (not a skill-returned CHANGES_REQUIRED[blocked_by_
-  architecture], since migration-manager itself returned BLOCKED with no
-  key), mirroring the DESIGN_REVIEW->CLARIFICATION HUMAN_REDIRECTED precedent
-  at 2026-09-05T09:00:00Z. Routed IMPLEMENTATION -> ARCHITECTURE_PLANNING
-  (attempt 2 - ARCHITECTURE_PLANNING v1/PASS already ran for this story at
-  2026-09-05T13:00-14:00, producing implementation_plan v1). T1
-  (schema-builder) and T2 (data-layer-builder) remain PASS and undisturbed;
-  T3's migration file stays on disk pending re-verification once the RLS
-  mechanism decision is revised. See docs/catalog/US-4.2-pipeline-status.md
-  v2 for the corrected record.
-
-  ARCHITECTURE_PLANNING (attempt 2, PASS): planner revised
-  docs/plans/US-4.2-implementation-plan.md to v2 (supersedes v1), adding
-  Architectural Change #12 - a dedicated non-superuser app_runtime PostgreSQL
-  role, provisioned by a new scripts/db/provision_runtime_role.sql (not an
-  Alembic migration), with app/main.py's lifespan switched to a new
-  Settings.runtime_database_url for the application's own request-serving
-  engine while migrations/env.py keeps using the existing database_url
-  (owner role) unchanged. tests/conftest.py's _database fixture must run the
-  same provisioning against the ephemeral testcontainers Postgres and rewire
-  app.state.db_engine/db_session_factory to the app_runtime-credentialed
-  engine, so the two already-written direct-RLS integration tests
-  (test_internal_reply_hidden_from_customer_context_by_rls_alone,
-  test_no_actor_kind_set_defaults_to_hiding_internal_reply) can actually
-  exercise a non-superuser connection. T3's migration file
-  (9132a68b73c8_add_ticket_replies.py) and its proven upgrade/downgrade/
-  upgrade cycle need no re-run - only re-verification via re-running the two
-  RLS tests once the fixture change lands. No blocking issues; three
-  non-blocking findings carried into IMPLEMENTATION_PLANNING (file footprint
-  wider than app/modules/support/, tests/conftest.py ownership unassigned
-  among the four builder skills, provisioning-script documentation deferred
-  to documentation-and-adrs). Advanced to IMPLEMENTATION_PLANNING.
-
-  IMPLEMENTATION_PLANNING (v2, PASS): implementation-planner found task_breakdown
-  v1 stale (recorded implementation_plan v1 as input; disk has v2) and
-  regenerated it as v2 against implementation_plan v2/impact_analysis v2/
-  specification v6/db_design v3/entity_model v3/api_design v3/openapi v3. Added
-  T4 (NEW) - migration-manager provisions scripts/db/provision_runtime_role.sql
-  and wires tests/conftest.py's _database fixture to serve requests through the
-  new app_runtime role, then re-verifies T3's two direct-RLS integration tests
-  against it - and folded app/main.py's one-line lifespan swap into T5
-  (service-and-router-builder), following this story's own v1 precedent of
-  bundling adjacent app/core/config.py settings into the service task. Both
-  assignments are wider than those skills' usual footprint; implementation_plan
-  v2 itself deferred the assignment to this stage rather than naming an owning
-  skill, so no loop-back to ARCHITECTURE_PLANNING was used - flagged as a
-  non-blocking finding for plan-reviewer/HUMAN_PLAN_APPROVAL instead. T1/T2/T3
-  rows carried forward unchanged (already PASS / DDL already proven, no
-  re-run). No blocking issues. Advanced to PLAN_REVIEW.
-
-  PLAN_REVIEW (v2, PASS): plan-reviewer re-reviewed implementation_plan v2 and
-  task_breakdown v2 (v1 of both, and v1 of this review, are now SUPERSEDED)
-  against impact_analysis v2, specification v6, api_design v3/openapi v3, and
-  db_design v3/entity_model v3. Full impact-analysis coverage carried forward
-  unchanged from v1's already-passed review; Architectural Change #12's four
-  new/changed files (scripts/db/provision_runtime_role.sql, app/main.py,
-  tests/conftest.py, app/core/config.py's runtime_database_url) have no
-  impact_analysis origin but are traced to the recorded HUMAN_REDIRECTED
-  transition and TR-AC3 itself, not treated as untraced scope creep. Task
-  breakdown T4's layering position (after T3, gating T7) is correct even
-  though it sits outside the router/service/repository chain. Risks 7-8 and
-  the full-suite regression addition judged concrete, not generic. Two
-  non-blocking findings recorded (impact_analysis staleness on Change #12's
-  files; T4/T5 skill-assignment judged acceptable) - neither blocks, neither
-  requires a loop-back. No Critical/Major findings. docs/reviews/plans/
-  US-4.2-plan-review.md v2. Advanced to HUMAN_PLAN_APPROVAL - awaiting
-  /so:approve or /so:reject.
-
-  HUMAN_PLAN_APPROVAL (attempt 2): human approved via /so:approve at
-  2026-09-05T21:15:00Z (decided_by: sbruhov@gmail.com), no comment. Required
-  artifacts implementation_plan v2, task_breakdown v2, plan_review v2 all
-  current (status DRAFT, not SUPERSEDED/ARCHIVED) with recorded automated
-  verdict PASS and no blocking findings. Advanced to TEST_WRITING.
-
-  TEST_WRITING (re-entry, PASS): test-writer found its own v1 outputs
-  (test_strategy, ac_test_matrix, test_generation_report) stale against
-  implementation_plan v2/task_breakdown v2/plan_review v2 (recorded
-  provenance was v1/v1/v1) and re-verified rather than regenerated: grep
-  count of test functions in the three story-owned files (60 integration /
-  42 unit-service / 12 unit-schemas) matches v1's reported figures exactly,
-  confirming zero drift, consistent with implementation_plan v2's own
-  Testing Strategy section ("unaffected by v2" / "no test rewrite needed"
-  for Architectural Change #12's runtime-role change). Bumped all three
-  artifacts to v2 for provenance only, with a Revision Note each. No
-  application or test code changed. PASS, no blocking issues. Advanced to
-  IMPLEMENTATION (re-entry - T1/T2 already PASS, T3 DDL already proven;
-  T4 (migration-manager: scripts/db/provision_runtime_role.sql +
-  tests/conftest.py) is next per task_breakdown v2, docs/catalog/
-  US-4.2-pipeline-status.md v2).
-
-  IMPLEMENTATION T4 (migration-manager, BLOCKED): scripts/db/provision_runtime_role.sql
-  written (idempotent CREATE ROLE app_runtime + dynamic GRANT/ALTER DEFAULT
-  PRIVILEGES via current_database(), no hard-coded db/role name) and
-  tests/conftest.py's _database fixture rewired to provision the role once per
-  session then serve all test requests (db_session, client, cleanup_users)
-  through an app_runtime-credentialed engine, matching implementation_plan v2
-  Architectural Change #12/app/main.py's intended real-deployment wiring.
-  Verified: idempotency (ran twice, zero errors); GRANT completeness/Risk 7
-  (full non-support integration suite, 261 tests, plus 26 of support's own
-  non-reply tests, pass unchanged against app_runtime). BLOCKED on the two
-  named re-verification tests plus a third previously-masked-passing one -
-  not a T4 defect: test_support_router.py's _seed_reply() helper
-  (test-writer/TEST_WRITING-owned, outside T4's scope) never sets
-  app.actor_kind before seeding internal-visibility replies, which
-  ticket_replies_write's WITH CHECK now correctly rejects under genuine RLS
-  enforcement (previously masked by the superuser bypass). No
-  IMPLEMENTATION.loop_back key fits a test-file fix, mirroring T3's own
-  BLOCKED precedent above. Full detail and the exact fix needed:
-  docs/catalog/US-4.2-pipeline-status.md v3, T4 section. Holds at
-  IMPLEMENTATION pending a human decision on how to route (likely
-  HUMAN_REDIRECTED to TEST_WRITING, mirroring the T3->ARCHITECTURE_PLANNING
-  precedent, then re-entering IMPLEMENTATION at T4 re-verification).
-
-  HUMAN_REDIRECTED (2026-09-05T22:30:00Z, decided_by: sbruhov@gmail.com):
-  resolves migration-manager's T4 BLOCKED verdict above. User directed routing
-  IMPLEMENTATION -> TEST_WRITING (no IMPLEMENTATION.loop_back key fits a
-  test-file fix, mirroring the T3->ARCHITECTURE_PLANNING precedent at
-  2026-09-05T18:30:00Z) so test-writer can add
-  `await db_session.execute(text("SET LOCAL app.actor_kind = 'agent'"))`
-  before each internal-visibility `_seed_reply()` call in
-  test_internal_reply_hidden_from_customer_context_by_rls_alone,
-  test_no_actor_kind_set_defaults_to_hiding_internal_reply, and
-  test_agent_context_sees_internal_reply_via_rls, then re-enter IMPLEMENTATION
-  at T4 re-verification once those tests pass. attempt := 2 (TEST_WRITING's
-  prior recorded attempt was 1, per history.jsonl 2026-09-05T21:30:00Z).
-
-  TEST_WRITING (HUMAN_REDIRECTED re-entry, attempt 2, PASS): fixed exactly
-  the three named tests in tests/integration/modules/support/test_support_
-  router.py per the user's direction - each now sets `SET LOCAL
-  app.actor_kind = 'agent'` before seeding its internal-visibility reply;
-  test_no_actor_kind_set_defaults_to_hiding_internal_reply additionally runs
-  `RESET app.actor_kind` immediately after seeding so the GUC does not
-  persist into its Act phase (SET LOCAL lasts for the rest of the
-  transaction, and this fixture's test body is one savepoint-based
-  transaction never rolled back mid-test - verified empirically, not
-  assumed). No application code, no other test, no other file changed.
-  Verified: the three tests pass individually and together; full support
-  suite 35 failed/29 passed (was 38/26 - exactly the three RLS tests moved
-  to passing, no other regression, remaining 35 are the expected pre-T5/T6
-  red state); full non-support integration suite 261/261 passed, unchanged;
-  ruff/mypy --strict clean on the changed file. test_strategy/ac_test_matrix/
-  test_generation_report bumped to v3 for provenance (no AC/row changes).
-  No blocking issues. Advanced to IMPLEMENTATION, implementation_substep :=
-  service-and-router-builder (T4 is now fully resolved - re-verification
-  proven; T5 next per task_breakdown v2).
-
-  IMPLEMENTATION T5/T6 (service-and-router-builder, BLOCKED): TicketReplyService
-  (create_reply/get_ticket_detail), module-owned exceptions
-  (TicketNotFoundError/InsufficientPermissionError/TicketClosedError/
-  TicketReplyRateLimitError), EmailSender's two new methods, config/.env.example
-  additions, app/main.py's runtime_database_url line, get_rls_session/
-  resolve_actor_kind/TicketReplyServiceDep, and both new routes
-  (POST .../replies, GET /support/tickets/{id}) all written and independently
-  verified: ruff/mypy --strict/lint-imports clean; OpenAPI render matches
-  openapi v3 exactly (path parameter renamed to {id} to match the contract
-  literally); 61/61 support unit tests, 63/64 support integration tests,
-  261/261 non-support integration tests pass; 93.90% combined coverage on
-  app/modules/support/ (service.py 95%, router.py 100%). BLOCKED on two
-  TEST_WRITING-owned test defects, not a T5/T6 code defect - see
-  docs/catalog/US-4.2-pipeline-status.md v5 T5/T6 section and this file's
-  blocking_issues above for full detail. Recommended resolution mirrors T4's
-  own HUMAN_REDIRECTED precedent exactly: route to TEST_WRITING to fix the
-  two named tests, then re-enter IMPLEMENTATION at T5/T6 re-verification.
-
-  HUMAN_REDIRECTED (2026-09-05T23:45:00Z, decided_by: sbruhov@gmail.com):
-  resolves service-and-router-builder's T5/T6 BLOCKED verdict above. User
-  directed routing IMPLEMENTATION -> TEST_WRITING (no IMPLEMENTATION.loop_back
-  key fits a test-file fix, mirroring the T3->ARCHITECTURE_PLANNING and
-  T4->TEST_WRITING precedents) with two specific fixes: (1) add
-  `SET LOCAL app.actor_kind = 'agent'` before the internal-visibility
-  `_seed_reply()` call in
-  test_get_ticket_detail_hides_internal_reply_from_customer_but_shows_to_agent;
-  (2) add an optional `created_at` parameter to `_seed_reply()` and update
-  test_get_ticket_detail_paginates_reply_thread_oldest_first to pass distinct
-  sequential `created_at` values for its three seeded replies. attempt := 3
-  (TEST_WRITING's prior recorded attempt was 2, per history.jsonl
-  2026-09-05T22:45:00Z).
-
-  TEST_WRITING (HUMAN_REDIRECTED re-entry, attempt 3, PASS): fixed exactly
-  the two named tests in tests/integration/modules/support/test_support_
-  router.py per the user's direction - (1) added SET LOCAL app.actor_kind =
-  'agent' before the internal-visibility _seed_reply() call in
-  test_get_ticket_detail_hides_internal_reply_from_customer_but_shows_to_agent
-  (no RESET needed - its Act phase runs through real HTTP requests, and
-  get_rls_session sets its own fresh app.actor_kind per request from the
-  caller's own token); (2) added an optional created_at parameter to
-  _seed_reply() and updated test_get_ticket_detail_paginates_reply_thread_
-  oldest_first to seed three replies with base_time + timedelta(seconds=i),
-  removing the tie on PostgreSQL's transaction-frozen now(). No application
-  code, no other test changed. Verified: both tests pass individually and
-  together, deterministic across 3 repeated runs; full support suite
-  (unit+integration) 125/125 passed, 93.90% coverage; full repository suite
-  688/688 passed; ruff/ruff format/mypy --strict/lint-imports all clean.
-  test_strategy/ac_test_matrix/test_generation_report left at v3 unchanged -
-  no upstream design artifact changed, only test code fixed a discovered
-  bug, tracked via git rather than a document version bump. T5 and T6 (see
-  docs/catalog/US-4.2-pipeline-status.md v6) are both now PASS -
-  IMPLEMENTATION's four sub-steps are all complete. Advanced to QUALITY_GATE.
-
-  QUALITY_GATE (PASS): gate-enforcer ran the full Definition-of-Done gate
-  fresh. pre-commit run --all-files clean (7/7 hooks; detect-secrets' first
-  run flagged only a pre-existing unstaged .secrets.baseline, staged with no
-  content change, re-run clean); mypy app tests clean (146 files); lint-imports
-  clean (6/6 contracts kept, zero pyproject.toml diff against HEAD - no config
-  drift); full repository suite 688/688 passed, 96.30% coverage (support/
-  service.py 95%, support/router.py 100%); migration upgrade->downgrade->
-  upgrade re-proven fresh (9132a68b73c8). Runtime rules: ORM containment clean
-  (no model/AsyncSession import in router.py, service.py returns only *Read
-  types); eager loading N/A (no relationship() anywhere in support/models.py -
-  documented module precedent); cache TTL present on every write
-  (TicketReplyRateLimitCache uses expire()); cross-module discipline clean (no
-  other-module router import in service.py); no banned idioms (Any/type:
-  ignore/cast/os.getenv-os.environ) found in app/; all four routes declare
-  response_model+status_code, both inbound schemas set extra="forbid", all
-  three *Read schemas declare from_attributes=True with explicit field lists,
-  .env.example updated (SUPPORT_QUEUE_EMAIL, RUNTIME_DATABASE_URL), OpenAPI
-  renders (28 paths). No blocking issues. docs/evidence/
-  US-4.2-implementation-report.md v1, docs/evidence/US-4.2-quality-gate-
-  report.md v1. Advanced to IMPLEMENTATION_VERIFICATION.
-
-  IMPLEMENTATION_VERIFICATION (PASS): implementation-verifier independently
-  re-verified AGENTS.md 6.5/6.6/6.7 and the 5 security-case matrix by reading
-  the migration file and every touched app/modules/support/ source file
-  directly, not inferred from gate-enforcer's summary. 6.5: both add_column
-  calls, the create_foreign_key call, and both CREATE POLICY statements in
-  9132a68b73c8_add_ticket_replies.py are each individually guarded via
-  sa.inspect(op.get_bind())/pg_policies; downgrade() performs real inverse
-  operations for every object created. 6.6: ORM containment clean
-  (create_reply/get_ticket_detail return ReplyRead/TicketDetailRead only,
-  router.py has no models/AsyncSession import); eager loading N/A (no
-  relationship() in models.py, confirmed by direct read); cache TTL present
-  (TicketReplyRateLimitCache.record_and_check calls expire()); cross-module
-  discipline clean (service.py's only cross-module collaborator is
-  UserServiceProtocol, injected as the concrete UserService via
-  dependencies.py, never a router). 6.7: response_model+status_code on both
-  new routes; CreateReplyRequest sets extra="forbid" with no privilege field;
-  .env.example diff confirmed (SUPPORT_QUEUE_EMAIL, RUNTIME_DATABASE_URL); no
-  sensitive field in ReplyRead/TicketDetailRead. 5: both new routes
-  (POST .../replies, GET .../{id}) have no-token/expired/malformed/revoked
-  tests plus a cited insufficient-permissions case (visibility=internal 403
-  for POST; tickets:read-lacking-agent 404 for GET) - the ownership-404 branch
-  is a separately documented design decision (API_DESIGN Open Question #2),
-  not a gap. No Critical/Major findings. docs/verification/
-  US-4.2-implementation-verification.md v1. Advanced to SECURITY_REVIEW.
-
-  SECURITY_REVIEW (PASS): security-reviewer audited every file this story
-  touches or adds against AGENTS.md section 7's six non-negotiable rules.
-  Password storage/reversible-encryption rows: N/A (no credential field
-  anywhere in this story). No token/hash/PII in logs: Pass (only static log
-  messages; the one interpolated value, support_queue_email in
-  send_ticket_reply_queue_notification, is a configured internal address,
-  not a token/hash/PII field). extra="forbid" + privilege exclusion: Pass
-  (CreateReplyRequest excludes id/ticket_id/author_id/created_at).
-  Parameterized SQL only: Pass (all ORM queries bound; get_rls_session's two
-  text() calls bind actor_kind/actor_id; migration's op.execute() calls are
-  compile-time constants; provision_runtime_role.sql's one dynamic value
-  uses PostgreSQL's %I-quoting format() against current_database(), not
-  string interpolation of user input). Uniform auth-failure response: Pass
-  (TicketNotFoundError returns the same 404 for unknown/not-owned/wrong-
-  actor-kind, never confirming ticket existence to an unauthorized caller).
-  No Critical or Major findings. Two Low advisory findings carried/recorded
-  (US-4.1's pre-existing sequentially-guessable ticket_number; the new
-  scripts/db/provision_runtime_role.sql's placeholder role password, which
-  matches the same must-override-in-deployment discipline already used for
-  Settings.jwt_secret_key/mfa_secret_encryption_key). docs/reviews/security/
-  US-4.2-security-review.md v1. Advanced to RECONCILIATION.
-
-  RECONCILIATION (PASS): reconciliation-reviewer confirmed every AC (TR-AC1-
-  TR-AC7) has a matrix row in docs/tests/US-4.2-ac-test-matrix.md v3, that
-  every named test function exists at its stated path (grep count 60/42/12
-  matches the matrix's recorded totals), and read each test's assertions to
-  confirm they check the AC's actual stated behavior rather than mere
-  proximity - spot-checked directly: the two OD-5/OD-8 resolved-ticket tests
-  (agent reply keeps status "resolved"; customer reply moves it to
-  "waiting_on_support" - the correct divergent outcomes, not a copy-paste),
-  the three RLS tests (one deliberately bypasses the repository/service with
-  a raw SELECT through a customer-context connection, per the NFR's own
-  "application filter deliberately disabled" requirement), the four
-  attachment-binding/BR-016-indistinguishability tests, the full FR-4
-  401/404 auth-failure matrix, and FR-7's validation boundaries. Compared
-  shipped app/modules/support/service.py::create_reply's status/
-  first_response_at table (lines 504-518) and exceptions.py's five
-  type_slugs against the approved spec directly: no drift found. The two
-  gaps already recorded in ac-test-matrix v3's own "Gaps Not Covered"
-  section (API_DESIGN OQ-2's exact scope-split combination, not reachable
-  under the shipped role seed; migration reversibility, owned by
-  migration-manager) are pre-existing documented limitations, not
-  reconciliation defects. No blocking issues. docs/reviews/reconciliation/
-  US-4.2-reconciliation.md v1, docs/reconciliation/US-4.2-traceability.md
-  v1. Advanced to HUMAN_PR_APPROVAL - awaiting /so:approve or /so:reject.
-
-  HUMAN_PR_APPROVAL: human approved via /so:approve at 2026-09-06T02:00:00Z
-  (decided_by: sbruhov@gmail.com), no comment. Required artifacts
-  implementation_verification v1, security_review v1, reconciliation v1,
-  traceability v1 all current (status DRAFT, not SUPERSEDED/ARCHIVED) with
-  recorded automated verdict PASS and no blocking findings. Advanced to
-  PR_PREPARATION.
-
-  PR_PREPARATION (PASS): pr-preparer confirmed all four required upstream
-  verdicts directly from their reports (gate-enforcer PASS via
-  docs/evidence/US-4.2-quality-gate-report.md v1; implementation-verifier PASS
-  v1; security-reviewer PASS v1; reconciliation-reviewer PASS v1), drafted the
-  PR title ("feat: ticket replies with RLS-enforced internal visibility
-  (US-4.2)"), summary, and a test-plan checklist built from
-  docs/reconciliation/US-4.2-traceability.md v1 covering all seven ACs plus
-  the quality-gate suite/coverage/migration-cycle results. Confirmed
-  .env.example current (SUPPORT_QUEUE_EMAIL, RUNTIME_DATABASE_URL both
-  present). Commit-hygiene review traced every changed file to this story's
-  implementation_plan v2 (including Architectural Change #12's wider
-  footprint) except one: .gitignore's docs/knowledge addition has no
-  traceable origin in this story's artifacts - recorded as a non-blocking
-  finding for the human to confirm before merge, not a gate failure. No
-  blocking issues. docs/pr/US-4.2-pr-summary.md v1. Advanced to
-  READY_FOR_PR - awaiting /so:approve or /so:reject.
-
-  READY_FOR_PR: human approved via /so:approve at 2026-09-06T02:30:00Z
-  (decided_by: sbruhov@gmail.com), comment: "Leaving docs/knowledge in
-  .gitignore as acknowledged. PR summary approved." Required artifact
-  pr_summary v1 confirmed current (status DRAFT, not SUPERSEDED/ARCHIVED)
-  with recorded automated verdict PASS and no blocking findings; the
-  .gitignore/docs/knowledge non-blocking finding is explicitly acknowledged
-  by this approval, not a gate defect. Per AGENTS.md section 1, this gate
-  records human sign-off only - no Pull Request was created, pushed, or
-  merged by the harness. Advanced to COMPLETED - a human must still confirm
-  the Pull Request is merged before /so:approve can advance to ARCHIVED.
-
-  COMPLETED (/so:next, continue-flow step 3): pending_human_gate was still
-  null on entry to this stage (the prior READY_FOR_PR->COMPLETED transition
-  recorded the advance but did not populate the gate). Built it now per
-  state-schema.md - required artifact pr_summary v1 (docs/pr/US-4.2-pr-
-  summary.md) confirmed current, status DRAFT; automated_verdict PASS
-  carried from PR_PREPARATION (no automated stage runs between READY_FOR_PR
-  and COMPLETED). No skill invoked, no stage transition - status set to
-  WAITING_FOR_HUMAN. Awaiting /so:approve (confirming the PR is merged) or
-  /so:reject.
-
-  COMPLETED (RETRACTED, 2026-09-06T03:30:00Z, decided_by: sbruhov@gmail.com):
-  the /so:approve recorded above at 2026-09-06T03:15:00Z advanced current_stage
-  to ARCHIVED on the human's stated confirmation that the Pull Request was
-  merged. That claim was checked against the actual repository state
-  (git log/branch -a, gh pr list) and found false: no feat/us-4.2-* branch or
-  Pull Request exists on the remote, and origin/main's tip (9948e96) is still
-  US-4.1's archive commit. The COMPLETED gate's `meaning` in stage-map.yaml is
-  "A human confirms the Pull Request has been merged" - that precondition does
-  not hold, so the approval is invalid. Reverted current_stage to COMPLETED,
-  status to WAITING_FOR_HUMAN, pending_human_gate rebuilt as PENDING
-  (unchanged from its original READY_FOR_PR->COMPLETED population), archived_at
-  cleared. The corresponding history.jsonl HUMAN_APPROVED event is left
-  in place per the append-only rule; this event supersedes it. Awaiting an
-  actual merged PR before /so:approve can validly re-run on this gate.
-
-  COMPLETED (/so:approve, 2026-09-06T04:00:00Z, decided_by: sbruhov@gmail.com,
-  no comment): required artifact pr_summary v1 (docs/pr/US-4.2-pr-summary.md)
-  reconfirmed current (status DRAFT, not SUPERSEDED/ARCHIVED), automated_verdict
-  PASS, no blocking findings. Per the COMPLETED gate's approval_precondition,
-  the merge claim was independently verified against the actual repository
-  (not taken on the approver's word): `git fetch origin` then
-  `git merge-base --is-ancestor 34a0e7d origin/main` returned true, and
-  `gh pr view 17 --json state,mergedAt,baseRefName,headRefName` confirmed
-  state=MERGED, mergedAt=2026-09-05T00:16:27Z, base=main,
-  head=feat/us-4.2-ticket-replies. origin/main's tip (44587b7) is that PR's
-  merge commit. This supersedes the 03:30 RETRACTED entry above - the
-  underlying condition it flagged (no merged PR found) no longer holds.
-  Advanced current_stage COMPLETED -> ARCHIVED per stage-map.yaml on_approve;
-  pending_human_gate cleared; status set to ARCHIVED. No Pull Request was
-  created, pushed, or merged by the harness in this step - PR #17 was already
-  merged prior to this approval. Archive-mode consolidation (delivery_summary,
-  project_state) is /so:archive's responsibility, not yet run.
-
-  ARCHIVED (/so:archive, 2026-09-06T05:00:00Z): re-verified PR #17's merge
-  independently (git fetch + merge-base --is-ancestor + gh pr view - same
-  result as the 04:00 approval). archived_at moved from 04:00 (the mechanical
-  COMPLETED->ARCHIVED transition per stage-map.yaml on_approve) to 05:00 (this
-  consolidation run actually completing), mirroring US-4.1's precedent where
-  the two coincided in one session. Note also: archive-flow.md's own stated
-  precondition ("current_stage == COMPLETED") was already stale on entry to
-  this run - current_stage was already ARCHIVED per the 04:00 mechanical
-  transition above, exactly the same two-step pattern US-4.1's history.jsonl
-  (254-255) recorded; treated as the document being stale, not the state
-  being wrong. Wrote docs/evidence/US-4.2-delivery-summary.md (v1); set
-  docs/catalog/stories.yaml US-4.2 state to ARCHIVED (delivered_by.pr: 17);
-  backfilled 22 US-4.2 story-level artifacts' front-matter status from DRAFT
-  straight to ARCHIVED (story and story_catalog carry no front matter;
-  delivery_summary was created ARCHIVED directly, never DRAFT; pipeline_status
-  stays DRAFT, preserved as a historical cross-story artifact) - no skill this
-  story ever wrote APPROVED, same gap US-4.1's archive run flagged; updated
-  docs/knowledge/project-state.md (Delivered Capabilities row, two new Known
-  Constraints for the app_runtime role and BR-017's unbuilt auto-close half,
-  Archived Stories row) - applied directly per archive-flow step 5. Proposed
-  (NOT applied) one docs/product/business-rules.md entry (ticket reply status
-  transitions) and one docs/ARCHITECTURE.md entry (dedicated non-superuser
-  app_runtime runtime-DB-role pattern) for human review. No GitHub sync
-  (source local_only). Cleared active-story.yaml (active_story: null,
-  status: ARCHIVED). Five pre-existing uncommitted working-tree edits
-  (AGENTS.md, docs/workflow/stage-map.yaml, .claude/commands/so/approve.md,
-  plus this file and history.jsonl) are outside this skill's ownership and
-  were left untouched. Known limitations (API_DESIGN OQ-2's untested scope
-  combination, BR-017's unbuilt auto-close half, app_runtime provisioning
-  requirement, ticket_number guessability) all carried in the delivery
-  summary. Recommends /so:start US-4.3 next (sole remaining EPIC-4 BACKLOG
-  story).
+  READY_FOR_PR HUMAN_APPROVED (sbruhov@gmail.com, 2026-09-07T10:00:00Z, no
+  comment): pr_summary v1 confirmed current (status DRAFT, not
+  SUPERSEDED/ARCHIVED) with automated_verdict PASS and no blocking findings.
+  Advanced to COMPLETED per stage-map.yaml READY_FOR_PR.on_approve -
+  completed_at set (stage reached, per state-schema.md - not yet
+  human-confirmed-merged). COMPLETED is itself a human_gate requiring its
+  own approval_precondition check (PR merged into default branch, verified
+  against the repository, not a stated word) before /so:approve records it;
+  pending_human_gate rebuilt (required_artifacts: pr_summary v1), status
+  WAITING_FOR_HUMAN. Awaiting /so:approve or /so:reject on COMPLETED.

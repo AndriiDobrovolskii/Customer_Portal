@@ -1,12 +1,18 @@
 import base64
 import uuid
+from collections.abc import Sequence
 from datetime import datetime
 from typing import NamedTuple
 
-from sqlalchemy import delete, or_, select, update
+from sqlalchemy import delete, func, literal, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.modules.support.models import Attachment, Ticket, TicketReply
+
+# US-4.3 Decision 7: the single shared constant both transition_status's
+# window guard and auto_close_resolved_past_window's predicate build their
+# WHERE fragment from - never two independently hardcoded `7`s.
+_RESOLUTION_WINDOW_DAYS = 7
 
 
 class TicketListPage(NamedTuple):
@@ -107,6 +113,74 @@ class TicketRepository:
             update(Ticket).where(Ticket.id == ticket_id).values(**values).returning(Ticket)
         )
         return result.scalar_one_or_none()
+
+    async def transition_status(
+        self,
+        ticket_id: uuid.UUID,
+        *,
+        expected_statuses: Sequence[str],
+        new_status: str,
+        resolved_at: datetime | None = None,
+        clear_resolved_at: bool = False,
+        resolution_note: str | None = None,
+        closed_at: datetime | None = None,
+        closed_by: uuid.UUID | None = None,
+        require_resolved_within_window: bool = False,
+    ) -> Ticket | None:
+        """US-4.3 Decision 2: conditional `UPDATE ... WHERE id = :id AND
+        status IN (:expected_statuses)` (optionally `AND resolved_at >=
+        now() - interval '7 days'`, DR-2's inclusive window guard). Returns
+        `None` on zero rows affected: ticket not found, status was not one
+        of `expected_statuses` (FR-6/FR-9), or - when the window guard is
+        set - the 7-day window had already elapsed. The caller cannot
+        distinguish these from row count alone and must have already
+        confirmed the ticket exists via `get_by_id` earlier in the same
+        request, per US-4.3-api-design.md's check order.
+        """
+        values: dict[str, object] = {"status": new_status}
+        if resolved_at is not None:
+            values["resolved_at"] = resolved_at
+        if clear_resolved_at:
+            values["resolved_at"] = None
+        if resolution_note is not None:
+            values["resolution_note"] = resolution_note
+        if closed_at is not None:
+            values["closed_at"] = closed_at
+        if closed_by is not None:
+            values["closed_by"] = closed_by
+
+        conditions = [Ticket.id == ticket_id, Ticket.status.in_(expected_statuses)]
+        if require_resolved_within_window:
+            conditions.append(
+                Ticket.resolved_at
+                >= func.now() - func.make_interval(0, 0, 0, literal(_RESOLUTION_WINDOW_DAYS))
+            )
+
+        result = await self._session.execute(
+            update(Ticket).where(*conditions).values(**values).returning(Ticket)
+        )
+        return result.scalar_one_or_none()
+
+    async def auto_close_resolved_past_window(
+        self, *, closed_at: datetime, closed_by: uuid.UUID
+    ) -> list[uuid.UUID]:
+        """US-4.3 Decision 8 (FR-3): single `UPDATE ... WHERE status =
+        'resolved' AND resolved_at < now() - interval '7 days' ...
+        RETURNING id`, served by `ix_tickets_resolved_at_pending_autoclose`.
+        Idempotent and safe to re-run (NFR): a ticket already closed by a
+        prior run, or reopened since, no longer matches the `WHERE` clause.
+        """
+        result = await self._session.execute(
+            update(Ticket)
+            .where(
+                Ticket.status == "resolved",
+                Ticket.resolved_at
+                < func.now() - func.make_interval(0, 0, 0, literal(_RESOLUTION_WINDOW_DAYS)),
+            )
+            .values(status="closed", closed_at=closed_at, closed_by=closed_by)
+            .returning(Ticket.id)
+        )
+        return list(result.scalars().all())
 
     async def commit(self) -> None:
         await self._session.commit()

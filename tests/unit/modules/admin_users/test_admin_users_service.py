@@ -282,6 +282,11 @@ class FakeEmailSender:
     async def send_ticket_reply_queue_notification(self, *, ticket_number: str) -> None:
         raise NotImplementedError
 
+    async def send_ticket_resolved_email(
+        self, *, to: str, ticket_number: str, resolution_note: str
+    ) -> None:
+        raise NotImplementedError
+
 
 def _make_service(
     repository: FakeAdminUserRepository | None = None,

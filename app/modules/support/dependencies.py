@@ -101,6 +101,7 @@ async def get_rls_session(
 def get_ticket_reply_service(
     session: Annotated[AsyncSession, Depends(get_rls_session)],
     valkey_client: Annotated[Redis, Depends(get_valkey_client)],
+    audit_service: AuditLogServiceDep,
     user_service: UserServiceDep,
     email_sender: Annotated[EmailSender, Depends(get_email_sender)],
 ) -> TicketReplyService:
@@ -113,6 +114,7 @@ def get_ticket_reply_service(
         reply_repository,
         attachment_repository,
         rate_limit_cache,
+        audit_service,
         email_sender,
         user_service,
     )

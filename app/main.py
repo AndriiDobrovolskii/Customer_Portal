@@ -70,6 +70,14 @@ async def problem_error_handler(request: Request, exc: ProblemError) -> JSONResp
             {"field": error.field, "code": error.code, "message": error.message}
             for error in exc.errors
         ]
+    # US-4.3 FR-6: InvalidStateTransitionError carries `allowed_events`, a
+    # field no other ProblemError subclass has — rendered generically here
+    # (getattr, not an import of the support module) rather than adding a
+    # base-class field only one subclass uses, mirroring how `errors` above
+    # is already the base class's own generic per-subclass extension point.
+    allowed_events = getattr(exc, "allowed_events", None)
+    if allowed_events is not None:
+        content["allowed_events"] = allowed_events
     return JSONResponse(
         status_code=exc.status,
         media_type="application/problem+json",

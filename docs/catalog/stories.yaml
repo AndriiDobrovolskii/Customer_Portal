@@ -177,5 +177,5 @@ stories:
     path: docs/stories/US-4.3-ticket-resolution.md
     epic: EPIC-4
     title: Ticket Resolution
-    state: BACKLOG
-    note: "Draft specification predates the current codebase; depends on US-4.2."
+    state: IN_PROGRESS
+    note: "Draft specification predates the current codebase; depends on US-4.2. Activated via /so:start 2026-09-06."

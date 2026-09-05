@@ -5,8 +5,8 @@
 
 version: 1
 
-active_story: null
-story_path: null
+active_story: US-4.3
+story_path: docs/stories/US-4.3-ticket-resolution.md
 
 source:
   type: local_only
@@ -14,13 +14,13 @@ source:
   issue_number: null
   issue_url: null
 
-activated_at: null
-activated_by: null
+activated_at: "2026-09-06T06:00:00Z"
+activated_by: sbruhov@gmail.com
 
-status: ARCHIVED
+status: IN_PROGRESS
 
 note: >
-  US-4.2 (Ticket Replies) archived 2026-09-06 via /so:archive (PR #17,
-  merged 2026-09-05T00:16:27Z). See docs/evidence/US-4.2-delivery-summary.md.
-  No Story is currently active. `/so:start US-4.3` is the recommended next
-  activation (EPIC-4's remaining BACKLOG story).
+  Activated via /so:start US-4.3, the sole remaining EPIC-4 BACKLOG story
+  (depends on US-4.2, archived). Story file pre-exists locally at the
+  registry path; catalog carries no per-story GitHub issue reference, so
+  source is local_only, consistent with US-4.1/US-4.2 activation precedent.
