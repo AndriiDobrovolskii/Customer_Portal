@@ -2,7 +2,7 @@
 artifact_type: database_design
 story: US-4.3
 version: 3
-status: DRAFT
+status: ARCHIVED
 created_at: "2026-09-06T12:00:00Z"
 updated_at: "2026-09-06T17:00:00Z"
 produced_by: db-designer

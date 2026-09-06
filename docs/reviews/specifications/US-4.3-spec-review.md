@@ -2,7 +2,7 @@
 artifact_type: specification_review
 story: US-4.3
 version: 3
-status: DRAFT
+status: ARCHIVED
 created_at: "2026-09-06T08:00:00Z"
 updated_at: "2026-09-06T10:00:00Z"
 produced_by: story-spec-reviewer

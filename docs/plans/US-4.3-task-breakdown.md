@@ -2,7 +2,7 @@
 artifact_type: task_breakdown
 story: US-4.3
 version: 1
-status: DRAFT
+status: ARCHIVED
 created_at: "2026-09-06T21:00:00Z"
 updated_at: "2026-09-06T21:00:00Z"
 produced_by: implementation-planner

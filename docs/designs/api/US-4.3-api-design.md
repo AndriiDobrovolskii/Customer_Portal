@@ -2,7 +2,7 @@
 artifact_type: api_design
 story: US-4.3
 version: 2
-status: DRAFT
+status: ARCHIVED
 created_at: "2026-09-06T11:00:00Z"
 updated_at: "2026-09-06T14:00:00Z"
 produced_by: openapi-designer

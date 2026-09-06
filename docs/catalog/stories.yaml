@@ -177,5 +177,10 @@ stories:
     path: docs/stories/US-4.3-ticket-resolution.md
     epic: EPIC-4
     title: Ticket Resolution
-    state: IN_PROGRESS
-    note: "Draft specification predates the current codebase; depends on US-4.2. Activated via /so:start 2026-09-06."
+    state: ARCHIVED
+    delivered_by: { pr: 19, note: "Merged 2026-09-05T20:56:54Z (8972687)" }
+    note: >
+      Delivered through the full pipeline 2026-09-06/07 and archived
+      2026-09-07. See docs/evidence/US-4.3-delivery-summary.md. BR-017's
+      auto-close half now shipped, completing the reopen/auto-close pair
+      US-4.2 started.

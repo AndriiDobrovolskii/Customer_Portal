@@ -2,7 +2,7 @@
 artifact_type: plan_review
 story: US-4.3
 version: 1
-status: DRAFT
+status: ARCHIVED
 created_at: "2026-09-06T21:30:00Z"
 updated_at: "2026-09-06T21:30:00Z"
 produced_by: plan-reviewer

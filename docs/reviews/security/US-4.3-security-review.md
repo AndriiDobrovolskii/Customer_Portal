@@ -2,7 +2,7 @@
 artifact_type: security_review
 story: US-4.3
 version: 1
-status: DRAFT
+status: ARCHIVED
 created_at: "2026-09-07T07:00:00Z"
 updated_at: "2026-09-07T07:00:00Z"
 produced_by: security-reviewer

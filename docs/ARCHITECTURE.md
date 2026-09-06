@@ -402,6 +402,18 @@ cache = await get_cache()
   degrade to the database path, not to a 500 — except for security-critical reads (token
   denylist), which MUST fail closed and reject the request.
 
+**Runtime database role (RLS-load-bearing, established by US-4.2).** The application's own
+request-serving DB connection runs through a dedicated non-superuser `app_runtime` role
+(`NOSUPERUSER NOBYPASSRLS`, provisioned by `scripts/db/provision_runtime_role.sql`, idempotent,
+dynamic `current_database()`-scoped `GRANT`s), wired via `app/main.py`'s `lifespan` and
+`Settings.runtime_database_url` — separate from the superuser role (`Settings.database_url`)
+Alembic migrations still use. This is load-bearing: PostgreSQL's superuser role unconditionally
+bypasses Row-Level Security regardless of `FORCE ROW LEVEL SECURITY`, so the single
+previously-configured role could not have enforced US-4.2's internal-reply RLS guarantee (BR-015).
+**Any future story that adds a table/column reachable through the app's normal request path must
+confirm `provision_runtime_role.sql`'s blanket `GRANT`s (and its `ALTER DEFAULT PRIVILEGES`) still
+cover it** — provable only by a full-suite regression run under `app_runtime`, not by inspection.
+
 ### 3.7 Transaction Boundary
 
 The **service layer** owns the transaction. Repositories issue statements and may `flush()`;
@@ -896,6 +908,21 @@ deterministic and therefore droppable by name in `downgrade()`.
 
 See `docs/decisions/US-3.3-open-decisions.md` (OD-6, OD-16, OD-17) for the full reasoning and
 what was tried and rejected first.
+
+**Precedent established by US-4.3 (ticket resolution, 2026-09-07):**
+
+* **Race-safe status-transition pattern (conditional `UPDATE`, no row lock).** `/resolve`,
+  `/close`, `/reopen`, and the reply-driven reopen all call a single
+  `TicketRepository.transition_status(...)` method whose SQL `UPDATE` embeds the required source
+  status (and, for the two reopen paths, the 7-day window) directly in its `WHERE` clause and
+  returns the updated row via `RETURNING` — never a separate `SELECT` followed by an `UPDATE`. Two
+  concurrent requests racing to transition the same ticket resolve to exactly one `200` and one
+  `409` (the loser's `WHERE` clause matches zero rows, `RETURNING` yields nothing) with no explicit
+  row lock (`SELECT ... FOR UPDATE`) and no advisory lock needed — unlike US-3.3's hash-chain
+  trigger, this pattern has no "read stale state, then write" window to close, since the
+  status/window check and the write are the same statement. Any future story adding another
+  ticket-status-mutating endpoint should reuse `transition_status` rather than introducing a second
+  read-then-write path.
 
 ---
 
