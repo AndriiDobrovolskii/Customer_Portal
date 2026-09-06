@@ -1,13 +1,17 @@
 #!/usr/bin/env python
 
 import json
+import os
 import sys
 from pathlib import Path
 from datetime import datetime
 
 payload = json.load(sys.stdin)
 
-log_file = Path("docs/hooks/tool-usage.jsonl")
+project_dir = os.environ.get("CLAUDE_PROJECT_DIR")
+project_root = Path(project_dir) if project_dir else Path(__file__).resolve().parent.parent.parent
+
+log_file = project_root / "docs" / "hooks" / "tool-usage.jsonl"
 log_file.parent.mkdir(parents=True, exist_ok=True)
 
 entry = {
