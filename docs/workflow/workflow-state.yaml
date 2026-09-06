@@ -15,11 +15,11 @@ version: 1
 story: US-4.3
 workflow: story-delivery
 
-current_stage: COMPLETED
-previous_stage: READY_FOR_PR
-last_completed_stage: READY_FOR_PR
+current_stage: ARCHIVED
+previous_stage: COMPLETED
+last_completed_stage: COMPLETED
 
-status: WAITING_FOR_HUMAN
+status: ARCHIVED
 attempt: 1
 
 last_invoked_skill: pr-preparer
@@ -34,19 +34,7 @@ last_artifacts:
 
 implementation_substep: null
 
-pending_human_gate:
-  stage: COMPLETED
-  status: PENDING
-  required_artifacts:
-    - type: pr_summary
-      path: docs/pr/US-4.3-pr-summary.md
-      version: 1
-  automated_verdict: PASS
-  blocking_findings: []
-  requested_at: "2026-09-07T10:00:00Z"
-  decided_at: null
-  decided_by: null
-  comment: null
+pending_human_gate: null
 
 blocking_issues: []
 
@@ -75,20 +63,27 @@ non_blocking_findings:
   - "SECURITY_REVIEW (PASS, v1): audited against AGENTS.md section 7's six non-negotiable rules across every file this story touches - password/credential storage rows N/A (no credential field introduced); no token/hash/PII in any new or touched log call (service.py's new logger.exception for the resolved-email failure path, email.py's new send_ticket_resolved_email logger.info, and the auto-close script's count-only logger.info are all static or non-sensitive); all three new inbound schemas (Resolve/Close/ReopenTicketRequest) set extra=\"forbid\" with no privilege field client-writable - every transition field is computed server-side, never taken from the request body; all SQL (transition_status, auto_close_resolved_past_window, the migration's check-constraint/index DDL) uses SQLAlchemy bound constructs, no string interpolation; auth-failure responses are uniform - TicketNotFoundError (404) covers both unknown-ticket and wrong-customer cases identically across all three new service methods, and /close and /reopen's shared requester/agent success path is confirmed IDOR-preventing by IMPLEMENTATION_VERIFICATION's own auth-matrix testing. One Low advisory finding carried forward unchanged from US-4.1/US-4.2 (ticket_number sequentially guessable) - not re-triggered by this story's UUID-keyed routes. Wrote docs/reviews/security/US-4.3-security-review.md (v1). Advanced to RECONCILIATION per stage-map.yaml SECURITY_REVIEW.next."
   - "RECONCILIATION (PASS, v1): every AC in specification.md v2 (TC-AC1 through TC-AC9) plus FR-5's source-uncovered direct-/reopen path confirmed to have exactly one ac_test_matrix v2 row, an existing test function (47 named functions independently grepped, one match each), and a test body (directly read, not sampled by name) asserting the AC's actual stated behavior - status code, persisted field, audit actor/event, and the relevant negative case (e.g. 'ticket unchanged', 'first agent's note intact', 'no audit write'). Direct comparison of service.py/schemas.py/exceptions.py/scripts/auto_close_resolved_tickets.py against the approved spec/api-design/db-design found no drift: _ALLOWED_EVENTS_BY_STATUS, OD-4's inclusive/strict boundary split, OD-5/OD-6/OD-7's eligibility and audit-actor rules, resolution_note's 5000-char bound, and every problem+json type slug all match exactly. The two approved deviations from the source story's literal text (OD-1's waiting_on_support target instead of a literal 'reopened' status; DESIGN_REVIEW v2 DR-4's added audit write on FR-4) were confirmed as human/review-traced corrections, not undocumented drift. Wrote docs/reviews/reconciliation/US-4.3-reconciliation.md and docs/reconciliation/US-4.3-traceability.md (both v1). Advanced to HUMAN_PR_APPROVAL per stage-map.yaml RECONCILIATION.next."
   - "PR_PREPARATION (PASS, v1): all four required gates (gate-enforcer, implementation-verifier, security-reviewer, reconciliation-reviewer) reconfirmed Pass by reading their actual reports, not a verbal summary. No stale_reconciliation condition - the entire US-4.3 implementation and every upstream artifact exist only in the uncommitted working tree, which is exactly the state RECONCILIATION v1 already reviewed; nothing moved afterward. .env.example confirmed N/A (no new setting; git diff on app/core/config.py is empty). One commit-hygiene item flagged, not silently resolved: docs/docs/hooks/tool-usage.jsonl is an untracked stray session-hook log unrelated to this story, recommended for exclusion from the eventual commit. Wrote docs/pr/US-4.3-pr-summary.md (v1) with title, summary, AC-by-AC test-plan checklist, risk/rollback notes, and the explicit not-yet-pushed statement. Advanced to READY_FOR_PR per stage-map.yaml PR_PREPARATION.next - a human gate; pending_human_gate built, status WAITING_FOR_HUMAN."
+  - "STATE-WRITE CORRECTION (informational, not blocking, self-caught): the COMPLETED HUMAN_APPROVED /so:approve pass at 2026-09-07T11:00:00Z wrote current_stage: ARCHIVED and archived_at directly, misreading stage-map.yaml COMPLETED.on_approve: ARCHIVED as a transition /so:approve itself performs. archive-flow.md steps 1 and 9-10 (read while preparing this /so:archive run) show that transition belongs to archive mode alone. Corrected at 2026-09-07T11:30:00Z: current_stage reverted to COMPLETED, pending_human_gate restored as the decided APPROVED record, archived_at cleared to null pending archive mode's own completion. The corresponding history.jsonl event (11:00:00Z, to_stage: ARCHIVED) is left as written (append-only) - its HUMAN_APPROVED substance and merge verification are accurate; only that one field was premature. Same class as the AUDIT-TRAIL ANOMALY finding above."
 
 started_at: "2026-09-06T06:15:00Z"
-updated_at: "2026-09-07T10:00:00Z"
+updated_at: "2026-09-07T12:00:00Z"
 completed_at: "2026-09-07T10:00:00Z"
-archived_at: null
+archived_at: "2026-09-07T12:00:00Z"
 
 note: >
-  READY_FOR_PR HUMAN_APPROVED (sbruhov@gmail.com, 2026-09-07T10:00:00Z, no
-  comment): pr_summary v1 confirmed current (status DRAFT, not
-  SUPERSEDED/ARCHIVED) with automated_verdict PASS and no blocking findings.
-  Advanced to COMPLETED per stage-map.yaml READY_FOR_PR.on_approve -
-  completed_at set (stage reached, per state-schema.md - not yet
-  human-confirmed-merged). COMPLETED is itself a human_gate requiring its
-  own approval_precondition check (PR merged into default branch, verified
-  against the repository, not a stated word) before /so:approve records it;
-  pending_human_gate rebuilt (required_artifacts: pr_summary v1), status
-  WAITING_FOR_HUMAN. Awaiting /so:approve or /so:reject on COMPLETED.
+  ARCHIVED (story-orchestrator, archive mode, 2026-09-07T12:00:00Z): ran with
+  current_stage == COMPLETED confirmed (after the STATE-WRITE CORRECTION
+  above) and reconciliation/traceability/pr_summary current per the
+  US-4.1/US-4.2 DRAFT-verdict-recorded-elsewhere precedent. Wrote
+  docs/evidence/US-4.3-delivery-summary.md (v1, full artifact inventory, 22
+  artifacts backfilled DRAFT->ARCHIVED front matter, pipeline_status left
+  untouched). docs/catalog/stories.yaml US-4.3 set to ARCHIVED (pr: 19).
+  docs/knowledge/project-state.md updated (Delivered Capabilities,
+  Known Constraints, Archived Stories). business-rules.md BR-018 and one
+  ARCHITECTURE.md addition (race-safe transition_status pattern) proposed
+  only, in the delivery summary - not applied, pending human review. No
+  GitHub sync (active-story.yaml source.type: local_only). active-story.yaml
+  cleared (active_story: null, status: ARCHIVED). docs/docs/hooks/
+  tool-usage.jsonl remains untracked in the working tree - a stray session
+  hook log, not a Story artifact; left in place, not deleted. No BACKLOG
+  story remains in EPIC-4; no unambiguous next Story id recommended.

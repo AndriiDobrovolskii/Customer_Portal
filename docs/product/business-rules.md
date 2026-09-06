@@ -133,3 +133,19 @@ A ticket-creation or reply request is rejected with a uniform "not owned" error 
 A resolved ticket auto-closes after 7 days with no further reply; a customer reply within that window reopens it instead. Both the auto-close job and the reopen-on-reply guard read the same 7-day constant so the boundary instant belongs to exactly one outcome.
 
 **Source:** `docs/specifications/US-4.3-spec.md` FR-3, FR-4, NFR.
+
+---
+
+## BR-018
+
+An agent's public reply to an `open` or `waiting_on_support` ticket advances it to `waiting_on_customer` and stamps `first_response_at` on the first such reply only (later replies do not restamp it); an agent's public reply to a `resolved` ticket leaves it `resolved` unchanged (no side effect). A customer's reply to a ticket in `waiting_on_customer` advances it to `waiting_on_support`; a customer's reply to a `resolved` ticket reopens it to `waiting_on_support` (the reply-side half of BR-017's reopen behavior — the complementary auto-close job shipped in US-4.3). A reply to a `closed` ticket is rejected outright (`409 ticket-closed`); no reply is persisted. Internal notes (agent-only, `visibility="internal"`) never trigger a status transition. Visibility defaults to `public` for both actor kinds when omitted; only an agent may set `internal` (a customer attempting to is rejected `403`, no reply persisted).
+
+**Source:** `docs/specifications/US-4.2-spec.md` FR-1, FR-2, FR-5, FR-6.
+
+---
+
+## BR-019
+
+An agent with `tickets:write` resolves an open/waiting ticket, requiring a non-empty `resolution_note` (max 5000 chars); the requester is emailed and a `ticket_resolved` audit entry is written. The requester or an agent may close a ticket from any non-`closed` state; the audit actor is `self` when the requester closes and `agent:{id}` when an agent closes, and `closed_by` records who/what closed it (a reserved system-actor sentinel value when the auto-close job does). A resolved ticket may be reopened directly (by requester or agent) within the same 7-day window BR-017 describes, transitioning it to `waiting_on_support` and clearing `resolved_at`; this transition and the reply-driven reopen (BR-018) both write a `ticket_reopened` audit entry. Every illegal transition (e.g. any action on an already-`closed` ticket) returns `409` with an `allowed_events` field naming the transitions actually available from the ticket's current state. Acting on another customer's ticket returns a uniform `404` across all three endpoints (IDOR prevention, same pattern as ticket creation/replies).
+
+**Source:** `docs/specifications/US-4.3-spec.md` FR-1 through FR-9.

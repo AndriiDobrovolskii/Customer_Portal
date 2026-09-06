@@ -148,7 +148,15 @@ domain, tracked separately.
   or otherwise act on them — noted here only so they aren't mistaken for
   stray/unclassified state on a future run.
 
-## Proposed Knowledge Updates (NOT applied — pending human review)
+## Proposed Knowledge Updates
+
+**Applied 2026-09-07T13:00:00Z**, on explicit human approval given during the
+US-4.3 archive-mode session (this proposal had sat unapplied since this
+story's own archive run on 2026-09-06). The ticket-reply-status-transitions
+rule below is now `docs/product/business-rules.md` BR-018; the `app_runtime`
+runtime-DB-role write-up is now `docs/ARCHITECTURE.md` §3.6.
+`docs/knowledge/project-state.md` was updated to point at them instead of at
+this section.
 
 ### `docs/product/business-rules.md`
 
