@@ -1,6 +1,6 @@
 ---
 name: gate-enforcer
-description: Runs and reports the full post-generation verification gate for a story's implementation — pre-commit run --all-files, mypy app tests, lint-imports, pytest --cov=app --cov-report=term-missing --cov-fail-under=85 where runnable locally — plus the runtime rules no tool checks (AGENTS.md §6.6): ORM objects never reaching a router, every relationship eager-loaded appropriately, every cache write carrying a TTL, cross-module calls going service→service (never service→another module's router), and no typing.Any/# type: ignore/os.getenv outside core.config. Use after schema-builder/data-layer-builder/service-and-router-builder/migration-manager have produced code and it's time to confirm the Definition of Done before commit or PR ("run the gate for US-xxx," "is this ready to commit," "check this passes CI," "verify the definition of done"). Never proposes bypassing a failing check — no --no-verify, SKIP=<hook>, narrowed mypy scope, coverage excludes, or disabled import-linter contracts; a failing check is reported and the skill stops there, per AGENTS.md §7.9 naming "reporting a check as passing without running it" the most serious violation available. Does not fix failures itself and does not perform a substantive architecture/security code review (that belongs to other pipeline stages) — this is the mechanical-gate-plus-runtime-rules check only, run before commit/PR, not a replacement for them.
+description: Runs and reports the full post-generation verification gate for a story's implementation. For a `track: backend` Story (default) — pre-commit run --all-files, mypy app tests, lint-imports, pytest --cov=app --cov-report=term-missing --cov-fail-under=85 where runnable locally, plus the runtime rules no tool checks (AGENTS.md §6.6): ORM objects never reaching a router, every relationship eager-loaded appropriately, every cache write carrying a TTL, cross-module calls going service→service, no typing.Any/# type: ignore/os.getenv outside core.config. For a `track: frontend` Story — npm run lint/format:check/type-check/test:coverage inside frontend/, plus this stack's own runtime rules (AGENTS.md §3's Frontend subsection): no screen/component importing api/ or calling fetch/axios directly, no access/refresh token in localStorage/sessionStorage. Use after the story's execution skill(s) have produced code and it's time to confirm the Definition of Done before commit or PR ("run the gate for US-xxx," "is this ready to commit," "check this passes CI," "verify the definition of done"). Never proposes bypassing a failing check — no --no-verify, SKIP=<hook>, narrowed mypy/eslint scope, coverage excludes, or disabled import-linter contracts; a failing check is reported and the skill stops there, per AGENTS.md §7.9 naming "reporting a check as passing without running it" the most serious violation available. Does not fix failures itself and does not perform a substantive architecture/security code review (that belongs to other pipeline stages) — this is the mechanical-gate-plus-runtime-rules check only, run before commit/PR, not a replacement for them.
 ---
 
 # Gate Enforcer
@@ -9,27 +9,40 @@ description: Runs and reports the full post-generation verification gate for a s
 
 Run this codebase's actual quality gate and report exactly what happened — never what should happen, never what would probably happen. AGENTS.md §7.9 names "reporting a check as passing without running it" as the single most serious violation available to an agent, because it silently disables every other rule in the file. This skill exists to make that failure mode structurally impossible: every checklist item below requires captured, quoted command output.
 
+**Track first.** Read the Story's `track` field (`docs/stories/<StoryId>.md` front matter;
+absent means `backend`) before running anything — it picks which command set below
+applies. The two tracks share nothing at the command level; do not run backend commands
+against `frontend/` or vice versa.
+
 ## Operational Contract
 
 ```
-Precondition: schema-builder, data-layer-builder, service-and-router-builder, and migration-manager (where applicable) have produced code for this story; git status/git diff shows real changes.
-Input Artifacts: the story's changed files; pyproject.toml ([tool.importlinter]/[tool.mypy]/[tool.ruff]/[tool.coverage] sections); .pre-commit-config.yaml; AGENTS.md §6 and §7.
+Precondition (track: backend): schema-builder, data-layer-builder, service-and-router-builder, and migration-manager (where applicable) have produced code for this story; git status/git diff shows real changes.
+Precondition (track: frontend): frontend-builder has produced code for this story; git status/git diff shows real changes under frontend/.
+Input Artifacts (backend): the story's changed files; pyproject.toml ([tool.importlinter]/[tool.mypy]/[tool.ruff]/[tool.coverage] sections); .pre-commit-config.yaml; AGENTS.md §6 and §7.
+Input Artifacts (frontend): frontend/package.json, frontend/eslint config, frontend/tsconfig.json; .pre-commit-config.yaml's frontend hooks (files: ^frontend/); AGENTS.md §2/§3/§6's Frontend subsections and §7.
 Output Artifacts: a chat report only (no docs/ file — docs/verification/ belongs to implementation-verifier, not this skill).
 ```
 
 ## Required Context
 
-Read, in order:
+**`track: backend`** — read, in order:
 
 1. `AGENTS.md` §6 (Definition of Done, all 7 items) and §7 (Prohibited Actions, especially §7.9's bypass list).
 2. `pyproject.toml`'s `[tool.importlinter]`, `[tool.mypy]`, `[tool.ruff]`, `[tool.coverage]` sections — read as the *actual current* thresholds/contracts, never assumed from memory (this project currently sets `--cov-fail-under=85`, `mypy strict` with `exclude = ["migrations/"]`, and 5 import-linter contracts — but re-read the file each run, since these can change).
 3. `.pre-commit-config.yaml` — confirm which hooks actually run locally (`ruff`, `ruff-format`, `mypy`, `lint-imports`, `unit-tests`, `no-mock-in-integration-tests`, `detect-secrets`, in this repo).
 
+**`track: frontend`** — read, in order:
+
+1. `AGENTS.md` §6's Frontend subsection and §7.
+2. `frontend/package.json` — confirm the four gate scripts (`lint`, `format:check`, `type-check`, `test:coverage`) exist with exactly those names (`AGENTS.md` §2's Frontend subsection); if any is missing or renamed, that is itself a finding, not something to route around by inventing an equivalent command.
+3. `.pre-commit-config.yaml` — confirm the frontend hooks exist, scoped `files: ^frontend/`.
+
 ## Preconditions
 
-Implementation code already exists for the story (`git status`/`git diff` shows something). If nothing changed, say so rather than running an empty gate.
+Implementation code already exists for the story (`git status`/`git diff` shows something, under `app/`+`tests/` for backend or `frontend/` for frontend). If nothing changed, say so rather than running an empty gate.
 
-## Workflow
+## Workflow — `track: backend`
 
 ### Part A — mechanical (always paste real captured output; never assert a result without running it)
 
@@ -56,6 +69,31 @@ Report the failing check verbatim, stop, and explicitly refuse to propose any of
 
 **PASS** only if every Part A check runnable locally actually passed and every Part B item is confirmed-compliant or explicitly N/A, with nothing not-run-locally asserted as passing. Otherwise **FAIL** with the specific unmet list, or a labeled "local gate green, CI-only checks pending" state for the documented CI-only items (integration tests with containers, the coverage threshold if it needs those tests, the Alembic cycle if not already run).
 
+## Workflow — `track: frontend`
+
+### Part A′ — mechanical (always paste real captured output; never assert a result without running it)
+
+1. `cd frontend && npm run lint` — capture full output. An ESLint auto-fix (if the script runs `--fix`) modifying files is expected, same spirit as Ruff's — `git add -u` and re-run; a real remaining finding is a stop.
+2. `npm run format:check` — capture full output; Prettier drift is a stop (this script is check-only, never `--write`, so it never silently fixes).
+3. `npm run type-check` (`tsc --noEmit`) — capture full output; must target the whole `frontend/` project, never a single file.
+4. `npm run test:coverage` (Vitest) — CI-only per `AGENTS.md` §6's Frontend subsection; if `node_modules` isn't installed here, report explicitly "not run here — CI is the authority," never a silent skip or a claimed pass. If it does run, report the coverage percentage against the 85% floor `AGENTS.md` §5's Frontend subsection sets. If a script from step 2 of Required Context is missing/renamed, stop and report that as the finding — do not invent a substitute command.
+
+### Part B′ — runtime rules (`AGENTS.md` §3's Frontend subsection, not machine-checkable without a frontend `lint-imports` equivalent, which does not exist yet)
+
+5. **API-boundary containment** — grep changed `screens/`/`components/` files for `fetch(`/`axios` — must be zero; every network call goes through `hooks/`→`api/`. Grep changed `api/` files for `from "react"` or a TanStack Query import — must be zero.
+6. **Session-token handling** — grep the diff for `localStorage`/`sessionStorage` next to anything token/credential-shaped — must be zero (access token in memory only; refresh token never touched by client code at all, per `AGENTS.md` §3).
+7. **Store discipline** — confirm the auth store's actions are called from `hooks/`' `onSuccess` callbacks, not from inside a screen/component body.
+8. **Banned idioms** — grep the diff for `any` (TypeScript), a bare `// eslint-disable` with no comment explaining a genuine false positive, and `console.log`/`console.error` of anything token/password/recovery-code-shaped.
+9. **Contract & security spot-check** — no sensitive value (password, access token, recovery code) reaches a rendered error message verbatim from a caught exception; `frontend/package.json`'s four gate scripts are present and unrenamed.
+
+### On any failure (frontend)
+
+Same refusal list as backend, translated: never propose `eslint-disable` blanket-added to silence a real finding, a narrowed `tsc` scope, a coverage exclude, or skipping a script. Name `AGENTS.md` §7.9 as the reason, same as backend.
+
+### Verdict (frontend)
+
+**PASS** only if all four Part A′ scripts actually ran and passed, and every Part B′ item is confirmed-compliant or explicitly N/A, with nothing not-run-locally asserted as passing. Otherwise **FAIL** with the specific unmet list.
+
 ## Constraints
 
 - Never propose or apply a gate bypass of any kind (see On any failure).
@@ -64,6 +102,7 @@ Report the failing check verbatim, stop, and explicitly refuse to propose any of
 
 ## Verification Checklist
 
+**`track: backend`**:
 - [ ] `pre-commit run --all-files` output captured and quoted.
 - [ ] `mypy app tests` output captured and quoted.
 - [ ] `lint-imports` output captured and quoted; no new `ignore_imports`/`exhaustive=false`.
@@ -77,9 +116,21 @@ Report the failing check verbatim, stop, and explicitly refuse to propose any of
 - [ ] §6.7 contract/security spot-check completed.
 - [ ] No bypass was proposed for any failing check.
 
+**`track: frontend`**:
+- [ ] `npm run lint` output captured and quoted.
+- [ ] `npm run format:check` output captured and quoted.
+- [ ] `npm run type-check` output captured and quoted.
+- [ ] `npm run test:coverage` output captured and quoted, with the coverage % against the 85% floor.
+- [ ] API-boundary containment (no `fetch`/`axios` in screens/components; no React/TanStack Query import in `api/`) checked with evidence.
+- [ ] Session-token handling (`localStorage`/`sessionStorage` grep) checked with evidence.
+- [ ] Store-discipline (mutations from `hooks/` `onSuccess`, not from component bodies) checked with evidence.
+- [ ] Banned-idiom grep run and results reported.
+- [ ] Contract/security spot-check completed.
+- [ ] No bypass was proposed for any failing check.
+
 ## Outputs
 
-- A chat report structured like `assets/report-template.md`, covering every item above with its result (Pass/Fail/N/A) and evidence.
+- A chat report structured like `assets/report-template.md`, covering every item above (for the Story's track) with its result (Pass/Fail/N/A) and evidence.
 
 ## Completion Criteria
 

@@ -83,12 +83,32 @@ Do not consult a table in this file. For the current stage:
 2. If `stages.<stage>.type` is `human_gate` — invoke no skill. Follow the
    human-gate branch of continue mode.
 3. If `type` is `terminal` — only archive mode reaches it.
-4. If `type` is `automated_skill` — invoke `stages.<stage>.skill`.
-5. If `type` is `composite_skill` — invoke `stages.<stage>.skills` in the order
-   given, which is fixed by `AGENTS.md` §3 layering and refined per story by
-   `task_breakdown`. Record each sub-step in `pipeline_status` and set
-   `implementation_substep` in `workflow-state.yaml`. Only `IMPLEMENTATION` is
-   composite today.
+4. If `type` is `automated_skill` — dispatch `stages.<stage>.skill` to an
+   isolated sub-agent (see "Dispatching a stage skill" below), never invoke it
+   inline.
+5. If `type` is `composite_skill` — resolve the Story's `track` (its front
+   matter in `docs/stories/<StoryId>.md`, per `artifact-schema.md`; absent
+   means `backend`), then dispatch each skill in
+   `stages.<stage>.skills_by_track[track]`, in the order given, as its OWN
+   separate sub-agent. The backend list's order is fixed by `AGENTS.md` §3
+   layering and refined per story by `task_breakdown`; the frontend list today
+   has one skill, so ordering is moot until it doesn't. Record each sub-step
+   in `pipeline_status` and set `implementation_substep` in
+   `workflow-state.yaml`. Only `IMPLEMENTATION` is composite today.
+
+## Dispatching a stage skill
+
+Every stage skill in `stage-map.yaml` reads its inputs from files
+(`docs/specifications`, `docs/designs/...`, etc.), never from conversation
+history — each is self-contained by design. This skill exploits that: instead
+of loading a stage skill's instructions inline (which pulls its full working
+transcript into this session), dispatch its work to a fresh sub-agent (`Agent`
+tool, `subagent_type: general-purpose`) and read back only its Result Envelope.
+This keeps the orchestrator's own context growing by one short report per
+stage rather than by every stage's full transcript — see `continue-flow.md`
+step 6 for the exact dispatch-prompt contract. Adopted 2026-09-07 after a
+manual pilot dispatch of `CLARIFICATION` for `US-5.1` confirmed the isolation
+holds in practice.
 
 Some stages are `optional: true` with an `optional_when` condition. A skill may
 return `NOT_APPLICABLE` only when that condition holds and it records why.
@@ -155,7 +175,8 @@ stage responsible. Do not route.
 - [ ] The stage list came from `stage-map.yaml` this run, not from memory.
 - [ ] `workflow-state.yaml` and `active-story.yaml` agree, or the mismatch was
       flagged and nothing advanced.
-- [ ] The stage's owning skill was actually invoked and its Result Envelope
+- [ ] The stage's owning skill was actually dispatched (as an isolated
+      sub-agent, per "Dispatching a stage skill") and its Result Envelope
       actually read.
 - [ ] Any `loop_back` key named by a skill exists under that stage in the map.
 - [ ] Exactly one `history.jsonl` event was appended per transition.

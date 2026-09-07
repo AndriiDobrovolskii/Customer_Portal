@@ -35,8 +35,11 @@ Invoke no skill. Depending on `pending_human_gate.status`:
 - `PENDING` → re-report the gate (required artifacts with versions, the
   automated verdict, blocking findings, and the exact `/so:approve` |
   `/so:reject` command) and stop.
-- `APPROVED` → advance `current_stage` to the gate's `on_approve`, clear
-  `pending_human_gate`, set `status`, append history, stop.
+- `APPROVED` → bump `status: APPROVED` in the front matter of every artifact in
+  `pending_human_gate.required_artifacts` (`artifact-lifecycle.md`'s `DRAFT` →
+  `APPROVED` rule — a front-matter field update, not content editing); advance
+  `current_stage` to the gate's `on_approve`, clear `pending_human_gate`, set
+  `status`, append history, stop.
 - `REJECTED` → route to the gate's `on_reject`, clear `pending_human_gate`,
   append history, stop.
 
@@ -62,22 +65,56 @@ valid output already exists — right `story`, `status` not `SUPERSEDED` or
 do not regenerate. Validate it and go to step 7 using its recorded verdict.
 Otherwise continue.
 
-### 6. Invoke the one responsible skill
+### 6. Invoke the one responsible skill — via an isolated sub-agent dispatch
 
 `skill := stages.<current>.skill`. Confirm it exists under `.claude/skills/`.
-Invoke it with the Story id, the canonical stage, and the resolved input paths.
-Wait. Read the Result Envelope, then inspect the produced artifacts at their
-registry paths — never assume success from the fact that the skill ran without
-erroring.
+Resolve the Story id and every input path this stage needs, per `stage-map.yaml`
+`inputs` and `artifact-paths.yaml`.
+
+Dispatch the skill's actual work to a fresh, isolated sub-agent (the `Agent`
+tool, `subagent_type: general-purpose`) rather than invoking it inline via the
+`Skill` tool. Every stage skill in `stage-map.yaml` already reads its inputs
+from files, never from conversation history, so it is self-contained by
+construction — safe to run with none of the orchestrator's own context.
+Dispatching this way keeps the orchestrator session growing only by one short
+Result Envelope per stage, instead of by each stage's full working transcript
+(confirmed on a manual `CLARIFICATION` dispatch for `US-5.1`, 2026-09-07: the
+sub-agent used ~105K tokens and 26 tool calls of its own; the orchestrator
+absorbed none of it).
+
+The dispatch prompt MUST:
+- name the exact skill file to follow (`.claude/skills/<skill>/SKILL.md`) and
+  instruct the sub-agent to follow it exactly, including its own required
+  reading order;
+- name the Story id and every resolved input path explicitly — never let the
+  sub-agent guess or re-derive them;
+- state which artifacts it does NOT own and must not write
+  (`docs/workflow/workflow-state.yaml`, `docs/workflow/active-story.yaml`,
+  `docs/workflow/history.jsonl` — `story-orchestrator` only), and that it must
+  never create commits, branches, or Pull Requests;
+- require the response to be ONLY the exact Result Envelope block plus a short
+  (~1 paragraph) summary — explicitly forbid pasting full artifact contents or
+  its own working transcript back to the orchestrator.
+
+Wait for the sub-agent to finish. Read the Result Envelope it returns, then
+independently inspect the artifacts it claims to have produced at their
+registry paths — never assume success from the sub-agent's own narration, and
+never accept a report that omits the Result Envelope block; re-dispatch or
+hold `BLOCKED` if it does.
 
 Two stages are special:
 
 - **`BACKLOG_SYNC`** — respect its `run_policy`. Do not auto-run it on every
   continue.
-- **`IMPLEMENTATION`** — `type: composite_skill`. Invoke its `skills` in the
-  order fixed by `AGENTS.md` §3 layering and refined by `task_breakdown`:
-  `schema-builder` → `data-layer-builder` → `migration-manager` →
-  `service-and-router-builder`. Record each sub-step in `pipeline_status`
+- **`IMPLEMENTATION`** — `type: composite_skill`. Resolve the Story's `track`
+  (`docs/stories/<StoryId>.md` front matter; absent means `backend`) and
+  dispatch each skill in `stages.IMPLEMENTATION.skills_by_track[track]` as its
+  OWN separate sub-agent dispatch — for `backend`, that's `schema-builder`,
+  `data-layer-builder`, `migration-manager`, `service-and-router-builder` in
+  the order fixed by `AGENTS.md` §3 layering and refined by `task_breakdown`;
+  for `frontend`, that's `frontend-builder`. Never one dispatch for the whole
+  composite stage; that would reintroduce the same context growth this change
+  exists to avoid. Record each sub-step in `pipeline_status`
   (`docs/catalog/{story_id}-pipeline-status.md`) and set
   `implementation_substep` in `workflow-state.yaml`. The stage completes only
   when every sub-step is done; a sub-step failure routes via the stage's

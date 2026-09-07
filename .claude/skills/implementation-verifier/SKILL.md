@@ -9,6 +9,16 @@ description: Performs the human-judgment half of AGENTS.md §6's Definition of D
 
 `gate-enforcer` proves the mechanical half of the Definition of Done — commands that either pass or fail. This skill proves the half AGENTS.md §6.6 itself marks "not machine-checkable": judgment calls that require actually reading the code, not running a linter against it. Trust `gate-enforcer`'s green result; don't reproduce it.
 
+**Track first.** Read the Story's `track` field (`docs/stories/<StoryId>.md` front matter;
+absent means `backend`). For `track: frontend`, §6.5 (migrations) and most of §6.6 (ORM
+containment, eager loading, cache TTL) are **N/A by construction** — this stack has no
+ORM, migration, or cache. Independently re-verify `gate-enforcer`'s frontend Part B′
+findings instead (API-boundary containment, session-token handling, store discipline —
+`AGENTS.md` §3's Frontend subsection), with the same file:line-cited rigor this skill
+already applies to the backend items below, and confirm §6.7's frontend analogue from
+`AGENTS.md` §6's Frontend subsection (no sensitive value reaching the browser console or a
+rendered error).
+
 ## Operational Contract
 
 ```
