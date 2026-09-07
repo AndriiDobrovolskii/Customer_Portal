@@ -184,3 +184,24 @@ stories:
       2026-09-07. See docs/evidence/US-4.3-delivery-summary.md. BR-017's
       auto-close half now shipped, completing the reopen/auto-close pair
       US-4.2 started.
+
+  # --- EPIC-5: Frontend ------------------------------------------------------
+  - id: US-5.1
+    retired_id: null
+    slug: authentication-session-management
+    path: docs/stories/US-5.1-authentication-session-management.md
+    epic: EPIC-5
+    title: Authentication & Session Management (Frontend)
+    state: IN_PROGRESS
+    source:
+      type: github_issue
+      repository: AndriiDobrovolskii/Customer_Portal
+      issue_number: 22
+      issue_url: https://github.com/AndriiDobrovolskii/Customer_Portal/issues/22
+    delivered_by: { pr: null, note: null }
+    note: >
+      First Story of EPIC-5 (product frontend, React+Vite+TS). Also the pilot
+      Story for the new sub-agent-dispatch continue-flow.md mechanism -
+      continue-flow.md/SKILL.md are not yet rewritten; this Story's early
+      stages run under the current inline-invocation mechanism until that
+      change is proven manually and applied.
