@@ -46,6 +46,33 @@ alembic revision --autogenerate -m "snake_case_description"
 alembic upgrade head && alembic downgrade -1 && alembic upgrade head   # proves idempotency
 ```
 
+### Frontend (`frontend/`)
+
+Added for `track: frontend` Stories (§9). A second, independent stack living in its own
+top-level directory — it consumes the backend's HTTP contract, never its code.
+
+| Area | Choice | Constraint |
+| --- | --- | --- |
+| Language | TypeScript, strict mode | No `any`; same spirit as §7.1's mypy ban. |
+| UI | React `18`, Vite | Function components + hooks only. |
+| Server state | TanStack Query | All backend HTTP traffic goes through it, never a bare `fetch`/`axios` call in a component. |
+| Forms | React Hook Form | Client-side validation before any request fires. |
+| Tests | Vitest, React Testing Library, MSW | MSW intercepts at the network layer — no server process, no live backend. |
+| Gates | ESLint, Prettier, `tsc --noEmit`, Vitest coverage | Zero findings, zero type errors, coverage floor per §5. |
+
+```bash
+cd frontend
+npm run lint             # ESLint
+npm run format:check     # Prettier, check-only
+npm run type-check       # tsc --noEmit
+npm run test:coverage    # Vitest, coverage gate
+```
+
+These four script names are load-bearing: `frontend-builder` (the execution skill) must
+define exactly these in `frontend/package.json`, and `gate-enforcer`'s frontend track
+invokes them by name. Renaming one on either side without the other breaks the gate with
+"script not found," which §7.9 forbids working around.
+
 ## 3. Architectural Constraints
 
 **Layers:** `router` → `dependencies` → `service` → `repository | cache gateway` → `models | schemas`. Imports flow downward only; cross-module calls go **service → service**.
@@ -69,6 +96,33 @@ alembic upgrade head && alembic downgrade -1 && alembic upgrade head   # proves 
 **Transactions.** The service owns the transaction — repositories may `flush()`, never `commit()`. One commit per business operation. Cache writes happen **after** the commit.
 
 **Async I/O.** Every I/O call is `await`ed on an async client — DB, Valkey, HTTP, files. Blocking work (`PasswordHasher.hash`/`.verify`) goes through `anyio.to_thread.run_sync`. Forbidden in any request path: `requests`, `time.sleep`, `psycopg2`, sync Valkey clients, `session.query()`.
+
+### Frontend (`frontend/`)
+
+**Layers:** `screens` (and their `forms`) → `hooks` → `api-client` → the backend, over HTTP
+only. A parallel `auth store` holds client-side session state (access token in memory,
+current user) and is consumed by `hooks` and `route guards`, never the reverse. Imports
+flow downward only, same principle as the backend's §3 table, adapted to this stack:
+
+| Layer | May import | Must not import | Returns |
+| --- | --- | --- | --- |
+| `screens/`, `components/` | hooks, store (read-only), shared UI components | `api/` directly, `fetch`/`axios` directly | JSX only |
+| `hooks/` | `api/`, store, TanStack Query | React components/JSX | typed query/mutation results |
+| `store/` (auth state) | stdlib, its own types | `api/`, hooks, React components | plain state + actions |
+| `api/` | `fetch`, shared request/response types | React, TanStack Query, store | typed DTOs only |
+| `routes/` (guards + layout) | store (to check auth), layout components | `api/` directly | JSX / redirects |
+
+A screen calling `fetch` directly, or an `api/` function importing a React hook, is the
+frontend equivalent of a router importing `sqlalchemy` — a layering violation, not a style
+nit. There is no `lint-imports`-equivalent contract enforcing this mechanically yet; until
+one exists, it is on the generating skill and reviewer to check it by reading the diff.
+
+**Session handling.** The access token lives in memory only (a store, never
+`localStorage`/`sessionStorage`) — the backend does not intend it for durable client
+storage. The refresh token is never read, stored, or touched by client code: the backend
+sets it as an `httpOnly`+`secure`+`samesite=strict` cookie, and the browser attaches it
+automatically to `POST /auth/refresh`. Silent refresh means calling that endpoint and
+letting the cookie do its job, never parsing or persisting it client-side.
 
 ## 4. Code Conventions
 
@@ -110,6 +164,33 @@ Assert status code **and** body shape **and** persisted state. Every protected r
 
 **AAA structure** with `# Arrange` / `# Act` / `# Assert` comments, one logical assertion target, no `if`/`for` in a test body — use `@pytest.mark.parametrize`. **Determinism:** no `sleep`, no retry-until-pass, no unseeded randomness; time-dependent logic uses an injected clock or `freezegun`. A row's `created_at` (or any `server_default=func.now()` column) is frozen to the same value for every insert made within one transaction — a test asserting order over such a column MUST pass explicit, distinct values (a seeder parameter or a per-row offset), never rely on insertion order alone, or ties will silently resolve by primary-key (often a random UUID) instead. **Coverage:** 85% minimum via `--cov-fail-under=85`, 90%+ for `service.py` and `router.py`. Coverage is a floor, not a goal; excluding files to reach it is a §7 violation.
 
+### Frontend (`frontend/`)
+
+`frontend/src/` mirrors the same discipline: a new `screens/LoginScreen.tsx` requires
+`frontend/src/screens/LoginScreen.test.tsx`, an `api/authApi.ts` function requires an MSW
+handler covering both its success and its documented error shapes.
+
+**Unit** — a hook or a pure function in isolation (Vitest), no network, no DOM beyond what
+React Testing Library needs to render a component. Prefer a real MSW handler over a
+hand-mocked `fetch`, for the same reason the backend prefers fakes to `MagicMock`: a
+handler that actually matches the request shape catches more than a stub that returns
+whatever it's told to.
+
+**Integration** — React Testing Library renders the real component tree (screen + hooks +
+store), MSW intercepts the network calls with handlers shaped like the actual backend
+contract (status code, body, and error envelope — including the two `/auth/register`
+responses that do NOT follow RFC 7807, per US-5.1's own OD-4). This is the frontend's
+equivalent of testing against real Postgres/Valkey: the fake is the *network boundary*,
+never the component's own internal state or the store.
+
+**No mocking the unit under test.** Vitest's `vi.mock()` on the component/hook/store
+actually being tested defeats the test the same way `MagicMock` on a backend service
+would — mock the network (MSW), not the code under test.
+
+Async assertions use React Testing Library's `waitFor`/`findBy*` — never a fixed `setTimeout`
+or a retry loop. **Coverage:** same 85% floor as the backend, via `vitest --coverage`
+(`test:coverage`), enforced the same way — a floor, not a goal.
+
 ## 6. Definition of Done
 
 Do not report a task complete until all seven are verified with real command output:
@@ -125,6 +206,22 @@ Do not report a task complete until all seven are verified with real command out
 **Where checks run.** pre-commit: Ruff, mypy, `lint-imports`, secret scan, integration-mock grep, and unit tests if they stay under 10 s (otherwise `pre-push`). CI only: integration tests with containers, the coverage threshold, the Alembic cycle. **CI is the authority** — every local hook is re-run there without `--fix`. Total pre-commit wall time must stay under ~15 s; a slow gate is more dangerous than none, because agents start routing around it.
 
 **When a hook fails.** An auto-fix rejection is normal and expected: Ruff modified files, so pre-commit failed by design — `git add -u` and commit again rather than concluding the toolchain is broken. Read the actual stderr and fix the named cause; do not regenerate unrelated code hoping the error moves. A hook you disagree with is a blocker to escalate with verbatim error text, never a hook to disable.
+
+### Frontend (`frontend/`)
+
+The same seven items apply, read through the frontend stack instead of the backend one:
+gate green means `npm run lint`, `npm run format:check`, `npm run type-check`, and
+`npm run test:coverage` (§2) all pass; "contracts intact" has no `lint-imports` analogue
+yet, so it means the layer table in §3's Frontend subsection was checked by reading the
+diff; migrations and the runtime-rules item (§6.6) are N/A — there is no ORM, cache, or
+migration in this stack; contract & security means no sensitive value
+(password, access token, recovery code) ever reaches the browser console or a committed
+file, and the access/refresh-token handling in §3 was followed exactly.
+
+**Where checks run**, same split as the backend: `lint`, `format:check`, and `type-check`
+run in `.pre-commit-config.yaml` (scoped `files: ^frontend/`, so a Python-only commit never
+pays for them). `test:coverage` is CI-only, same as the backend's coverage threshold — CI
+is the authority.
 
 ## 7. Prohibited Actions
 

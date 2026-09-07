@@ -42,6 +42,37 @@ repos:
         entry: '\b(unittest\.mock|mock\.patch|patch\.object|AsyncMock|MagicMock|monkeypatch\.setattr)\b'
         files: ^tests/integration/.*\.py$
 
+      # Frontend gate (AGENTS.md §2/§6 Frontend subsections). Scoped to frontend/ so
+      # these never run — and never need `npm install` — on a Python-only commit.
+      # Script names are load-bearing: they must match frontend/package.json exactly
+      # (see frontend-builder's SKILL.md and gate-enforcer's frontend track).
+      - id: frontend-lint
+        name: eslint (frontend)
+        entry: npm --prefix frontend run lint
+        language: system
+        pass_filenames: false
+        files: ^frontend/.*\.(ts|tsx)$
+
+      - id: frontend-format
+        name: prettier --check (frontend)
+        entry: npm --prefix frontend run format:check
+        language: system
+        pass_filenames: false
+        files: ^frontend/.*\.(ts|tsx|css|json)$
+
+      - id: frontend-type-check
+        name: tsc --noEmit (frontend)
+        entry: npm --prefix frontend run type-check
+        language: system
+        pass_filenames: false
+        files: ^frontend/.*\.(ts|tsx)$
+
+      - id: frontend-vi-mock-in-integration-tests
+        name: no vi.mock() of the unit under test in frontend integration tests
+        language: pygrep
+        entry: '\bvi\.mock\('
+        files: ^frontend/src/screens/.*\.test\.tsx$
+
   - repo: https://github.com/Yelp/detect-secrets
     rev: v1.5.0
     hooks:

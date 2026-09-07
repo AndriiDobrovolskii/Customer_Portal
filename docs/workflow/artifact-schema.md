@@ -77,6 +77,7 @@ epic: EPIC-3
 title: View Audit Information
 slug: view-audit-information
 priority: HIGH
+track: backend                              # backend | frontend — see below
 source:
   type: github_issue | local_only
   repository: <owner/repo or null>
@@ -87,6 +88,16 @@ source:
 ```
 
 Story lifecycle status lives in `docs/catalog/stories.yaml`, never in this file.
+
+**`track`**: `backend` (default — omit the field entirely on a story with no `track:` line
+and every skill treats it as `backend`, so no existing Story needs retrofitting) or
+`frontend`. This is the **sole** signal the harness uses to decide whether `IMPLEMENTATION`
+(`stage-map.yaml`) dispatches the four backend builder skills or `frontend-builder`, and
+whether `planner`/`implementation-planner`/`plan-reviewer`/`test-writer`/`gate-enforcer`
+apply `AGENTS.md`'s backend or frontend subsections. Set once, by whoever authors the
+Story (a human, or `us-clarifier` if the Story is silent on it and the spec makes the
+answer obvious — never inferred downstream from "no `api_design`/`database_design`",
+since a backend-only Story that changes neither can look identical to a frontend one).
 
 ## Non-Markdown / generated artifacts
 

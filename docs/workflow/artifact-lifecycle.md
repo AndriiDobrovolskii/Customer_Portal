@@ -33,6 +33,14 @@ Rules:
   downstream artifacts recorded consuming.
 - Stale input (a review or evidence artifact generated from a now-`SUPERSEDED`
   upstream) blocks progression until the dependent stage is re-run.
+- `DRAFT` → `APPROVED`: owned by `story-orchestrator`, not the producing or
+  reviewing skill (neither may write an artifact it doesn't own — `artifact-paths.yaml`).
+  When a `human_gate`'s `/so:approve` is recorded, the orchestrator bumps
+  `status: APPROVED` in the front matter of every artifact named in that gate's
+  `required_artifacts` (a front-matter field update, not content editing — the same
+  narrow write the orchestrator already makes to `workflow-state.yaml`). Until that
+  gate fires, an artifact stays `DRAFT` even after its owning review stage returns
+  `PASS` — a review verdict is not the same enum as artifact status (see `IMPLEMENTATION_VERIFICATION`/`RECONCILIATION`, which check artifact currency and would otherwise see a `PASS`-reviewed artifact still marked `DRAFT`).
 
 ---
 

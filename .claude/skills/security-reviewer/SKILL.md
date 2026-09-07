@@ -9,6 +9,19 @@ description: Audits implemented code against this project's non-negotiable secur
 
 Audit implemented code against the specific, binding security invariants AGENTS.md §7 states for this codebase — not a general-purpose security sweep. These rules are non-negotiable by AGENTS.md's own wording, so any violation forces a Fail; there is no "Pass with Issues" for a §7 violation.
 
+**Track first.** Read the Story's `track` field (`docs/stories/<StoryId>.md` front matter;
+absent means `backend`). For `track: frontend`, checks 1, 2, 4, and 5 below are **N/A by
+construction** — no password hashing, no credential-at-rest storage, no Pydantic schema,
+no SQL exists in this stack. In their place, verify the frontend-specific invariants
+`AGENTS.md` §3's Frontend subsection states: the access token never persisted outside
+memory, the refresh token never read/stored/logged by client code at all (not "hashed
+before logging" — never present client-side to begin with), and no password/token/
+recovery-code value reaches a `console.*` call or a rendered error message. Check 6
+(uniform auth-failure response) still applies in a narrower form: confirm the frontend
+doesn't itself add differentiation on top of whatever the backend already returned (e.g.
+rendering a different message for "wrong password" vs. "unknown email" when the backend's
+response was already uniform).
+
 ## Operational Contract
 
 ```

@@ -45,3 +45,4 @@ graphify-out/
 
 # Adding the knowlege folder to .gitignore to avoid committing large files
 docs\knowledge
+docs/docs/hooks/tool-usage.jsonl

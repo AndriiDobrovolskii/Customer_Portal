@@ -255,11 +255,16 @@ stages:
       AGENTS.md section 3 (models/migration before repository, repository before
       service, service before router) and refined per story by task_breakdown.
       Sub-step progress is tracked in pipeline_status, NOT in workflow-state.yaml.
-    skills:
-      - schema-builder                # schemas.py
-      - data-layer-builder            # models.py, repository.py, cache.py
-      - migration-manager             # alembic revision, proven upgrade/downgrade/upgrade
-      - service-and-router-builder    # service.py, router.py, dependencies.py, exceptions.py
+    skills_by_track:
+      # story.track (docs/stories/<StoryId>.md front matter, artifact-schema.md)
+      # selects which list runs. Absent/unset track = backend (default).
+      backend:
+        - schema-builder                # schemas.py
+        - data-layer-builder            # models.py, repository.py, cache.py
+        - migration-manager             # alembic revision, proven upgrade/downgrade/upgrade
+        - service-and-router-builder    # service.py, router.py, dependencies.py, exceptions.py
+      frontend:
+        - frontend-builder              # frontend/ scaffold, api-client, store, routes, screens, tests
     inputs: [story, open_decisions, specification, specification_review,
              impact_analysis, implementation_plan, task_breakdown, plan_review,
              api_design, openapi, database_design, entity_model, test_strategy,

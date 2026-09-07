@@ -7,6 +7,11 @@ description: Produces the architectural implementation plan for a story from its
 
 Create a detailed architectural implementation plan before code generation begins. The plan defines what will change and how it will be validated — so implementation stays scoped to the story (`AGENTS.md` §7.8: no opportunistic refactors, no unrelated files touched).
 
+**Track first.** Read the Story's `track` field (`docs/stories/<StoryId>.md` front matter,
+`artifact-schema.md`; absent means `backend`) before anything else — it decides which half
+of every section below applies. Never infer the track from which design docs happen to
+exist; read the field.
+
 # Operational Contract
 
 ```
@@ -17,7 +22,7 @@ Output Artifacts: docs/plans/<StoryId>-implementation-plan.md.
 
 # Required Context
 
-Read:
+**`track: backend`** (default) — read:
 
 - `docs/specifications/<StoryId>-spec.md`
 - `docs/designs/api/<StoryId>-openapi.yaml`, `docs/designs/api/<StoryId>-api-design.md`
@@ -26,17 +31,46 @@ Read:
 - `docs/product/non-functional-requirements.md`
 - The existing module under `app/modules/` this story extends (or the nearest sibling module, if this is a new one) — mirror its actual file layout rather than assuming one.
 
+**`track: frontend`** — read:
+
+- `docs/specifications/<StoryId>-spec.md` (its own API Contract table is the reference
+  contract — there is no separate `api_design`/`openapi` to read; both are `NOT_APPLICABLE`
+  for this track by definition)
+- `docs/impact-analysis/<StoryId>-impact-analysis.md`
+- `AGENTS.md` §2/§3's Frontend subsections (stack, layer table, session-handling rule)
+- The existing `frontend/` tree, if any — mirror its layout rather than assuming one; if it
+  doesn't exist yet, this plan's Files To Create must include the scaffold.
+
 # Preconditions
 
-Spec review is Pass/Pass with Issues, an API design exists, a database design exists (unless the story is genuinely read-only with no schema change — state that explicitly if so, don't silently skip the design docs), and `impact-analyzer` has produced the blast-radius survey this plan builds on.
+**`track: backend`**: spec review is Pass/Pass with Issues, an API design exists, a
+database design exists (unless the story is genuinely read-only with no schema change —
+state that explicitly if so, don't silently skip the design docs), and `impact-analyzer`
+has produced the blast-radius survey this plan builds on.
+
+**`track: frontend`**: spec review is Pass/Pass with Issues and `impact-analyzer` has
+produced the survey. API/DB design being `NOT_APPLICABLE` is expected, not a missing
+precondition — do not stop and wait for design docs that this track never produces.
 
 # Responsibilities
 
-Determine, following `AGENTS.md` §3 layering (`router → dependencies → service → repository/cache → models/schemas`) and building on `impact-analyzer`'s survey rather than re-deriving it:
+**`track: backend`** — determine, following `AGENTS.md` §3 layering
+(`router → dependencies → service → repository/cache → models/schemas`) and building on
+`impact-analyzer`'s survey rather than re-deriving it:
 
 - architectural changes the story requires
 - new files required, and which existing files are modified (per `impact-analyzer`'s survey)
 - risks (concurrency, migration hazards per `AGENTS.md` §4 "Migrations", breaking an existing contract)
+- dependencies on other stories or Open Decisions still unresolved
+
+**`track: frontend`** — determine, following `AGENTS.md` §3's Frontend layer table
+(`screens/components → hooks → api/`, with `store` consumed by `hooks`/route guards) and
+building on `impact-analyzer`'s survey:
+
+- architectural changes the story requires (new screens, hooks, store slices, routes)
+- new files required, and which existing `frontend/` files are modified
+- risks (a race between concurrent 401s and a single in-flight refresh — this Story's own
+  OD-2 — is the frontend analogue of a migration hazard; call it out the same way)
 - dependencies on other stories or Open Decisions still unresolved
 
 # Planning Rules
@@ -47,7 +81,18 @@ Determine, following `AGENTS.md` §3 layering (`router → dependencies → serv
 
 # Plan Structure
 
-Write `docs/plans/<StoryId>-implementation-plan.md` with these sections: Goal · Architectural Changes · Files To Create · Files To Modify · Risks · Validation Strategy (how `pre-commit run --all-files`/mypy/import-linter stay green) · Testing Strategy (unit fakes vs. integration-on-real-PG-and-Valkey split, per `AGENTS.md` §5). Execution order and which execution skill runs each task belong to `implementation-planner`'s task breakdown, not this plan.
+Write `docs/plans/<StoryId>-implementation-plan.md` with these sections: Goal ·
+Architectural Changes · Files To Create · Files To Modify · Risks · Validation Strategy ·
+Testing Strategy. Execution order and which execution skill runs each task belong to
+`implementation-planner`'s task breakdown, not this plan.
+
+- **`track: backend`** — Validation Strategy: how `pre-commit run --all-files`/mypy/
+  import-linter stay green. Testing Strategy: unit fakes vs. integration-on-real-PG-and-
+  Valkey split, per `AGENTS.md` §5.
+- **`track: frontend`** — Validation Strategy: how `npm run lint`/`format:check`/
+  `type-check`/`test:coverage` (`AGENTS.md` §2's Frontend subsection — these exact script
+  names) stay green. Testing Strategy: Vitest unit vs. React-Testing-Library-plus-MSW
+  integration split, per `AGENTS.md` §5's Frontend subsection.
 
 # Outputs
 
