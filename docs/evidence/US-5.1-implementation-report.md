@@ -2,7 +2,7 @@
 artifact_type: implementation_report
 story: US-5.1
 version: 1
-status: DRAFT
+status: ARCHIVED
 created_at: "2026-09-07T06:47:57Z"
 updated_at: "2026-09-07T06:47:57Z"
 produced_by: gate-enforcer
