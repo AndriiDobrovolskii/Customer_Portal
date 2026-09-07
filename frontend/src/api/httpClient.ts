@@ -1,0 +1,140 @@
+// The one HTTP boundary this Story's endpoints go through (AGENTS.md §3's
+// Frontend table: "`api/` ... the only fetch() layer"). Attaches the
+// in-memory access token as a Bearer header (via the neutral session bridge,
+// never importing `store/` directly), lets the browser handle the httpOnly
+// refresh cookie automatically (`credentials: "include"`, never read or
+// parsed here), and is the single interception point for FR-4's
+// 401 -> refresh -> retry logic (via `refreshCoordinator.ts`) and FR-9's
+// error normalization (via `errorNormalization.ts`).
+import { coordinateRefresh } from "./refreshCoordinator";
+import { normalizeApiError, type NormalizedApiError } from "./errorNormalization";
+import { getSessionBridge } from "../session/sessionBridge";
+import type { RefreshResponse } from "./types";
+
+const API_BASE = "/api/v1";
+
+export type HttpMethod = "GET" | "POST" | "DELETE" | "PUT" | "PATCH";
+
+export interface HttpRequestInit {
+  method: HttpMethod;
+  body?: unknown;
+  /** Whether this call carries the in-memory Bearer token. Default true. */
+  auth?: boolean;
+}
+
+export class ApiError extends Error {
+  readonly status: number;
+  readonly fieldErrors?: Record<string, string>;
+  readonly kind?: "network" | "server";
+
+  constructor(normalized: NormalizedApiError, kind?: "network" | "server") {
+    super(normalized.message);
+    this.name = "ApiError";
+    this.status = normalized.status;
+    this.fieldErrors = normalized.fieldErrors;
+    this.kind = kind ?? (normalized.status >= 500 ? "server" : undefined);
+  }
+}
+
+function networkError(): ApiError {
+  return new ApiError(
+    { status: 0, message: "Unable to reach the server. Please check your connection and try again." },
+    "network",
+  );
+}
+
+async function safeJsonParse(text: string): Promise<unknown> {
+  if (!text) {
+    return undefined;
+  }
+  try {
+    return JSON.parse(text) as unknown;
+  } catch {
+    return text;
+  }
+}
+
+async function parseResponse<T>(response: Response): Promise<T> {
+  const contentType = response.headers.get("content-type");
+  const text = await response.text();
+  const body = await safeJsonParse(text);
+
+  if (response.ok) {
+    return body as T;
+  }
+
+  const normalized = normalizeApiError({ status: response.status, contentType, body });
+  throw new ApiError(normalized);
+}
+
+async function rawFetch(path: string, init: RequestInit): Promise<Response> {
+  try {
+    return await fetch(`${API_BASE}${path}`, init);
+  } catch {
+    throw networkError();
+  }
+}
+
+async function performRefreshRequest(): Promise<RefreshResponse> {
+  const response = await rawFetch("/auth/refresh", {
+    method: "POST",
+    headers: { Accept: "application/json" },
+    credentials: "include",
+  });
+  return parseResponse<RefreshResponse>(response);
+}
+
+function buildHeaders(hasBody: boolean, auth: boolean): Record<string, string> {
+  const headers: Record<string, string> = { Accept: "application/json" };
+  if (hasBody) {
+    headers["Content-Type"] = "application/json";
+  }
+  if (auth) {
+    const token = getSessionBridge().getAccessToken();
+    if (token) {
+      headers.Authorization = `Bearer ${token}`;
+    }
+  }
+  return headers;
+}
+
+async function performRequest<T>(path: string, init: HttpRequestInit): Promise<T> {
+  const auth = init.auth ?? true;
+  const hasBody = init.body !== undefined;
+
+  const doFetch = () =>
+    rawFetch(path, {
+      method: init.method,
+      headers: buildHeaders(hasBody, auth),
+      credentials: "include",
+      body: hasBody ? JSON.stringify(init.body) : undefined,
+    });
+
+  let response = await doFetch();
+
+  if (response.status === 401 && auth) {
+    const bridge = getSessionBridge();
+    try {
+      const refreshed = await coordinateRefresh(performRefreshRequest);
+      bridge.onTokenRefreshed(refreshed.access_token);
+      response = await doFetch();
+    } catch {
+      bridge.onSessionExpired();
+      throw new ApiError({ status: 401, message: "Your session has expired. Please log in again." });
+    }
+  }
+
+  return parseResponse<T>(response);
+}
+
+export function httpGet<T>(path: string, options: { auth?: boolean } = {}): Promise<T> {
+  return performRequest<T>(path, { method: "GET", auth: options.auth });
+}
+
+export function httpPost<T>(path: string, body?: unknown, options: { auth?: boolean } = {}): Promise<T> {
+  return performRequest<T>(path, { method: "POST", body, auth: options.auth });
+}
+
+export function httpDelete<T>(path: string, options: { auth?: boolean } = {}): Promise<T> {
+  return performRequest<T>(path, { method: "DELETE", auth: options.auth });
+}
