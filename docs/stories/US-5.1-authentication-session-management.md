@@ -30,7 +30,7 @@ So that the Customer Portal backend (EPIC-1..4) is usable and demonstrable end-t
 | 2 | Access token storage | In-memory only (a store, e.g. Zustand/Context — not `localStorage`/`sessionStorage`) | Backend never intended the access token for durable client storage; XSS-resistant by construction |
 | 3 | Refresh token handling | Never read or stored by the client. The backend already sets it as an `httpOnly`+`secure`+`samesite=strict` cookie (`app/modules/users/router.py`); the client only calls `POST /auth/refresh` and lets the browser attach the cookie | Confirmed against actual backend code, not assumed |
 | 4 | MFA scope | Only the login-time challenge (`POST /auth/mfa/verify`, 6-digit TOTP or recovery code) is in this Story. Enrollment (`/auth/mfa/enroll`, `/auth/mfa/activate`) is explicitly deferred to a future Story | Confirmed with the user during intake |
-| 5 | Post-login redirect target | Redirect to a minimal authenticated placeholder route (e.g. `/`), NOT `/tickets` | Support Tickets UI (Story 5.2) does not exist yet; redirecting to `/tickets` today would be a dead route |
+| 5 | Post-login redirect target | Redirect to a minimal authenticated placeholder route (e.g. `/`), NOT `/tickets` | Support Tickets UI (Story 5.3) does not exist yet; redirecting to `/tickets` today would be a dead route |
 | 6 | `mfa_enrollment_deadline` (present on `LoginResponse`/`RefreshResponse` for privileged roles in their 14-day grace period) | Show a dismissible informational banner naming the deadline; no link into an enrollment flow (none exists yet) | Surfacing the field costs little; building a flow toward it would cross into out-of-scope MFA enrollment |
 | 7 | No backend changes | This Story changes no API/DB — `API_DESIGN` and `DB_DESIGN` pipeline stages should record `NOT_APPLICABLE` | Purely a frontend consuming the existing, already-delivered contract |
 
@@ -48,7 +48,7 @@ So that the Customer Portal backend (EPIC-1..4) is usable and demonstrable end-t
 
 ## Out of Scope
 - MFA enrollment/activation UI (`/auth/mfa/enroll`, `/auth/mfa/activate`, `DELETE /auth/mfa`) — future "Profile / Settings" Story
-- Support Tickets UI — Story 5.2
+- Support Tickets UI — Story 5.3 (renumbered: Story 5.2 is Account Self-Service & Admin Console)
 - Admin UI, profile-editing UI — future Stories
 - Any backend/API/DB change
 

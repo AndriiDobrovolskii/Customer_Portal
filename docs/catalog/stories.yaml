@@ -185,6 +185,26 @@ stories:
       auto-close half now shipped, completing the reopen/auto-close pair
       US-4.2 started.
 
+  - id: US-4.4
+    retired_id: null
+    slug: agent-ticket-queue-and-assignment
+    path: docs/stories/US-4.4-agent-ticket-queue-and-assignment.md
+    epic: EPIC-4
+    title: Agent Ticket Queue & Assignment
+    state: BACKLOG
+    source:
+      type: github_issue
+      repository: AndriiDobrovolskii/Customer_Portal
+      issue_number: 28
+      issue_url: https://github.com/AndriiDobrovolskii/Customer_Portal/issues/28
+    delivered_by: { pr: null, note: null }
+    note: >
+      Raised out of EPIC-5 story-writing: reject_agent_queue_access closes the
+      only ticket-listing endpoint to staff, leaving the support_agent persona
+      with no reachable UI. Replaces that rejection with an agent branch under
+      tickets:read and adds a nullable tickets.assignee_id (additive
+      migration). Hard-blocks US-5.5 and nothing else.
+
   # --- EPIC-5: Frontend ------------------------------------------------------
   - id: US-5.1
     retired_id: null
@@ -205,3 +225,79 @@ stories:
       continue-flow.md/SKILL.md are not yet rewritten; this Story's early
       stages run under the current inline-invocation mechanism until that
       change is proven manually and applied.
+
+  - id: US-5.2
+    retired_id: null
+    slug: account-self-service-ui
+    path: docs/stories/US-5.2-account-self-service-ui.md
+    epic: EPIC-5
+    title: Account & Profile Self-Service (Frontend)
+    state: BACKLOG
+    source:
+      type: github_issue
+      repository: AndriiDobrovolskii/Customer_Portal
+      issue_number: 25
+      issue_url: https://github.com/AndriiDobrovolskii/Customer_Portal/issues/25
+    delivered_by: { pr: null, note: null }
+    note: >
+      Profile edit, email change/verification, MFA enrollment, account
+      deactivation. Extends the shared API client to expose response headers
+      (ETag/If-Match); US-5.4 depends on that. Its profile *view* (PS-AC1) is
+      blocked: no GET /profile or GET /users/me exists, so the form ships
+      write-only until a backend Story adds the read endpoint.
+
+  - id: US-5.3
+    retired_id: null
+    slug: support-tickets-ui
+    path: docs/stories/US-5.3-support-tickets-ui.md
+    epic: EPIC-5
+    title: Support Tickets (Frontend)
+    state: BACKLOG
+    source:
+      type: github_issue
+      repository: AndriiDobrovolskii/Customer_Portal
+      issue_number: 26
+      issue_url: https://github.com/AndriiDobrovolskii/Customer_Portal/issues/26
+    delivered_by: { pr: null, note: null }
+    note: >
+      Customer-side only. Flips US-5.1's placeholder post-login redirect to
+      /tickets. Attachments excluded (no upload endpoint, and TicketRead /
+      ReplyRead expose no attachment references). The agent half is US-5.5.
+
+  - id: US-5.4
+    retired_id: null
+    slug: admin-console-ui
+    path: docs/stories/US-5.4-admin-console-ui.md
+    epic: EPIC-5
+    title: Admin Console (Frontend)
+    state: BACKLOG
+    source:
+      type: github_issue
+      repository: AndriiDobrovolskii/Customer_Portal
+      issue_number: 27
+      issue_url: https://github.com/AndriiDobrovolskii/Customer_Portal/issues/27
+    delivered_by: { pr: null, note: null }
+    note: >
+      Originally drafted as "Slice B" of US-5.2 and peeled out - the two share
+      no screens and no permission model. Depends on US-5.2 for the API
+      client's ETag/response-header support. Permission scopes are available
+      only by decoding the JWT scopes claim; LoginResponse carries no roles.
+
+  - id: US-5.5
+    retired_id: null
+    slug: agent-console-ui
+    path: docs/stories/US-5.5-agent-console-ui.md
+    epic: EPIC-5
+    title: Agent Console (Frontend)
+    state: BACKLOG
+    source:
+      type: github_issue
+      repository: AndriiDobrovolskii/Customer_Portal
+      issue_number: 29
+      issue_url: https://github.com/AndriiDobrovolskii/Customer_Portal/issues/29
+    delivered_by: { pr: null, note: null }
+    note: >
+      Hard-blocked on US-4.4 - GET /support/tickets returns 403 to every
+      tickets:read/tickets:write holder today, so no part of this Story is
+      buildable until that ships. Reuses US-5.3's ticket detail/thread
+      components rather than duplicating them.
