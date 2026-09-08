@@ -2,9 +2,9 @@
 artifact_type: clarification_report
 story: US-5.2
 version: 1
-status: DRAFT
+status: ARCHIVED
 created_at: "2026-09-08T06:22:35Z"
-updated_at: "2026-09-08T06:22:35Z"
+updated_at: "2026-09-08T18:25:00Z"
 produced_by: us-clarifier
 inputs:
   - path: docs/product/product-vision.md

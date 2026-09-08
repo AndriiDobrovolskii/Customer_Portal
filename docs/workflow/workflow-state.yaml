@@ -9,11 +9,11 @@ version: 1
 story: US-5.2
 workflow: story-delivery
 
-current_stage: READY_FOR_PR
-previous_stage: PR_PREPARATION
-last_completed_stage: PR_PREPARATION
+current_stage: ARCHIVED
+previous_stage: COMPLETED
+last_completed_stage: COMPLETED
 
-status: WAITING_FOR_HUMAN
+status: ARCHIVED
 attempt: 1
 
 last_invoked_skill: pr-preparer
@@ -24,24 +24,15 @@ last_result:
   recorded_at: "2026-09-08T15:10:00Z"
 
 last_artifacts:
-  - type: pr_summary
-    path: docs/pr/US-5.2-pr-summary.md
+  - type: delivery_summary
+    path: docs/evidence/US-5.2-delivery-summary.md
     version: 1
 
 implementation_substep: null
 
-pending_human_gate:
-  stage: READY_FOR_PR
-  status: PENDING
-  required_artifacts:
-    - type: pr_summary
-      path: docs/pr/US-5.2-pr-summary.md
-      version: 1
-  automated_verdict: PASS
-  approve_command: "/so:approve"
-  reject_command: "/so:reject"
+pending_human_gate: null
 
-note: "PR_PREPARATION: pr-preparer confirmed all four upstream gates (gate-enforcer, implementation-verifier, reconciliation-reviewer, security-reviewer) PASS, confirmed no staleness, confirmed .env.example needs no change, confirmed commit hygiene (58 files, all under frontend/ matching task breakdown). Drafted docs/pr/US-5.2-pr-summary.md. Not staged/committed/pushed. READY_FOR_PR is a human gate: a human must create/finalize the Pull Request and record it via /so:approve."
+note: "Archived 2026-09-08T18:25:00Z via /so:archive. Delivery summary at docs/evidence/US-5.2-delivery-summary.md. No business-rules.md/ARCHITECTURE.md updates proposed (pure frontend consumer of already-documented backend rules and layering). GitHub issue #25 closed 2026-09-08T18:30:00Z on explicit human approval."
 
 blocking_issues: []
 
@@ -67,6 +58,6 @@ non_blocking_findings:
   - "PS-AC3/FR-3 (confirm-email-change) specifies no expired/invalid outcome distinction, unlike PS-AC4/FR-4 (verify-email); likely covered by XC-AC1's generic handling but unconfirmed (carried unchanged from v1 review)."
 
 started_at: "2026-09-08T00:00:00Z"
-updated_at: "2026-09-08T15:10:00Z"
-completed_at: null
-archived_at: null
+updated_at: "2026-09-08T18:25:00Z"
+completed_at: "2026-09-08T17:55:00Z"
+archived_at: "2026-09-08T18:25:00Z"

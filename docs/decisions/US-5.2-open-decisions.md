@@ -2,9 +2,9 @@
 artifact_type: open_decisions
 story: US-5.2
 version: 2
-status: DRAFT
+status: ARCHIVED
 created_at: "2026-09-08T06:22:35Z"
-updated_at: "2026-09-08T00:35:00Z"
+updated_at: "2026-09-08T18:25:00Z"
 produced_by: us-clarifier
 resolutions_recorded_by: story-orchestrator
 inputs:

@@ -2,9 +2,9 @@
 artifact_type: implementation_report
 story: US-5.2
 version: 1
-status: DRAFT
+status: ARCHIVED
 created_at: "2026-09-08T17:00:00Z"
-updated_at: "2026-09-08T17:00:00Z"
+updated_at: "2026-09-08T18:25:00Z"
 produced_by: gate-enforcer
 inputs:
   - path: docs/stories/US-5.2-account-self-service-ui.md

@@ -4,18 +4,18 @@
 # activation). Stage skills never write this file.
 
 version: 1
-active_story: US-5.2
-story_path: docs/stories/US-5.2-account-self-service-ui.md
+active_story: null
+story_path: null
 
 source:
-  type: github_issue
-  repository: AndriiDobrovolskii/Customer_Portal
-  issue_number: 25
-  issue_url: https://github.com/AndriiDobrovolskii/Customer_Portal/issues/25
+  type: null
+  repository: null
+  issue_number: null
+  issue_url: null
 
-activated_at: "2026-09-08T00:00:00Z"
-activated_by: sbruhov@gmail.com
+activated_at: null
+activated_by: null
 
-status: IN_PROGRESS
+status: ARCHIVED
 
-note: null
+note: "US-5.2 archived 2026-09-08T18:25:00Z; see docs/evidence/US-5.2-delivery-summary.md. No Story currently active."

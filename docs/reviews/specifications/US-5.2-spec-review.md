@@ -2,9 +2,9 @@
 artifact_type: specification_review
 story: US-5.2
 version: 2
-status: APPROVED
+status: ARCHIVED
 created_at: "2026-09-08T06:33:36Z"
-updated_at: "2026-09-08T08:02:31Z"
+updated_at: "2026-09-08T18:25:00Z"
 produced_by: story-spec-reviewer
 inputs:
   - path: docs/stories/US-5.2-account-self-service-ui.md

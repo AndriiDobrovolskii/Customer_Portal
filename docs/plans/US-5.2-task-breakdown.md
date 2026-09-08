@@ -2,9 +2,9 @@
 artifact_type: task_breakdown
 story: US-5.2
 version: 1
-status: APPROVED
+status: ARCHIVED
 created_at: "2026-09-08T08:34:53Z"
-updated_at: "2026-09-08T09:15:00Z"
+updated_at: "2026-09-08T18:25:00Z"
 produced_by: implementation-planner
 inputs:
   - path: docs/stories/US-5.2-account-self-service-ui.md
