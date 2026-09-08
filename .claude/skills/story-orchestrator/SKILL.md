@@ -7,7 +7,9 @@ description: >
   docs/workflow/workflow-state.yaml plus docs/workflow/history.jsonl. Use when
   the user wants to "run the pipeline for US-x.y", "advance this story", "start
   US-x.y", or asks where a story stands. Four modes, one per /so command: start
-  (activate a story), continue (advance exactly one stage), status (read-only
+  (activate a story), continue (advance automatically through consecutive
+  automated stages, stopping only at a human gate, a BLOCKED verdict, or a
+  CHANGES_REQUIRED loop that exhausted its attempt cap), status (read-only
   report), archive (consolidate a completed delivery). Acts as a sequencer
   only - it invokes the owning skills rather than doing their work, stops at any
   stage whose skill reports anything other than PASS or NOT_APPLICABLE, and
@@ -179,15 +181,24 @@ stage responsible. Do not route.
       sub-agent, per "Dispatching a stage skill") and its Result Envelope
       actually read.
 - [ ] Any `loop_back` key named by a skill exists under that stage in the map.
-- [ ] Exactly one `history.jsonl` event was appended per transition.
-- [ ] A non-`PASS` verdict stopped the pipeline and named the blocking stage —
-      no downstream skill ran afterward.
-- [ ] No human gate was passed without `/so:approve`.
+- [ ] Exactly one `history.jsonl` event was appended per transition, one per
+      stage processed this run.
+- [ ] A `BLOCKED` verdict, an unknown `loop_back` key, or a `CHANGES_REQUIRED`
+      loop past its attempt cap stopped the pipeline and named the blocking
+      stage — no downstream skill ran afterward.
+- [ ] The run kept advancing through every `PASS` / `NOT_APPLICABLE` stage
+      without stopping early, until a real stop condition was hit.
+- [ ] No human gate was passed without `/so:approve`; reaching one ended the
+      run without invoking its skill.
 - [ ] `pipeline_status` reflects `IMPLEMENTATION`'s sub-steps, not just the
       top-level stage.
 
 ## Completion Criteria
 
-Continue mode is complete when exactly one transition has been recorded, or the
-workflow is holding at a named stage with a specific reason — never silently
-abandoned mid-sequence.
+Continue mode is complete when the workflow has advanced automatically through
+every automated stage it could, and is now holding at a human gate, a
+`BLOCKED` verdict, a `CHANGES_REQUIRED` loop that exhausted its attempt cap, or
+an inconsistent state — each with a specific, named reason. One or more
+transitions may have been recorded in a single run; never silently abandoned
+mid-sequence, and never stopped merely because a transition was recorded when
+no stop condition applies.

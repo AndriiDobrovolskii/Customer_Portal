@@ -81,7 +81,7 @@ shared-state action: skills do not push, open, or merge Pull Requests.
 | Command | What it does |
 |---|---|
 | `/so:start <StoryId>` | Activate a Story and initialize its workflow state. |
-| `/so:next` | Advance exactly one stage. Never two. |
+| `/so:next` | Advance automatically through consecutive automated stages. Stops only at a human gate, a `BLOCKED` verdict, a `CHANGES_REQUIRED` loop that exhausted its attempt cap, or an inconsistent state. |
 | `/so:status` | Read-only: where the Story is, what is stale, what is blocking. |
 | `/so:approve [comment]` | Record human approval at the current human gate. |
 | `/so:reject <reason>` | Record human rejection and route to the gate's loop-back target. |
