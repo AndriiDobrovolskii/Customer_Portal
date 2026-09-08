@@ -64,6 +64,40 @@ class Ticket(Base):
             "status != 'resolved' OR (resolved_at IS NOT NULL AND resolution_note IS NOT NULL)",
             name="ck_tickets_resolved_requires_resolution_fields",
         ),
+        # US-4.4 FR-1 (AQ-AC1): the default, filterless agent queue - every
+        # ticket not "closed", ordered oldest-updated first. Partial so the
+        # index only ever holds rows the default query (and any non-closed
+        # status=X filter) can match. Predicate MUST be written as the
+        # literal `status != 'closed'` (never `.in_([...])`) - PostgreSQL's
+        # partial-index predicate-implication check reliably proves a `<>`
+        # comparison but not a semantically-equivalent `IN`-list
+        # (US-4.4-db-design.md "Indexes"), so `list_for_agent_queue`'s
+        # default branch must match this predicate form exactly.
+        Index(
+            "ix_tickets_queue_default_updated_at_id",
+            "updated_at",
+            "id",
+            postgresql_where=text("status != 'closed'"),
+        ),
+        # US-4.4 FR-2 (AQ-AC2): an explicit status=X filter, any of the five
+        # values including "closed".
+        Index(
+            "ix_tickets_status_updated_at_id",
+            "status",
+            "updated_at",
+            "id",
+        ),
+        # US-4.4 FR-2: assignee_id=<uuid>/assignee_id=me (equality) and
+        # assignee_id=none (IS NULL - a btree index serves this directly,
+        # NULLs are indexed and sortable). No separate single-column index on
+        # assignee_id - this composite index's leading column already serves
+        # that lookup (same precedent as ticket_replies.ticket_id).
+        Index(
+            "ix_tickets_assignee_id_updated_at_id",
+            "assignee_id",
+            "updated_at",
+            "id",
+        ),
     )
 
     id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=uuid.uuid4)
@@ -106,6 +140,14 @@ class Ticket(Base):
     # since no `users` row exists for "the system" (mirrors
     # audit_log.actor_id's existing no-FK convention).
     closed_by: Mapped[uuid.UUID | None] = mapped_column(nullable=True)
+    # US-4.4 FR-3/FR-4: set by a successful POST .../assign (including
+    # re-assignment), cleared by a successful DELETE .../assign. No
+    # `ondelete` override (RESTRICT-by-default) - the identical BR-007
+    # account-erasure placeholder already used for requester_id/uploaded_by
+    # (US-4.1-db-design.md). No CHECK ties this to `status`: a ticket closed
+    # while assigned keeps its assignee_id after closure (US-4.4-db-design.md
+    # "No CHECK constraint ties assignee_id to status").
+    assignee_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("users.id"), nullable=True)
 
 
 class TicketReply(Base):

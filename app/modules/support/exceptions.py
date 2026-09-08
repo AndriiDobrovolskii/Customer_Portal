@@ -69,18 +69,6 @@ class AccountDeactivatedError(ProblemError):
     detail = "This account has been deactivated."
 
 
-class AgentQueueNotAvailableError(ProblemError):
-    """GET's staff-rejection branch (OD-4): caller holds `tickets:read`/
-    `tickets:write` (support_agent/admin) — full agent queue behavior is
-    Out of Scope for this story.
-    """
-
-    type_slug = "agent-queue-not-available"
-    title = "Agent Queue Not Available"
-    status = 403
-    detail = "Agent queue views are not available through this endpoint yet."
-
-
 class TicketNotFoundError(ProblemError):
     """FR-4 (US-4.2): unknown ticket id, a different customer's ticket, or an
     authenticated caller who is neither the ticket's requester nor an agent —
@@ -154,3 +142,19 @@ class TicketReplyRateLimitError(ProblemError):
     def __init__(self, *, retry_after_seconds: int) -> None:
         super().__init__()
         self.headers = {"Retry-After": str(retry_after_seconds)}
+
+
+class AssignmentConflictError(ProblemError):
+    """US-4.4 FR-10: `assign_ticket`'s conditional `UPDATE ... WHERE
+    assignee_id IS NOT DISTINCT FROM :expected` affected zero rows because a
+    concurrent assign/reassign already changed `assignee_id` since this
+    request's own read — a field-level optimistic-concurrency conflict, not
+    a ticket-status-machine violation (`InvalidStateTransitionError` is
+    reserved for the closed-ticket case). New slug, first use in this
+    project (US-4.4-api-design.md "Concurrency Design").
+    """
+
+    type_slug = "assignment-conflict"
+    title = "Assignment Conflict"
+    status = 409
+    detail = "This ticket's assignee changed before this request completed. Retry with fresh data."

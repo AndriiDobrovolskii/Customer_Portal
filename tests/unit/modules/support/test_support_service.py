@@ -1,13 +1,14 @@
 import uuid
 from collections.abc import Callable
 from datetime import UTC, datetime
-from typing import Any
+from typing import Any, Literal
 
 import pytest
 
 from app.modules.support.cache import IdempotencyEnvelope
 from app.modules.support.exceptions import (
     AccountDeactivatedError,
+    AssignmentConflictError,
     AttachmentNotOwnedError,
     IdempotencyKeyReuseError,
     InsufficientPermissionError,
@@ -16,6 +17,7 @@ from app.modules.support.exceptions import (
     TicketCreationRateLimitError,
     TicketNotFoundError,
     TicketReplyRateLimitError,
+    ValidationFailedError,
 )
 from app.modules.support.models import Attachment, Ticket, TicketReply
 from app.modules.support.repository import ReplyListPage, TicketListPage
@@ -35,7 +37,9 @@ _BODY = "My login keeps failing."
 _CATEGORY = "billing"
 
 
-def _make_ticket(*, requester_id: uuid.UUID, category: str = _CATEGORY) -> Ticket:
+def _make_ticket(
+    *, requester_id: uuid.UUID, category: str = _CATEGORY, assignee_id: uuid.UUID | None = None
+) -> Ticket:
     # Real ORM model, not a lookalike dataclass — `TicketRepositoryProtocol`'s
     # return types are covariant with `app.modules.support.models.Ticket`
     # under mypy --strict, matching this project's existing fake-repository
@@ -56,6 +60,12 @@ def _make_ticket(*, requester_id: uuid.UUID, category: str = _CATEGORY) -> Ticke
     ticket.resolution_note = None
     ticket.closed_at = None
     ticket.closed_by = None
+    # US-4.4: `assignee_id` is not yet a mapped column as of this
+    # test-writing pass either (added by data-layer-builder, T2) - same
+    # "initialize explicitly so a pre-IMPLEMENTATION read fails on an
+    # assertion, not an AttributeError" rationale as the US-4.3 columns
+    # above.
+    ticket.assignee_id = assignee_id
     return ticket
 
 
@@ -104,6 +114,27 @@ class FakeTicketRepository:
         self.update_calls: list[dict[str, Any]] = []
         self.transition_calls: list[dict[str, Any]] = []
         self.transition_returns_none = False
+        # US-4.4 (DR-5/Architectural Change #5): the agent-queue listing's
+        # own filtered/ordered page - test-writer's own collaborator-shape
+        # assumption, since no design doc fixes `list_for_agent_queue`'s
+        # exact signature: reuses `TicketListPage`'s existing (items,
+        # next_cursor) shape verbatim (the item type - `Ticket` ORM rows -
+        # is identical; only the query's filters/ordering differ), rather
+        # than inventing a new page NamedTuple no artifact names.
+        self.agent_queue_calls: list[dict[str, Any]] = []
+        self.agent_queue_page: TicketListPage | None = TicketListPage(items=[], next_cursor=None)
+        # US-4.4 (Architectural Change #6/#9, FR-3/FR-10): conditional
+        # UPDATE ... RETURNING *, None on zero rows affected (closed ticket
+        # or lost the `assignee_id IS NOT DISTINCT FROM :expected` race) -
+        # same `Ticket | None` idiom as `transition_status`.
+        self.assign_calls: list[dict[str, Any]] = []
+        self.assign_returns_none = False
+        # US-4.4 (Architectural Change #6/#9, FR-4/OD-3): unconditional
+        # clear ... RETURNING *, None on zero rows affected (closed ticket,
+        # OD-3's adopted default) - no optimistic-concurrency guard, per
+        # US-4.4-implementation-plan.md's "unassign has no loser to report".
+        self.unassign_calls: list[dict[str, Any]] = []
+        self.unassign_returns_none = False
 
     async def create(
         self, *, requester_id: uuid.UUID, subject: str, body: str, category: str
@@ -195,6 +226,65 @@ class FakeTicketRepository:
             ticket.closed_at = closed_at
         if closed_by is not None:
             ticket.closed_by = closed_by
+        return ticket
+
+    async def list_for_agent_queue(
+        self,
+        *,
+        cursor: str | None,
+        limit: int,
+        status: str | None = None,
+        category: str | None = None,
+        assignee_id: uuid.UUID | Literal["none"] | None = None,
+    ) -> TicketListPage | None:
+        # US-4.4 FR-1/FR-2/DR-5: `assignee_id` is the *service*-resolved
+        # filter value - `"me"` resolved to a real UUID, `"none"` passed
+        # through as the repository's own unassigned-filter sentinel, and
+        # `None` meaning the filter is absent entirely (matching the real
+        # `TicketRepositoryProtocol.list_for_agent_queue` signature; symmetric
+        # with how `TicketService.list_own_tickets` already resolves `status`
+        # filtering before calling `list_for_requester`).
+        self.agent_queue_calls.append(
+            {
+                "status": status,
+                "category": category,
+                "assignee_id": assignee_id,
+                "cursor": cursor,
+                "limit": limit,
+            }
+        )
+        return self.agent_queue_page
+
+    async def assign_ticket(
+        self,
+        ticket_id: uuid.UUID,
+        *,
+        new_assignee_id: uuid.UUID,
+        expected_assignee_id: uuid.UUID | None,
+    ) -> Ticket | None:
+        self.assign_calls.append(
+            {
+                "ticket_id": ticket_id,
+                "new_assignee_id": new_assignee_id,
+                "expected_assignee_id": expected_assignee_id,
+            }
+        )
+        if self.assign_returns_none:
+            return None
+        ticket = self.existing.get(ticket_id)
+        if ticket is None:
+            return None
+        ticket.assignee_id = new_assignee_id
+        return ticket
+
+    async def unassign_ticket(self, ticket_id: uuid.UUID) -> Ticket | None:
+        self.unassign_calls.append({"ticket_id": ticket_id})
+        if self.unassign_returns_none:
+            return None
+        ticket = self.existing.get(ticket_id)
+        if ticket is None:
+            return None
+        ticket.assignee_id = None
         return ticket
 
     async def commit(self) -> None:
@@ -349,17 +439,48 @@ class FakeUserService:
         *,
         email: str | None = "requester@example.com",
         account_status: str | None = "active",
+        account_status_by_user: dict[uuid.UUID, str | None] | None = None,
     ) -> None:
         self.email = email
         self.account_status = account_status
+        # US-4.4 OD-4: `assign_ticket`'s target-validation check calls this
+        # against the *target* user id, not only the caller's own (unlike
+        # US-4.1's `create_ticket` usage) - `account_status_by_user` lets a
+        # test give a specific target id a different status than the
+        # default, and `status_calls` confirms the fake was actually
+        # invoked with an arbitrary id, not just the caller's own.
+        self.account_status_by_user = account_status_by_user or {}
         self.calls: list[uuid.UUID] = []
+        self.status_calls: list[uuid.UUID] = []
 
     async def get_email_for_user(self, user_id: uuid.UUID) -> str | None:
         self.calls.append(user_id)
         return self.email
 
     async def get_account_status_for_user(self, user_id: uuid.UUID) -> str | None:
+        self.status_calls.append(user_id)
+        if user_id in self.account_status_by_user:
+            return self.account_status_by_user[user_id]
         return self.account_status
+
+
+class FakeRoleService:
+    """US-4.4 Architectural Change #4 / T6: `RoleServiceProtocol` fake - the
+    first `support` -> `roles` cross-module collaborator this file needs.
+    `assign_ticket`'s FR-8 target-validation check calls
+    `resolve_scopes_for_user` against the *target* id, so this fake keys its
+    canned answer by user id (a single flat `scopes_by_user` default,
+    `{}` -> `[]`, mirrors `roles.service.RoleService.resolve_scopes_for_user`'s
+    own real "no roles -> []" fallthrough, `app/modules/roles/service.py:102-103`).
+    """
+
+    def __init__(self, *, scopes_by_user: dict[uuid.UUID, list[str]] | None = None) -> None:
+        self.scopes_by_user = scopes_by_user or {}
+        self.calls: list[uuid.UUID] = []
+
+    async def resolve_scopes_for_user(self, user_id: uuid.UUID) -> list[str]:
+        self.calls.append(user_id)
+        return self.scopes_by_user.get(user_id, [])
 
 
 class FakeEmailSender:
@@ -445,6 +566,7 @@ def _make_service(
     rate_limit_cache: FakeRateLimitCache | None = None,
     audit_service: FakeAuditService | None = None,
     user_service: FakeUserService | None = None,
+    role_service: FakeRoleService | None = None,
     email_sender: FakeEmailSender | None = None,
 ) -> tuple[
     TicketService,
@@ -455,13 +577,31 @@ def _make_service(
     FakeAuditService,
     FakeUserService,
     FakeEmailSender,
+    FakeRoleService,
 ]:
+    # US-4.4 Architectural Change #4 / T6: `RoleServiceProtocol` is a new
+    # *required* constructor parameter (FR-8's target-validation
+    # collaborator) - test-writer's own collaborator-shape assumption on
+    # its exact position (no design doc fixes it): grouped with this file's
+    # other cross-module Protocol collaborators, right after `user_service`
+    # and before `email_sender`, mirroring `TicketReplyService`'s own
+    # precedent of adding a new required collaborator without disturbing
+    # this fixture's repos/caches-first ordering. `role_service` is
+    # returned as this tuple's *new final* element (after `email_sender`),
+    # which changes the *arity* every existing unpack must account for:
+    # a call site that fully unpacked all 8 prior elements by position
+    # now raises `ValueError: too many values to unpack` and gains one
+    # trailing `_`; a call site that relied on `*_, email_sender =
+    # _make_service(...)` to grab the trailing element now silently
+    # rebinds `email_sender` to the fake `RoleService` instead and must
+    # become `*_, email_sender, _ = _make_service(...)`.
     ticket_repository = ticket_repository or FakeTicketRepository()
     attachment_repository = attachment_repository or FakeAttachmentRepository()
     idempotency_cache = idempotency_cache or FakeIdempotencyCache()
     rate_limit_cache = rate_limit_cache or FakeRateLimitCache(count=1)
     audit_service = audit_service or FakeAuditService()
     user_service = user_service or FakeUserService()
+    role_service = role_service or FakeRoleService()
     email_sender = email_sender or FakeEmailSender()
     service = TicketService(
         ticket_repository,
@@ -470,6 +610,7 @@ def _make_service(
         rate_limit_cache,
         audit_service,
         user_service,
+        role_service,
         email_sender,
     )
     return (
@@ -481,6 +622,7 @@ def _make_service(
         audit_service,
         user_service,
         email_sender,
+        role_service,
     )
 
 
@@ -606,7 +748,7 @@ def _make_reply_service(
 async def test_create_ticket_happy_path_writes_audit_event_and_queues_email() -> None:
     # Arrange
     requester_id = uuid.uuid4()
-    service, ticket_repo, _, idempotency_cache, _, audit_service, user_service, email_sender = (
+    service, ticket_repo, _, idempotency_cache, _, audit_service, user_service, email_sender, _ = (
         _make_service()
     )
 
@@ -652,8 +794,8 @@ async def test_create_ticket_deactivated_account_raises_before_any_write() -> No
     # stated ordering).
     requester_id = uuid.uuid4()
     user_service = FakeUserService(account_status="deactivated")
-    service, ticket_repo, _, idempotency_cache, _, audit_service, user_service, _ = _make_service(
-        user_service=user_service
+    service, ticket_repo, _, idempotency_cache, _, audit_service, user_service, _, _ = (
+        _make_service(user_service=user_service)
     )
 
     # Act / Assert
@@ -695,7 +837,7 @@ async def test_create_ticket_no_email_on_file_skips_dispatch_without_failing() -
     # Arrange: FR-1's confirmation email is best-effort — a requester with no
     # resolvable email must not block ticket creation.
     requester_id = uuid.uuid4()
-    service, *_, email_sender = _make_service(user_service=FakeUserService(email=None))
+    service, *_, email_sender, _ = _make_service(user_service=FakeUserService(email=None))
 
     # Act
     result = await service.create_ticket(
@@ -1092,7 +1234,7 @@ async def test_resolve_ticket_agent_from_each_eligible_status_succeeds(status_be
     ticket.id = ticket_id
     ticket.status = status_before
     ticket_repo = FakeTicketRepository(existing={ticket_id: ticket})
-    service, ticket_repo, _, _, _, audit_service, _, email_sender = _make_service(
+    service, ticket_repo, _, _, _, audit_service, _, email_sender, _ = _make_service(
         ticket_repository=ticket_repo
     )
 
@@ -2352,3 +2494,566 @@ async def test_get_ticket_detail_unknown_ticket_raises_ticket_not_found() -> Non
             cursor=None,
             limit=50,
         )
+
+
+# =============================================================================
+# US-4.4 (Agent Ticket Queue & Assignment) — TicketService.list_agent_queue /
+# assign_ticket / unassign_ticket
+#
+# Test-writer's own collaborator-shape assumption (no design doc fixes these
+# literal method/parameter names — docs/tests/US-4.4-test-strategy.md records
+# this explicitly): `list_agent_queue(*, agent_id, status, category,
+# assignee_id, cursor, limit) -> AgentTicketListResponse` (parallel to
+# `list_own_tickets`'s own signature shape); `assign_ticket(*, ticket_id,
+# actor_id, actor_scopes, assignee_id) -> AgentTicketStateRead` and
+# `unassign_ticket(*, ticket_id, actor_id, actor_scopes) ->
+# AgentTicketStateRead` (both names fixed by implementation_plan.md's Files
+# To Modify section verbatim). `actor_scopes` (not `actor_kind`) is passed
+# because FR-7's check needs to distinguish "no tickets:*" (customer) from
+# "tickets:read only" (403) from "tickets:write" (proceed) — a three-way
+# split `resolve_actor_kind`'s existing two-value vocabulary cannot express.
+# `list_for_agent_queue`'s `assignee_id` resolution (`"me"`/`"none"`/a UUID
+# string) is a *service*-layer concern — the repository fake receives the
+# already-resolved value: a real UUID, the literal sentinel `"none"`
+# (unassigned filter, matching the real `TicketRepositoryProtocol` shape),
+# or `None` when the filter is absent. The repository fake never sees the
+# literal string `"me"`.
+# =============================================================================
+
+
+def _agent_ticket(
+    *, requester_id: uuid.UUID, assignee_id: uuid.UUID | None = None, status: str = "open"
+) -> Ticket:
+    ticket = _make_ticket(requester_id=requester_id, assignee_id=assignee_id)
+    ticket.status = status
+    return ticket
+
+
+# --- AQ-AC1/AQ-AC2/FR-1/FR-2: agent queue filters, pass-through, cursor ----
+
+
+async def test_list_agent_queue_passes_status_category_and_cursor_through_unresolved() -> None:
+    # Arrange: `status`/`category`/`cursor`/`limit` need no service-layer
+    # resolution — only `assignee_id` does (see below).
+    ticket = _agent_ticket(requester_id=uuid.uuid4())
+    ticket_repo = FakeTicketRepository()
+    ticket_repo.agent_queue_page = TicketListPage(items=[ticket], next_cursor="next-page")
+    service, ticket_repo, *_ = _make_service(ticket_repository=ticket_repo)
+
+    # Act
+    result = await service.list_agent_queue(
+        agent_id=uuid.uuid4(),
+        status="waiting_on_support",
+        category="billing",
+        assignee_id=None,
+        cursor="prev-cursor",
+        limit=25,
+    )
+
+    # Assert
+    assert [item.id for item in result.items] == [ticket.id]
+    assert result.next_cursor == "next-page"
+    call = ticket_repo.agent_queue_calls[0]
+    assert call["status"] == "waiting_on_support"
+    assert call["category"] == "billing"
+    assert call["cursor"] == "prev-cursor"
+    assert call["limit"] == 25
+    assert call["assignee_id"] is None
+
+
+async def test_list_agent_queue_item_carries_assignee_id() -> None:
+    # Arrange: AQ-AC1 — "each item carries assignee_id".
+    assignee_id = uuid.uuid4()
+    ticket = _agent_ticket(requester_id=uuid.uuid4(), assignee_id=assignee_id)
+    ticket_repo = FakeTicketRepository()
+    ticket_repo.agent_queue_page = TicketListPage(items=[ticket], next_cursor=None)
+    service, *_ = _make_service(ticket_repository=ticket_repo)
+
+    # Act
+    result = await service.list_agent_queue(
+        agent_id=uuid.uuid4(),
+        status=None,
+        category=None,
+        assignee_id=None,
+        cursor=None,
+        limit=100,
+    )
+
+    # Assert
+    assert result.items[0].assignee_id == assignee_id
+
+
+async def test_list_agent_queue_assignee_id_me_resolves_to_calling_agent() -> None:
+    # Arrange: AQ-AC2 — "assignee_id=me resolves to the calling agent's own id".
+    agent_id = uuid.uuid4()
+    ticket_repo = FakeTicketRepository()
+    service, ticket_repo, *_ = _make_service(ticket_repository=ticket_repo)
+
+    # Act
+    await service.list_agent_queue(
+        agent_id=agent_id, status=None, category=None, assignee_id="me", cursor=None, limit=100
+    )
+
+    # Assert
+    call = ticket_repo.agent_queue_calls[0]
+    assert call["assignee_id"] == agent_id
+
+
+async def test_list_agent_queue_assignee_id_none_filters_unassigned() -> None:
+    # Arrange: AQ-AC2 — "assignee_id=none returns only unassigned tickets".
+    ticket_repo = FakeTicketRepository()
+    service, ticket_repo, *_ = _make_service(ticket_repository=ticket_repo)
+
+    # Act
+    await service.list_agent_queue(
+        agent_id=uuid.uuid4(),
+        status=None,
+        category=None,
+        assignee_id="none",
+        cursor=None,
+        limit=100,
+    )
+
+    # Assert
+    call = ticket_repo.agent_queue_calls[0]
+    assert call["assignee_id"] == "none"
+
+
+async def test_list_agent_queue_assignee_id_specific_uuid_passed_through() -> None:
+    # Arrange
+    target_id = uuid.uuid4()
+    ticket_repo = FakeTicketRepository()
+    service, ticket_repo, *_ = _make_service(ticket_repository=ticket_repo)
+
+    # Act
+    await service.list_agent_queue(
+        agent_id=uuid.uuid4(),
+        status=None,
+        category=None,
+        assignee_id=str(target_id),
+        cursor=None,
+        limit=100,
+    )
+
+    # Assert
+    call = ticket_repo.agent_queue_calls[0]
+    assert call["assignee_id"] == target_id
+
+
+async def test_list_agent_queue_malformed_assignee_id_raises_422() -> None:
+    # Arrange: API design Open Questions #2 — a value that is none of
+    # UUID/`me`/`none` is rejected, mirroring the inherited malformed-
+    # cursor/limit precedent.
+    service, *_ = _make_service()
+
+    # Act & Assert
+    with pytest.raises(ValidationFailedError) as exc_info:
+        await service.list_agent_queue(
+            agent_id=uuid.uuid4(),
+            status=None,
+            category=None,
+            assignee_id="not-a-uuid-or-me-or-none",
+            cursor=None,
+            limit=100,
+        )
+    fields = [error.field for error in exc_info.value.errors or []]
+    assert fields[0] == "assignee_id"
+
+
+async def test_list_agent_queue_invalid_cursor_raises_422() -> None:
+    # Arrange
+    ticket_repo = FakeTicketRepository()
+    ticket_repo.agent_queue_page = None
+    service, *_ = _make_service(ticket_repository=ticket_repo)
+
+    # Act & Assert
+    with pytest.raises(ValidationFailedError) as exc_info:
+        await service.list_agent_queue(
+            agent_id=uuid.uuid4(),
+            status=None,
+            category=None,
+            assignee_id=None,
+            cursor="garbage",
+            limit=100,
+        )
+    fields = [error.field for error in exc_info.value.errors or []]
+    assert fields[0] == "cursor"
+
+
+@pytest.mark.parametrize("limit", [0, 101])
+async def test_list_agent_queue_out_of_range_limit_raises_422(limit: int) -> None:
+    # Arrange
+    service, *_ = _make_service()
+
+    # Act & Assert
+    with pytest.raises(ValidationFailedError) as exc_info:
+        await service.list_agent_queue(
+            agent_id=uuid.uuid4(),
+            status=None,
+            category=None,
+            assignee_id=None,
+            cursor=None,
+            limit=limit,
+        )
+    fields = [error.field for error in exc_info.value.errors or []]
+    assert fields[0] == "limit"
+
+
+# --- AQ-AC3/FR-3: assign ----------------------------------------------------
+
+
+async def test_assign_ticket_happy_path_sets_assignee_and_audits_and_commits() -> None:
+    # Arrange
+    ticket_id = uuid.uuid4()
+    actor_id = uuid.uuid4()
+    target_id = uuid.uuid4()
+    ticket = _agent_ticket(requester_id=uuid.uuid4(), assignee_id=None)
+    ticket.id = ticket_id
+    ticket_repo = FakeTicketRepository(existing={ticket_id: ticket})
+    role_service = FakeRoleService(scopes_by_user={target_id: ["tickets:write"]})
+    user_service = FakeUserService(account_status_by_user={target_id: "active"})
+    service, ticket_repo, _, _, _, audit_service, *_ = _make_service(
+        ticket_repository=ticket_repo, role_service=role_service, user_service=user_service
+    )
+
+    # Act
+    result = await service.assign_ticket(
+        ticket_id=ticket_id,
+        actor_id=actor_id,
+        actor_scopes=["tickets:read", "tickets:write"],
+        assignee_id=target_id,
+    )
+
+    # Assert
+    assert result.assignee_id == target_id
+    call = ticket_repo.assign_calls[-1]
+    assert call["ticket_id"] == ticket_id
+    assert call["new_assignee_id"] == target_id
+    assert call["expected_assignee_id"] is None
+    audit_call = audit_service.record_event_calls[-1]
+    assert audit_call["event"] == "ticket_assigned"
+    assert audit_call["actor_id"] == actor_id
+    assert audit_call["target_id"] == ticket_id
+    assert ticket_repo.commit_count == 1
+
+
+async def test_assign_ticket_self_assign_follows_identical_success_path() -> None:
+    # Arrange: Assumption #5 — the caller may name their own id.
+    ticket_id = uuid.uuid4()
+    actor_id = uuid.uuid4()
+    ticket = _agent_ticket(requester_id=uuid.uuid4(), assignee_id=None)
+    ticket.id = ticket_id
+    ticket_repo = FakeTicketRepository(existing={ticket_id: ticket})
+    role_service = FakeRoleService(scopes_by_user={actor_id: ["tickets:write"]})
+    user_service = FakeUserService(account_status_by_user={actor_id: "active"})
+    service, *_ = _make_service(
+        ticket_repository=ticket_repo, role_service=role_service, user_service=user_service
+    )
+
+    # Act
+    result = await service.assign_ticket(
+        ticket_id=ticket_id,
+        actor_id=actor_id,
+        actor_scopes=["tickets:write"],
+        assignee_id=actor_id,
+    )
+
+    # Assert
+    assert result.assignee_id == actor_id
+
+
+async def test_assign_ticket_reassign_already_assigned_replaces_and_audits() -> None:
+    # Arrange: AQ-AC3 — "re-assigning an already-assigned ticket replaces
+    # the assignee and audits the change".
+    ticket_id = uuid.uuid4()
+    previous_assignee = uuid.uuid4()
+    new_assignee = uuid.uuid4()
+    ticket = _agent_ticket(requester_id=uuid.uuid4(), assignee_id=previous_assignee)
+    ticket.id = ticket_id
+    ticket_repo = FakeTicketRepository(existing={ticket_id: ticket})
+    role_service = FakeRoleService(scopes_by_user={new_assignee: ["tickets:write"]})
+    user_service = FakeUserService(account_status_by_user={new_assignee: "active"})
+    service, ticket_repo, _, _, _, audit_service, *_ = _make_service(
+        ticket_repository=ticket_repo, role_service=role_service, user_service=user_service
+    )
+
+    # Act
+    result = await service.assign_ticket(
+        ticket_id=ticket_id,
+        actor_id=uuid.uuid4(),
+        actor_scopes=["tickets:write"],
+        assignee_id=new_assignee,
+    )
+
+    # Assert
+    assert result.assignee_id == new_assignee
+    call = ticket_repo.assign_calls[-1]
+    assert call["expected_assignee_id"] == previous_assignee
+    assert audit_service.record_event_calls[-1]["event"] == "ticket_assigned"
+
+
+# --- AQ-AC7/FR-7: 404-before-403 permission gate on assign/unassign --------
+
+
+@pytest.mark.parametrize("method_name", ["assign_ticket", "unassign_ticket"])
+async def test_assign_and_unassign_customer_caller_raises_404_before_any_lookup(
+    method_name: str,
+) -> None:
+    # Arrange: a customer holds neither tickets:read nor tickets:write — the
+    # permission gate runs before any ticket lookup (US-4.4-api-design.md's
+    # stated check order), so no repository call is ever made.
+    ticket_repo = FakeTicketRepository()
+    service, ticket_repo, *_ = _make_service(ticket_repository=ticket_repo)
+    method = getattr(service, method_name)
+    kwargs: dict[str, object] = {
+        "ticket_id": uuid.uuid4(),
+        "actor_id": uuid.uuid4(),
+        "actor_scopes": [],
+    }
+    if method_name == "assign_ticket":
+        kwargs["assignee_id"] = uuid.uuid4()
+
+    # Act & Assert
+    with pytest.raises(TicketNotFoundError):
+        await method(**kwargs)
+    assert ticket_repo.assign_calls == []
+    assert ticket_repo.unassign_calls == []
+
+
+@pytest.mark.parametrize("method_name", ["assign_ticket", "unassign_ticket"])
+async def test_assign_and_unassign_read_only_agent_raises_403_before_any_lookup(
+    method_name: str,
+) -> None:
+    # Arrange: a tickets:read-only agent — 403, not 404, and (per the
+    # permission-gate-first check order) also no repository call.
+    ticket_repo = FakeTicketRepository()
+    service, ticket_repo, *_ = _make_service(ticket_repository=ticket_repo)
+    method = getattr(service, method_name)
+    kwargs: dict[str, object] = {
+        "ticket_id": uuid.uuid4(),
+        "actor_id": uuid.uuid4(),
+        "actor_scopes": ["tickets:read"],
+    }
+    if method_name == "assign_ticket":
+        kwargs["assignee_id"] = uuid.uuid4()
+
+    # Act & Assert
+    with pytest.raises(InsufficientPermissionError):
+        await method(**kwargs)
+    assert ticket_repo.assign_calls == []
+    assert ticket_repo.unassign_calls == []
+
+
+@pytest.mark.parametrize("method_name", ["assign_ticket", "unassign_ticket"])
+async def test_assign_and_unassign_unknown_ticket_raises_404(method_name: str) -> None:
+    # Arrange: a tickets:write holder, but the ticket id does not exist.
+    service, *_ = _make_service()
+    method = getattr(service, method_name)
+    kwargs: dict[str, object] = {
+        "ticket_id": uuid.uuid4(),
+        "actor_id": uuid.uuid4(),
+        "actor_scopes": ["tickets:write"],
+    }
+    if method_name == "assign_ticket":
+        kwargs["assignee_id"] = uuid.uuid4()
+
+    # Act & Assert
+    with pytest.raises(TicketNotFoundError):
+        await method(**kwargs)
+
+
+# --- AQ-AC9/FR-9 and FR-4/OD-3: closed-ticket 409 on both operations -------
+
+
+@pytest.mark.parametrize("method_name", ["assign_ticket", "unassign_ticket"])
+async def test_assign_and_unassign_closed_ticket_raises_409(method_name: str) -> None:
+    # Arrange: FR-9 (assign) and FR-4's OD-3 adopted default (unassign) —
+    # both return 409 invalid-state-transition for a closed ticket.
+    ticket_id = uuid.uuid4()
+    ticket = _agent_ticket(requester_id=uuid.uuid4(), assignee_id=uuid.uuid4(), status="closed")
+    ticket.id = ticket_id
+    ticket_repo = FakeTicketRepository(existing={ticket_id: ticket})
+    service, ticket_repo, *_ = _make_service(ticket_repository=ticket_repo)
+    method = getattr(service, method_name)
+    kwargs: dict[str, object] = {
+        "ticket_id": ticket_id,
+        "actor_id": uuid.uuid4(),
+        "actor_scopes": ["tickets:write"],
+    }
+    if method_name == "assign_ticket":
+        kwargs["assignee_id"] = uuid.uuid4()
+
+    # Act & Assert
+    with pytest.raises(InvalidStateTransitionError) as exc_info:
+        await method(**kwargs)
+    assert exc_info.value.allowed_events == []
+    assert ticket_repo.assign_calls == []
+    assert ticket_repo.unassign_calls == []
+
+
+# --- AQ-AC8/FR-8 (and OD-4): assignee must hold tickets:write --------------
+
+
+async def test_assign_ticket_target_lacks_tickets_write_raises_422() -> None:
+    # Arrange
+    ticket_id = uuid.uuid4()
+    target_id = uuid.uuid4()
+    ticket = _agent_ticket(requester_id=uuid.uuid4(), assignee_id=None)
+    ticket.id = ticket_id
+    ticket_repo = FakeTicketRepository(existing={ticket_id: ticket})
+    role_service = FakeRoleService(scopes_by_user={target_id: ["tickets:read"]})
+    service, ticket_repo, *_ = _make_service(
+        ticket_repository=ticket_repo, role_service=role_service
+    )
+
+    # Act & Assert
+    with pytest.raises(ValidationFailedError) as exc_info:
+        await service.assign_ticket(
+            ticket_id=ticket_id,
+            actor_id=uuid.uuid4(),
+            actor_scopes=["tickets:write"],
+            assignee_id=target_id,
+        )
+    fields = [error.field for error in exc_info.value.errors or []]
+    assert fields[0] == "assignee_id"
+    assert ticket_repo.assign_calls == []
+
+
+async def test_assign_ticket_target_deactivated_raises_422() -> None:
+    # Arrange: OD-4's adopted default — a target holding tickets:write but
+    # deactivated is rejected the same way as a target lacking the scope.
+    ticket_id = uuid.uuid4()
+    target_id = uuid.uuid4()
+    ticket = _agent_ticket(requester_id=uuid.uuid4(), assignee_id=None)
+    ticket.id = ticket_id
+    ticket_repo = FakeTicketRepository(existing={ticket_id: ticket})
+    role_service = FakeRoleService(scopes_by_user={target_id: ["tickets:write"]})
+    user_service = FakeUserService(account_status_by_user={target_id: "deactivated"})
+    service, ticket_repo, *_ = _make_service(
+        ticket_repository=ticket_repo, role_service=role_service, user_service=user_service
+    )
+
+    # Act & Assert
+    with pytest.raises(ValidationFailedError) as exc_info:
+        await service.assign_ticket(
+            ticket_id=ticket_id,
+            actor_id=uuid.uuid4(),
+            actor_scopes=["tickets:write"],
+            assignee_id=target_id,
+        )
+    fields = [error.field for error in exc_info.value.errors or []]
+    assert fields[0] == "assignee_id"
+    assert ticket_repo.assign_calls == []
+    # OD-4: the account-status check is against the *target* id, not the
+    # caller's own — confirms the fake (and, once built, the real check)
+    # is actually invoked with an arbitrary id.
+    assert target_id in user_service.status_calls
+
+
+# --- AQ-AC10/FR-10: concurrent assignment -----------------------------------
+
+
+async def test_assign_ticket_concurrency_loss_raises_409_assignment_conflict() -> None:
+    # Arrange: this request's own `get_by_id` read saw the ticket
+    # unassigned, but the conditional UPDATE affects zero rows — another
+    # agent's assign committed first (the fake's own `assign_returns_none`
+    # stands in for "the DB's WHERE clause matched zero rows", same
+    # convention as `FakeTicketRepository.transition_returns_none`).
+    ticket_id = uuid.uuid4()
+    target_id = uuid.uuid4()
+    ticket = _agent_ticket(requester_id=uuid.uuid4(), assignee_id=None)
+    ticket.id = ticket_id
+    ticket_repo = FakeTicketRepository(existing={ticket_id: ticket})
+    ticket_repo.assign_returns_none = True
+    role_service = FakeRoleService(scopes_by_user={target_id: ["tickets:write"]})
+    user_service = FakeUserService(account_status_by_user={target_id: "active"})
+    service, ticket_repo, _, _, _, audit_service, *_ = _make_service(
+        ticket_repository=ticket_repo, role_service=role_service, user_service=user_service
+    )
+
+    # Act & Assert
+    with pytest.raises(AssignmentConflictError):
+        await service.assign_ticket(
+            ticket_id=ticket_id,
+            actor_id=uuid.uuid4(),
+            actor_scopes=["tickets:write"],
+            assignee_id=target_id,
+        )
+    assert audit_service.record_event_calls == []
+    assert ticket_repo.commit_count == 0
+
+
+# --- AQ-AC4/FR-4: unassign ---------------------------------------------------
+
+
+async def test_unassign_ticket_happy_path_clears_assignee_and_audits_and_commits() -> None:
+    # Arrange
+    ticket_id = uuid.uuid4()
+    actor_id = uuid.uuid4()
+    ticket = _agent_ticket(requester_id=uuid.uuid4(), assignee_id=uuid.uuid4())
+    ticket.id = ticket_id
+    ticket_repo = FakeTicketRepository(existing={ticket_id: ticket})
+    service, ticket_repo, _, _, _, audit_service, *_ = _make_service(ticket_repository=ticket_repo)
+
+    # Act
+    result = await service.unassign_ticket(
+        ticket_id=ticket_id, actor_id=actor_id, actor_scopes=["tickets:write"]
+    )
+
+    # Assert
+    assert result.assignee_id is None
+    assert ticket_repo.unassign_calls == [{"ticket_id": ticket_id}]
+    audit_call = audit_service.record_event_calls[-1]
+    assert audit_call["event"] == "ticket_unassigned"
+    assert audit_call["actor_id"] == actor_id
+    assert audit_call["target_id"] == ticket_id
+    assert ticket_repo.commit_count == 1
+
+
+async def test_unassign_ticket_already_unassigned_is_idempotent_200() -> None:
+    # Arrange: API design Open Questions #5 — whether a no-op repeat call
+    # also writes a fresh audit entry is deliberately left undecided by
+    # every upstream artifact; this test asserts only the settled part of
+    # the contract (a 200 with assignee_id null, not a 404/409), per
+    # US-4.4-openapi.yaml's stated idempotency.
+    ticket_id = uuid.uuid4()
+    ticket = _agent_ticket(requester_id=uuid.uuid4(), assignee_id=None)
+    ticket.id = ticket_id
+    ticket_repo = FakeTicketRepository(existing={ticket_id: ticket})
+    service, *_ = _make_service(ticket_repository=ticket_repo)
+
+    # Act
+    result = await service.unassign_ticket(
+        ticket_id=ticket_id, actor_id=uuid.uuid4(), actor_scopes=["tickets:write"]
+    )
+
+    # Assert
+    assert result.assignee_id is None
+
+
+# --- Both endpoints: commit-exactly-once / audit-only-on-success -----------
+
+
+async def test_assign_ticket_commits_exactly_once() -> None:
+    # Arrange
+    ticket_id = uuid.uuid4()
+    target_id = uuid.uuid4()
+    ticket = _agent_ticket(requester_id=uuid.uuid4(), assignee_id=None)
+    ticket.id = ticket_id
+    ticket_repo = FakeTicketRepository(existing={ticket_id: ticket})
+    role_service = FakeRoleService(scopes_by_user={target_id: ["tickets:write"]})
+    user_service = FakeUserService(account_status_by_user={target_id: "active"})
+    service, ticket_repo, *_ = _make_service(
+        ticket_repository=ticket_repo, role_service=role_service, user_service=user_service
+    )
+
+    # Act
+    await service.assign_ticket(
+        ticket_id=ticket_id,
+        actor_id=uuid.uuid4(),
+        actor_scopes=["tickets:write"],
+        assignee_id=target_id,
+    )
+
+    # Assert
+    assert ticket_repo.commit_count == 1

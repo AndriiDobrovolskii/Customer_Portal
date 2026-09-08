@@ -1,0 +1,578 @@
+openapi: 3.0.3
+info:
+  title: Agent Ticket Queue & Assignment (US-4.4 / spec US-4.4) — fragment
+  version: "1"
+x-story: US-4.4
+x-source-specification: docs/specifications/US-4.4-spec.md
+x-source-specification-version: 1
+x-produced-by: openapi-designer
+paths:
+  /v1/support/tickets:
+    get:
+      operationId: listOwnTickets
+      summary: List tickets — agent queue branch or customer own-tickets branch
+      description: >
+        Single endpoint, two branches selected by whether the caller's access
+        token carries `tickets:read` (FR-1/FR-5). `operationId` kept
+        verbatim from US-4.1 (no FR calls for renaming published contract
+        surface, and FR-5 requires the customer branch to stay byte-
+        identical) — the summary above is broadened in prose only. See
+        US-4.4-api-design.md "Two Branches, One Route".
+      tags: [support, tickets]
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: status
+          in: query
+          required: false
+          schema:
+            type: string
+            enum: [open, waiting_on_support, waiting_on_customer, resolved, closed]
+          description: >
+            Shared by both branches, unchanged from US-4.1 for the customer
+            branch. Agent branch (FR-2): filters the queue to this status;
+            `status=closed` is the only way a closed ticket appears in the
+            agent branch's response (the default, filterless agent query
+            excludes `closed` — FR-1). Customer branch: unchanged US-4.1
+            behavior, no default exclusion.
+        - name: category
+          in: query
+          required: false
+          schema:
+            type: string
+            maxLength: 50
+          description: >
+            New in this story, agent branch only (FR-2). Ignored by the
+            customer branch (FR-6) — ignored, not rejected with 422; see
+            US-4.4-api-design.md Open Questions #2.
+        - name: assignee_id
+          in: query
+          required: false
+          schema:
+            type: string
+          description: >
+            New in this story, agent branch only (FR-2). One of: a UUID, the
+            literal `me` (resolves server-side to the calling agent's own
+            id), or the literal `none` (unassigned tickets only). Ignored by
+            the customer branch (FR-6) — never rejected with 422 there, even
+            when malformed, per FR-6's own stated rationale (the ownership
+            filter, not parameter validation, protects customer data). On the
+            agent branch a value that is none of the three accepted forms is
+            rejected — see the `422` response below and
+            US-4.4-api-design.md Open Questions #2.
+        - name: cursor
+          in: query
+          required: false
+          schema:
+            type: string
+          description: >
+            Opaque pagination cursor from a previous response's
+            `next_cursor`. Branch-specific encoding: the customer branch's
+            cursor still orders by `(created_at, id)` (US-4.1, unchanged);
+            the agent branch's cursor orders by `(updated_at, id)`
+            (Assumption #8/FR-1's "oldest-updated first"). A cursor from one
+            branch is not valid on the other — see
+            US-4.4-api-design.md "Cursor Is Branch-Specific".
+        - name: limit
+          in: query
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+          description: >
+            Not stated by any FR in either the US-4.1 or this story's spec;
+            inherited unchanged from US-4.1-openapi.yaml's own unstated
+            choice of 1-100/default 100 (spec review's Low finding, carried
+            forward — see US-4.4-api-design.md Open Questions #3).
+      responses:
+        "200":
+          description: >
+            Agent branch (`tickets:read` present, FR-1/FR-2): every ticket
+            not in status `"closed"` (unless `status=closed` is explicit),
+            regardless of requester, ordered oldest-`updated_at` first
+            (stable-tiebroken by `id`), each item carrying `assignee_id`
+            (`AgentTicketListResponse`). Customer branch (`tickets:read`
+            absent, FR-5/FR-6): only the caller's own tickets, newest-
+            `created_at` first, no `assignee_id` field anywhere in the
+            response (`TicketListResponse`, byte-identical to US-4.1). No
+            `403` branch exists any more on this route — `In Scope` removes
+            `reject_agent_queue_access`/`AgentQueueNotAvailableError`
+            entirely; a caller with neither `tickets:read` nor an owned
+            ticket simply receives an empty customer-branch page, not an
+            error.
+          content:
+            application/json:
+              schema:
+                anyOf:
+                  - $ref: "#/components/schemas/TicketListResponse"
+                  - $ref: "#/components/schemas/AgentTicketListResponse"
+                description: >
+                  `anyOf`, not `oneOf`: `TicketRead` carries no
+                  `additionalProperties: false` (it is an outbound schema —
+                  this project's `extra="forbid"` convention is inbound-only,
+                  AGENTS.md §4), so an `AgentTicketRead` item — every
+                  `TicketRead` field plus `assignee_id` — validates against
+                  both `TicketListResponse` and `AgentTicketListResponse` at
+                  once. `oneOf` would demand exactly one match and reject
+                  every agent-branch body outright. See
+                  US-4.4-api-design.md "Two Branches, One Route" for how
+                  this maps onto FastAPI's `response_model`.
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "422":
+          description: >
+            Malformed `cursor` or out-of-range `limit` (either branch,
+            mirroring US-4.1's own unstated-but-inherited behavior), or —
+            agent branch only — an `assignee_id` value that is neither a
+            UUID, `me`, nor `none` (this contract's own addition, not stated
+            by any FR — see Open Questions #2). Never returned for a
+            malformed agent-only parameter on the customer branch (FR-6).
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ValidationFailedProblem"
+  /v1/support/tickets/{id}/assign:
+    post:
+      operationId: assignTicket
+      summary: Agent takes or reassigns ownership of a ticket
+      tags: [support, tickets, assignment]
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AssignTicketRequest"
+      responses:
+        "200":
+          description: >
+            `assignee_id` set to the named target (FR-3). Self-assignment
+            (Assumption #5 — the caller names their own id) follows the
+            identical success path; no FR or AC distinguishes it. Re-
+            assigning an already-assigned ticket replaces the assignee and
+            audits the change identically to a first assignment. A
+            `ticket_audit_log` entry (`event=ticket_assigned`,
+            `actor=`the caller, `target=`the ticket) is written in the same
+            transaction as the write (NFR) — not part of this response body.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AgentTicketStateRead"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          description: >
+            Caller holds `tickets:read` but not `tickets:write` (FR-7). Only
+            reached if the ticket is not closed and the caller's scope was
+            actually evaluated — see US-4.4-api-design.md's stated check
+            order (permission gate runs first here, unlike US-4.3's
+            state-before-actor order, because this gate needs no ticket
+            lookup — see Open Questions #1).
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/InsufficientPermissionProblem"
+        "404":
+          description: >
+            Caller holds neither `tickets:read` nor `tickets:write` (a
+            customer), or the ticket id does not exist (FR-7). Both cases
+            return the identical body — never `403` for a customer, never
+            confirming the ticket id exists, consistent with TR-AC4/TC-AC7's
+            established precedent (FR-7's own citation).
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/NotFoundProblem"
+        "409":
+          description: >
+            Two distinct conditions share this status, told apart by `type`:
+            (a) the ticket's status is `"closed"` (FR-9, `type` ends
+            `invalid-state-transition`) — reuses the module's existing
+            `InvalidStateTransitionError` shape (`app/modules/support/
+            exceptions.py`, US-4.3) with `allowed_events: []`, since assign/
+            unassign have no "next valid event" vocabulary of their own; (b)
+            a concurrent assign won the race first (FR-10, `type` ends
+            `assignment-conflict`) — a new slug, since this is a field-level
+            optimistic-concurrency conflict on `assignee_id`, not a
+            ticket-status-machine violation. See US-4.4-api-design.md
+            "Concurrency Design" for the generalization beyond FR-10's
+            literal "unassigned ticket" wording.
+          content:
+            application/problem+json:
+              schema:
+                oneOf:
+                  - $ref: "#/components/schemas/InvalidStateTransitionProblem"
+                  - $ref: "#/components/schemas/AssignmentConflictProblem"
+        "422":
+          description: >
+            The named `assignee_id` does not hold `tickets:write` (FR-8), or
+            — per OD-4's unconfirmed drafting default, carried through
+            unresolved — holds it but the account is deactivated. Not yet
+            human-confirmed; see US-4.4-api-design.md Open Questions #4 and
+            spec Open Questions OD-4.
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ValidationFailedProblem"
+    delete:
+      operationId: unassignTicket
+      summary: Agent releases ownership of a ticket
+      tags: [support, tickets, assignment]
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: >
+            `assignee_id` cleared to `null` (FR-4). Idempotent: unassigning a
+            ticket that already has no assignee also returns `200` with
+            `assignee_id` null and is not an error — see
+            US-4.4-api-design.md "Unassign Is Idempotent" for whether a
+            repeat call also writes a fresh `ticket_unassigned` audit entry
+            (Open Questions #5, not settled by any AC). Where a state change
+            did occur, a `ticket_audit_log` entry
+            (`event=ticket_unassigned`) is written in the same transaction
+            as the write (NFR).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AgentTicketStateRead"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          description: Caller holds `tickets:read` but not `tickets:write` (FR-7).
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/InsufficientPermissionProblem"
+        "404":
+          description: >
+            Caller holds neither `tickets:read` nor `tickets:write`, or the
+            ticket id does not exist (FR-7). Same uniform-404 shape as
+            `assign`.
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/NotFoundProblem"
+        "409":
+          description: >
+            Ticket status is `"closed"` — FR-4's drafting default per OD-3,
+            not yet human-confirmed (mirrors `assign`'s FR-9 restriction for
+            symmetry; the alternative, not built here, is a `200` with
+            `assignee_id` cleared even on a closed ticket). No concurrency-
+            conflict flavor is defined for `unassign` — see
+            US-4.4-api-design.md "Concurrency Design": unassign is designed
+            as an unconditional, idempotent clear rather than an optimistic-
+            concurrency-guarded write, so it has no analogous "lost the
+            race" case to report.
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/InvalidStateTransitionProblem"
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+  responses:
+    Unauthorized:
+      description: No valid access token.
+      content:
+        application/problem+json:
+          schema:
+            $ref: "#/components/schemas/UnauthorizedProblem"
+  schemas:
+    AssignTicketRequest:
+      type: object
+      required: [assignee_id]
+      additionalProperties: false
+      properties:
+        assignee_id:
+          type: string
+          format: uuid
+          description: >
+            The target agent's user id. May equal the caller's own id
+            (self-assign, Assumption #5). Must currently hold `tickets:write`
+            (and, per OD-4's unconfirmed default, be active) or the request
+            is rejected `422` (FR-8).
+    TicketRead:
+      type: object
+      required: [id, ticket_number, status, requester_id, subject, body, category, created_at, updated_at]
+      description: >
+        Restated verbatim from US-4.1-openapi.yaml/US-4.3's shared usage —
+        this story does not modify it (OD-1). See that fragment for the
+        authoritative field-by-field rationale.
+      properties:
+        id:
+          type: string
+          format: uuid
+        ticket_number:
+          type: string
+          example: "CP-2026-0000431"
+        status:
+          type: string
+          enum: [open, waiting_on_support, waiting_on_customer, resolved, closed]
+        requester_id:
+          type: string
+          format: uuid
+        subject:
+          type: string
+        body:
+          type: string
+        category:
+          type: string
+          maxLength: 50
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+    TicketListResponse:
+      type: object
+      required: [items]
+      description: >
+        Restated verbatim from US-4.1-openapi.yaml — the customer branch's
+        response shape, untouched by this story (OD-1, FR-5).
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/TicketRead"
+        next_cursor:
+          type: string
+          nullable: true
+    AgentTicketRead:
+      type: object
+      required: [id, ticket_number, status, requester_id, subject, body, category, created_at, updated_at, assignee_id]
+      description: >
+        OD-1's recommended default: every `TicketRead` field plus
+        `assignee_id`. A distinct schema, not `TicketRead` extended in
+        place, so the customer-facing `TicketRead`/`TicketListResponse`
+        contract this endpoint also serves is provably unaffected (spec
+        Response Schemas section).
+      properties:
+        id:
+          type: string
+          format: uuid
+        ticket_number:
+          type: string
+          example: "CP-2026-0000431"
+        status:
+          type: string
+          enum: [open, waiting_on_support, waiting_on_customer, resolved, closed]
+        requester_id:
+          type: string
+          format: uuid
+        subject:
+          type: string
+        body:
+          type: string
+        category:
+          type: string
+          maxLength: 50
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+        assignee_id:
+          type: string
+          format: uuid
+          nullable: true
+          description: >
+            The agent currently owning the ticket, or `null` if unassigned
+            (FR-1). Never present on `TicketRead`/`TicketListResponse`
+            (Assumption #7, NFR).
+    AgentTicketListResponse:
+      type: object
+      required: [items]
+      description: The agent branch's response envelope (FR-1/FR-2).
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/AgentTicketRead"
+        next_cursor:
+          type: string
+          nullable: true
+          description: >
+            Opaque, `(updated_at, id)`-encoded — not interchangeable with
+            `TicketListResponse.next_cursor`'s `(created_at, id)` encoding.
+    AgentTicketStateRead:
+      type: object
+      required: [id, ticket_number, status, updated_at, assignee_id]
+      description: >
+        OD-1's recommended default: every `TicketStateRead`
+        (US-4.3-openapi.yaml) field plus `assignee_id`. A distinct schema,
+        not `TicketStateRead` extended in place, so `/resolve`, `/close`,
+        and `/reopen` — all customer-reachable — stay provably unaffected.
+      properties:
+        id:
+          type: string
+          format: uuid
+        ticket_number:
+          type: string
+          example: "CP-2026-0000431"
+        status:
+          type: string
+          enum: [open, waiting_on_support, waiting_on_customer, resolved, closed]
+          description: >
+            Unchanged by assign/unassign in this story — Out of Scope
+            confirms assignment is orthogonal to the US-4.3 state machine
+            (source Open Question #1's own default).
+        resolved_at:
+          type: string
+          format: date-time
+          nullable: true
+        closed_at:
+          type: string
+          format: date-time
+          nullable: true
+        updated_at:
+          type: string
+          format: date-time
+        assignee_id:
+          type: string
+          format: uuid
+          nullable: true
+          description: The value after this call — set (assign) or null (unassign).
+    UnauthorizedProblem:
+      allOf:
+        - $ref: "#/components/schemas/ProblemBase"
+      properties:
+        type:
+          type: string
+          example: ".../errors/unauthorized"
+        status:
+          type: integer
+          example: 401
+      description: Cross-cutting slug shared by every authenticated endpoint in this project.
+    InsufficientPermissionProblem:
+      allOf:
+        - $ref: "#/components/schemas/ProblemBase"
+      properties:
+        type:
+          type: string
+          example: ".../errors/insufficient-permission"
+        status:
+          type: integer
+          example: 403
+      description: >
+        Reuses app/modules/support/exceptions.py's InsufficientPermissionError
+        slug/shape, already shipped by US-4.2 for the same condition observed
+        on a different route (FR-7).
+    NotFoundProblem:
+      allOf:
+        - $ref: "#/components/schemas/ProblemBase"
+      properties:
+        type:
+          type: string
+          example: ".../errors/not-found"
+        status:
+          type: integer
+          example: 404
+      description: >
+        Reuses app/modules/support/exceptions.py's TicketNotFoundError
+        slug/shape (US-4.2), used here for the deliberately-uniform
+        "no such ticket, or you cannot reach the assignment endpoints for
+        it" case (FR-7).
+    InvalidStateTransitionProblem:
+      allOf:
+        - $ref: "#/components/schemas/ProblemBase"
+      properties:
+        type:
+          type: string
+          example: ".../errors/invalid-state-transition"
+        status:
+          type: integer
+          example: 409
+        allowed_events:
+          type: array
+          items:
+            type: string
+          description: >
+            Always empty for this story's endpoints — assign/unassign do not
+            expose a "next valid event" vocabulary the way resolve/close/
+            reopen do. Field kept (not dropped) only because it is required
+            by the shipped US-4.3 exception class this response reuses.
+      required: [allowed_events]
+      description: >
+        Reuses app/modules/support/exceptions.py's InvalidStateTransitionError
+        (US-4.3) — same slug/status/shape, raised here with
+        allowed_events=[] (FR-9; FR-4's OD-3 default for unassign).
+    AssignmentConflictProblem:
+      allOf:
+        - $ref: "#/components/schemas/ProblemBase"
+      properties:
+        type:
+          type: string
+          example: ".../errors/assignment-conflict"
+        status:
+          type: integer
+          example: 409
+      description: >
+        New slug, first use in this project (FR-10). Reported when a
+        conditional UPDATE scoped to the `assignee_id` value read at the
+        start of the request affects zero rows because a concurrent
+        assign/reassign already changed it — a field-level optimistic-
+        concurrency conflict, deliberately not reported as
+        invalid-state-transition (that slug is reserved for the
+        ticket-is-closed condition). See US-4.4-api-design.md "Concurrency
+        Design".
+    ValidationFailedProblem:
+      allOf:
+        - $ref: "#/components/schemas/ProblemBase"
+      properties:
+        type:
+          type: string
+          example: ".../errors/validation-failed"
+        status:
+          type: integer
+          example: 422
+        errors:
+          type: array
+          items:
+            type: object
+            required: [field, message, code]
+            properties:
+              field:
+                type: string
+              message:
+                type: string
+              code:
+                type: string
+      description: Reused cross-project slug and shape (app/core/exceptions.py's FieldError), not new here.
+    ProblemBase:
+      type: object
+      description: RFC 7807 problem body. `type` is an absolute/relative URI ending in the slug named per response.
+      required: [type, title, status, detail, instance]
+      properties:
+        type:
+          type: string
+        title:
+          type: string
+        status:
+          type: integer
+        detail:
+          type: string
+        instance:
+          type: string
+          example: /v1/support/tickets/{id}/assign

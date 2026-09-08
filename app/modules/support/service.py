@@ -4,13 +4,14 @@ import json
 import logging
 import uuid
 from datetime import UTC, datetime
-from typing import Protocol
+from typing import Literal, Protocol
 
 from app.core.email import EmailSender
 from app.core.exceptions import FieldError
 from app.modules.support.cache import IdempotencyEnvelope
 from app.modules.support.exceptions import (
     AccountDeactivatedError,
+    AssignmentConflictError,
     AttachmentNotOwnedError,
     IdempotencyKeyReuseError,
     InsufficientPermissionError,
@@ -24,6 +25,9 @@ from app.modules.support.exceptions import (
 from app.modules.support.models import Attachment, Ticket, TicketReply
 from app.modules.support.repository import ReplyListPage, TicketListPage
 from app.modules.support.schemas import (
+    AgentTicketListResponse,
+    AgentTicketRead,
+    AgentTicketStateRead,
     ReplyRead,
     ReplyThreadPage,
     TicketDetailRead,
@@ -90,6 +94,26 @@ class TicketRepositoryProtocol(Protocol):
         closed_by: uuid.UUID | None = None,
         require_resolved_within_window: bool = False,
     ) -> Ticket | None: ...
+
+    async def list_for_agent_queue(
+        self,
+        *,
+        cursor: str | None,
+        limit: int,
+        status: str | None = None,
+        category: str | None = None,
+        assignee_id: uuid.UUID | Literal["none"] | None = None,
+    ) -> TicketListPage | None: ...
+
+    async def assign_ticket(
+        self,
+        ticket_id: uuid.UUID,
+        *,
+        new_assignee_id: uuid.UUID,
+        expected_assignee_id: uuid.UUID | None,
+    ) -> Ticket | None: ...
+
+    async def unassign_ticket(self, ticket_id: uuid.UUID) -> Ticket | None: ...
 
     async def commit(self) -> None: ...
 
@@ -165,6 +189,18 @@ class UserServiceProtocol(Protocol):
     async def get_account_status_for_user(self, user_id: uuid.UUID) -> str | None: ...
 
 
+class RoleServiceProtocol(Protocol):
+    """Cross-module collaborator (`app.modules.roles.service`), service ->
+    service per `AGENTS.md` §3 — never `roles.repository` directly, and
+    never a direct `from app.modules.roles.service import RoleService`
+    import in this module (Protocol-only, DI resolved at `dependencies.py`).
+    US-4.4 FR-8's assign-target validation: does the named `assignee_id`
+    currently hold `tickets:write`?
+    """
+
+    async def resolve_scopes_for_user(self, user_id: uuid.UUID) -> list[str]: ...
+
+
 def _hash_request(
     *, subject: str, body: str, category: str, attachment_ids: list[uuid.UUID]
 ) -> str:
@@ -193,6 +229,7 @@ class TicketService:
         rate_limit_cache: TicketCreationRateLimitCacheProtocol,
         audit_service: AuditServiceProtocol,
         user_service: UserServiceProtocol,
+        role_service: RoleServiceProtocol,
         email_sender: EmailSender,
     ) -> None:
         self._repository = repository
@@ -201,6 +238,7 @@ class TicketService:
         self._rate_limit_cache = rate_limit_cache
         self._audit_service = audit_service
         self._user_service = user_service
+        self._role_service = role_service
         self._email_sender = email_sender
 
     async def create_ticket(
@@ -389,6 +427,190 @@ class TicketService:
             items=[TicketRead.model_validate(ticket) for ticket in page.items],
             next_cursor=page.next_cursor,
         )
+
+    async def list_agent_queue(
+        self,
+        *,
+        agent_id: uuid.UUID,
+        status: str | None,
+        category: str | None,
+        assignee_id: str | None,
+        cursor: str | None,
+        limit: int,
+    ) -> AgentTicketListResponse:
+        """AQ-AC1/AQ-AC2 (FR-1/FR-2): the agent-branch queue listing,
+        parallel to `list_own_tickets` above. `assignee_id` is a raw,
+        unresolved string from the router (one of a UUID, the literal
+        `"me"`, the literal `"none"`, or `None` when the filter is absent)
+        — resolved to a real filter value here, before the repository is
+        ever called, mirroring how `list_own_tickets` already resolves
+        `status` filtering before its own repository call. `"me"` resolves
+        to the calling agent's own id (AQ-AC2); `"none"` is passed through
+        as the repository's own unassigned-filter sentinel
+        (`list_for_agent_queue`'s docstring); any other non-UUID string is
+        `422 validation-failed` (API design Open Questions #2).
+        """
+        if not 1 <= limit <= _MAX_LIST_LIMIT:
+            raise ValidationFailedError(
+                errors=[
+                    FieldError(
+                        field="limit", message="limit must be between 1 and 100.", code="max"
+                    )
+                ]
+            )
+
+        resolved_assignee_id: uuid.UUID | Literal["none"] | None
+        if assignee_id is None:
+            resolved_assignee_id = None
+        elif assignee_id == "me":
+            resolved_assignee_id = agent_id
+        elif assignee_id == "none":
+            resolved_assignee_id = "none"
+        else:
+            try:
+                resolved_assignee_id = uuid.UUID(assignee_id)
+            except ValueError:
+                raise ValidationFailedError(
+                    errors=[
+                        FieldError(
+                            field="assignee_id",
+                            message='assignee_id must be a UUID, "me", or "none".',
+                            code="invalid",
+                        )
+                    ]
+                ) from None
+
+        page = await self._repository.list_for_agent_queue(
+            cursor=cursor,
+            limit=limit,
+            status=status,
+            category=category,
+            assignee_id=resolved_assignee_id,
+        )
+        if page is None:
+            raise ValidationFailedError(
+                errors=[FieldError(field="cursor", message="Invalid cursor.", code="invalid")]
+            )
+
+        return AgentTicketListResponse(
+            items=[AgentTicketRead.model_validate(ticket) for ticket in page.items],
+            next_cursor=page.next_cursor,
+        )
+
+    async def assign_ticket(
+        self,
+        *,
+        ticket_id: uuid.UUID,
+        actor_id: uuid.UUID,
+        actor_scopes: list[str],
+        assignee_id: uuid.UUID,
+    ) -> AgentTicketStateRead:
+        """AQ-AC3/AQ-AC7/AQ-AC8/AQ-AC9/AQ-AC10 (FR-3/FR-7/FR-8/FR-9/FR-10).
+        Check order per US-4.4-api-design.md: permission gate (no ticket
+        lookup at all — a pure function of the caller's own token) -> ticket
+        lookup (404) -> closed-ticket (409, FR-9) -> target validation (422,
+        FR-8, OD-4 APPROVED extends this to a deactivated target account) ->
+        conditional update (409 assignment-conflict on race loss, FR-10) ->
+        audit write -> one commit. This is a genuinely different check order
+        from `resolve_ticket`/`close_ticket`/`reopen_ticket` above (state
+        before actor) — the permission gate runs first here because it needs
+        no DB lookup at all (US-4.4-api-design.md's own stated rationale).
+        """
+        if "tickets:write" not in actor_scopes:
+            if "tickets:read" in actor_scopes:
+                raise InsufficientPermissionError
+            raise TicketNotFoundError
+
+        ticket = await self._repository.get_by_id(ticket_id)
+        if ticket is None:
+            raise TicketNotFoundError
+
+        if ticket.status == "closed":
+            raise InvalidStateTransitionError(allowed_events=[])
+
+        target_scopes = await self._role_service.resolve_scopes_for_user(assignee_id)
+        if "tickets:write" not in target_scopes:
+            raise ValidationFailedError(
+                errors=[
+                    FieldError(
+                        field="assignee_id",
+                        message="assignee_id does not hold tickets:write.",
+                        code="invalid",
+                    )
+                ]
+            )
+
+        target_status = await self._user_service.get_account_status_for_user(assignee_id)
+        if target_status == "deactivated":
+            raise ValidationFailedError(
+                errors=[
+                    FieldError(
+                        field="assignee_id",
+                        message="assignee_id's account is deactivated.",
+                        code="invalid",
+                    )
+                ]
+            )
+
+        updated = await self._repository.assign_ticket(
+            ticket_id, new_assignee_id=assignee_id, expected_assignee_id=ticket.assignee_id
+        )
+        if updated is None:
+            raise AssignmentConflictError
+
+        await self._audit_service.record_event(
+            category="tickets",
+            event="ticket_assigned",
+            actor_id=actor_id,
+            target_id=ticket_id,
+            outcome="success",
+            payload=None,
+        )
+        await self._repository.commit()
+
+        return AgentTicketStateRead.model_validate(updated)
+
+    async def unassign_ticket(
+        self, *, ticket_id: uuid.UUID, actor_id: uuid.UUID, actor_scopes: list[str]
+    ) -> AgentTicketStateRead:
+        """AQ-AC4/AQ-AC7 (FR-4/FR-7; FR-4's OD-3 APPROVED default). Same
+        permission-gate-first check order as `assign_ticket` above; the
+        write itself is an unconditional clear (no optimistic-concurrency
+        conflict to report — `US-4.4-api-design.md` "Concurrency Design"),
+        idempotent on an already-unassigned ticket (API design's own
+        Open Questions #5 — an idempotent no-op still writes a fresh audit
+        entry here, the simpler of the two undecided options).
+        """
+        if "tickets:write" not in actor_scopes:
+            if "tickets:read" in actor_scopes:
+                raise InsufficientPermissionError
+            raise TicketNotFoundError
+
+        ticket = await self._repository.get_by_id(ticket_id)
+        if ticket is None:
+            raise TicketNotFoundError
+
+        if ticket.status == "closed":
+            raise InvalidStateTransitionError(allowed_events=[])
+
+        updated = await self._repository.unassign_ticket(ticket_id)
+        if updated is None:
+            # Backstop for a concurrent close between this method's own
+            # lookup and its write — the repository's WHERE clause (status
+            # != 'closed') is the authoritative source of truth (OD-3).
+            raise InvalidStateTransitionError(allowed_events=[])
+
+        await self._audit_service.record_event(
+            category="tickets",
+            event="ticket_unassigned",
+            actor_id=actor_id,
+            target_id=ticket_id,
+            outcome="success",
+            payload=None,
+        )
+        await self._repository.commit()
+
+        return AgentTicketStateRead.model_validate(updated)
 
     async def resolve_ticket(
         self,

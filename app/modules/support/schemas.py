@@ -153,3 +153,68 @@ class TicketStateRead(BaseModel):
     resolved_at: datetime | None = None
     closed_at: datetime | None = None
     updated_at: datetime
+
+
+class AssignTicketRequest(BaseModel):
+    """`US-4.4-openapi.yaml` `AssignTicketRequest`. Single required field —
+    the target agent's user id (may equal the caller's own id, self-assign).
+    Target validation (holds `tickets:write`, is active per OD-4) is a
+    service-layer concern (FR-8), not expressible here.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    assignee_id: uuid.UUID
+
+
+class AgentTicketRead(BaseModel):
+    """`US-4.4-openapi.yaml` `AgentTicketRead` — OD-1's adopted, APPROVED
+    resolution: every `TicketRead` field plus `assignee_id`, as a distinct
+    schema rather than an extension of `TicketRead` in place, so the
+    customer-facing `TicketRead`/`TicketListResponse` contract stays
+    provably unaffected (FR-1, FR-2; Assumption #7/NFR — `assignee_id` MUST
+    NOT appear on any customer-facing response shape).
+    """
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: uuid.UUID
+    ticket_number: str
+    status: str
+    requester_id: uuid.UUID
+    subject: str
+    body: str
+    category: str
+    created_at: datetime
+    updated_at: datetime
+    assignee_id: uuid.UUID | None
+
+
+class AgentTicketListResponse(BaseModel):
+    """`US-4.4-openapi.yaml` `AgentTicketListResponse` — the agent branch's
+    response envelope (FR-1, FR-2), parallel to `TicketListResponse` but
+    carrying `AgentTicketRead` items. `next_cursor` is opaque and encoded
+    `(updated_at, id)` — not interchangeable with `TicketListResponse`'s
+    `(created_at, id)`-encoded cursor.
+    """
+
+    items: list[AgentTicketRead]
+    next_cursor: str | None = None
+
+
+class AgentTicketStateRead(BaseModel):
+    """`US-4.4-openapi.yaml` `AgentTicketStateRead` — OD-1's adopted,
+    APPROVED resolution: every `TicketStateRead` field plus `assignee_id`, as
+    a distinct schema so `/resolve`, `/close`, and `/reopen` (all
+    customer-reachable) stay provably unaffected (FR-3, FR-4, FR-9).
+    """
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: uuid.UUID
+    ticket_number: str
+    status: str
+    resolved_at: datetime | None = None
+    closed_at: datetime | None = None
+    updated_at: datetime
+    assignee_id: uuid.UUID | None
