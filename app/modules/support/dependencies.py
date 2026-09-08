@@ -9,12 +9,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.email import EmailSender, get_email_sender
 from app.db.dependencies import get_db_session, get_valkey_client
 from app.modules.audit.dependencies import AuditLogServiceDep
+from app.modules.roles.dependencies import RoleServiceDep
 from app.modules.support.cache import (
     TicketCreationRateLimitCache,
     TicketIdempotencyCache,
     TicketReplyRateLimitCache,
 )
-from app.modules.support.exceptions import AgentQueueNotAvailableError
 from app.modules.support.repository import (
     AttachmentRepository,
     TicketReplyRepository,
@@ -30,6 +30,7 @@ def get_ticket_service(
     valkey_client: Annotated[Redis, Depends(get_valkey_client)],
     audit_service: AuditLogServiceDep,
     user_service: UserServiceDep,
+    role_service: RoleServiceDep,
     email_sender: Annotated[EmailSender, Depends(get_email_sender)],
 ) -> TicketService:
     repository = TicketRepository(session)
@@ -43,6 +44,7 @@ def get_ticket_service(
         rate_limit_cache,
         audit_service,
         user_service,
+        role_service,
         email_sender,
     )
 
@@ -50,26 +52,14 @@ def get_ticket_service(
 TicketServiceDep = Annotated[TicketService, Depends(get_ticket_service)]
 
 
-async def reject_agent_queue_access(current_user: CurrentUserDep) -> None:
-    """`GET`'s staff-rejection branch (OD-4, US-4.1-api-design.md's DR-4
-    fix): a caller who holds `tickets:read` or `tickets:write` (i.e. is
-    `support_agent`/`admin`) is rejected — full agent queue behavior is Out
-    of Scope for this story. `current_user.scopes` is the JWT-decoded scope
-    list, the same source `roles.dependencies.require_scope` reads directly
-    — this is a reject-if-present check rather than `require_scope`'s
-    require-if-absent shape, so it can't reuse that factory directly, but
-    needs no extra service call either.
-    """
-    if "tickets:read" in current_user.scopes or "tickets:write" in current_user.scopes:
-        raise AgentQueueNotAvailableError
-
-
 def resolve_actor_kind(current_user: AuthenticatedUser) -> str:
     """US-4.2 implementation-plan Architectural Change #2: the two-value
-    `author_kind`/`app.actor_kind` vocabulary, derived from the identical
-    check `reject_agent_queue_access` above already uses - not a new
-    derivation mechanism, reused here so the router and `get_rls_session`
-    never compute it two different ways.
+    `author_kind`/`app.actor_kind` vocabulary, derived from `current_user
+    .scopes` - the same source `TicketService`'s own `tickets:write`/
+    `tickets:read` permission gates read directly (US-4.4 retired the
+    former `reject_agent_queue_access` dependency that used to sit here
+    alongside this one) - not a new derivation mechanism, reused here so
+    the router and `get_rls_session` never compute it two different ways.
     """
     return "agent" if "tickets:write" in current_user.scopes else "customer"
 

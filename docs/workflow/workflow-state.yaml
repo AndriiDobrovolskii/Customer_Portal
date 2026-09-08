@@ -9,32 +9,62 @@ version: 1
 story: US-4.4
 workflow: story-delivery
 
-current_stage: CLARIFICATION
-previous_stage: null
-last_completed_stage: null
+current_stage: COMPLETED
+previous_stage: READY_FOR_PR
+last_completed_stage: READY_FOR_PR
 
-status: IN_PROGRESS
+status: WAITING_FOR_HUMAN
 attempt: 1
 
-last_invoked_skill: null
+last_invoked_skill: pr-preparer
 
 last_result:
-  verdict: null
-  stage: null
-  recorded_at: null
+  verdict: PASS
+  stage: PR_PREPARATION
+  recorded_at: "2026-09-08T08:30:00Z"
 
-last_artifacts: []
+last_artifacts:
+  - type: pr_summary
+    path: docs/pr/US-4.4-pr-summary.md
+    version: 1
 
 implementation_substep: null
 
-pending_human_gate: null
+pending_human_gate:
+  stage: COMPLETED
+  status: PENDING
+  required_artifacts:
+    - type: pr_summary
+      path: docs/pr/US-4.4-pr-summary.md
+      version: 1
+  automated_verdict: PASS
+  blocking_findings: []
+  requested_at: "2026-09-08T09:00:00Z"
+  decided_at: null
+  decided_by: null
+  comment: null
 
 blocking_issues: []
 
 non_blocking_findings:
-  - "ACTIVATED: docs/specifications/US-4.4-spec.md and other pipeline artifacts do not yet exist for this Story - CLARIFICATION has not run. Note: this repository carries no pre-existing draft spec/review for US-4.4 (unlike US-4.1..US-4.3 at the time of the harness migration), so there is no stale-artifact risk to flag here."
+  - "PLAN_REVIEW PASS: docs/reviews/plans/US-4.4-plan-review.md (v1, DRAFT). Ten-task sequence respects AGENTS.md §3 layering with no ordering violation. T4's verification cell confirmed to explicitly require the integration test with a seeded past updated_at (not a generic pass/fail note) and explains why a same-transaction unit/fake test would prove nothing. OD-3/OD-4 confirmed consistently reflected (same error types, same adopted defaults) across implementation_plan and task_breakdown. T6 (RoleServiceProtocol wiring) confirmed correctly sequenced ahead of T8, the only task needing it - T7 has no runtime dependency. One Low, non-blocking finding: T8's verification command lacks an explicit grep confirming OD-4's deactivated-target check raises the same ValidationFailedError/422 the exceptions section specifies (T4 has equivalent explicit grep checks; T8 does not) - verification-completeness gap only, not a design defect, already covered by a named unit test in the Testing Strategy. Entering human_gate HUMAN_PLAN_APPROVAL, pending_human_gate built, awaiting /so:approve or /so:reject."
+  - "HUMAN_PLAN_APPROVAL APPROVED by sbruhov@gmail.com - implementation_plan, task_breakdown, and plan_review (all v1, PLAN_REVIEW PASS) confirmed current before recording approval. Advanced to TEST_WRITING."
+  - "TEST_WRITING PASS: 21 new unit tests (tests/unit/modules/support/test_support_service.py) and 29 new + 1 updated integration test (tests/integration/modules/support/test_support_router.py) covering all ten ACs (AQ-AC1-AQ-AC10), DR-3 updated_at-preservation, and DR-1 index-selection. Both files expected to fail collection until IMPLEMENTATION lands the code (test-writer-before-implementation precedent). OD-1 (Critical, response schema split), OD-2 (Medium, GET /{id} not extended), OD-3 (Medium, unassign-on-closed 409), OD-4 (Low, deactivated assign-target 422) remain logged not-yet-human-confirmed Open Decisions; tests were written against each's already-adopted default per upstream APPROVED artifacts. Advanced to IMPLEMENTATION."
+  - "Held BLOCKED before dispatching IMPLEMENTATION: OD-1..OD-4 unresolved in docs/decisions/US-4.4-open-decisions.md, and APPROVED task_breakdown states OD-3/OD-4 must be confirmed before T4/T8 run (T1 already encodes OD-1's schema split, so no partial-dispatch path avoids this)."
+  - "Human decision recorded 2026-09-07T17:25:48Z by sbruhov@gmail.com: OD-1..OD-4 all APPROVED exactly as us-clarifier recommended (new AgentTicketRead/AgentTicketStateRead schemas; GET /{id} not extended; unassign-on-closed 409; deactivated assign-target 422). us-clarifier appended the resolutions to docs/decisions/US-4.4-open-decisions.md in place, keeping version 1 (deliberate deviation from the default re-run/version-bump rule: nine downstream APPROVED/DRAFT artifacts already record this file at v1 and already encode these exact adopted defaults, so treating this as a substantive revision would falsely stale-cascade back through SPECIFICATION/SPEC_REVIEW/DESIGN/PLANNING for a byte-identical outcome; this is an in-place annotation, not a re-derivation). Orchestrator then flipped its status DRAFT -> APPROVED (front-matter-only, per artifact-lifecycle.md §1's DRAFT->APPROVED rule). Unblocked; resuming toward IMPLEMENTATION."
+  - "IMPLEMENTATION PASS (all four backend sub-steps, docs/catalog/US-4.4-pipeline-status.md v1): schema-builder (T1, OD-1's schema split), data-layer-builder (T2-T4, assignee_id column/indexes, list_for_agent_queue/assign_ticket/unassign_ticket), migration-manager (T5, 55d8d34a9753, real upgrade/downgrade/upgrade cycle proven against Docker Postgres - Docker was down, started it plus the project's pg/valkey containers), service-and-router-builder (T6-T9, RoleServiceProtocol wiring, assign/unassign service logic, router branch + new routes). One cross-file defect found and fixed during T6-T9's own verification: repository.py's assign_ticket keyword-only parameter renamed assignee_id -> new_assignee_id (targeted re-dispatch to data-layer-builder) plus service.py's one call site/Protocol signature updated to match (targeted re-dispatch to service-and-router-builder) - both fixes independently verified scoped via grep/git diff, mypy --strict clean. Combined US-4.4 test suite after fixes: 230 passed, 9 failed - all 9 independently confirmed as pre-existing test-file defects (FakeTicketRepository shape mismatch x6, fixture tuple-unpack bugs x2, one audit-count off-by-one), none in production code; left for QUALITY_GATE/gate-enforcer to formally gate and route. Advanced to QUALITY_GATE."
+  - "QUALITY_GATE CHANGES_REQUIRED (loop_back: changes_required_tests -> TEST_WRITING, attempt 2): gate-enforcer independently re-ran the full gate against real Docker Postgres/Valkey and confirmed no production defect in app/modules/support/ - all 9 failures + 9 mypy errors trace to tests/unit/modules/support/test_support_service.py (stale FakeTicketRepository.list_for_agent_queue shape, a _make_service() fixture tuple-unpack arity bug, and 5 Optional-indexing mypy errors on ProblemError.errors needing the existing 'or []' idiom) and one assertion bug in tests/integration/modules/support/test_support_router.py (audit-count off-by-one - production correctly writes 1 row, test expects 2). pre-commit/lint-imports/ruff/mypy(app) all otherwise clean; pytest --cov: 827 passed/9 failed, 96.34% coverage (floor 85%); migration re-proven upgrade/downgrade/upgrade. Routed back to TEST_WRITING to fix the four named test-file defects only - no IMPLEMENTATION code changes needed."
+  - "TEST_WRITING PASS (attempt 2, fix-only pass on QUALITY_GATE's loop-back): all four named test-file defects fixed in tests/unit/modules/support/test_support_service.py and tests/integration/modules/support/test_support_router.py only - no app/ code touched. Independently re-verified: mypy app tests clean (147 source files, was 9 errors), the two US-4.4 test files 239/239 passed (was 230/239), full repo suite 836 passed (was 827/836, no regressions). test_strategy and test_generation_report bumped to v2 (corrected the same disproven unassigned_only collaborator-shape assumption both contained); ac_test_matrix stays v1 (no AC-to-test mapping changed). Advanced to IMPLEMENTATION per stage-map's TEST_WRITING.next."
+  - "IMPLEMENTATION re-entry validated without re-dispatching any builder (docs/catalog/US-4.4-pipeline-status.md v2): TEST_WRITING's attempt-2 fix touched only test files, none of T1-T9's owned files (schemas.py/models.py/repository.py/migration/service.py/router.py/dependencies.py/exceptions.py) changed - confirmed via git status/diff showing zero changes under app/ or migrations/ since v1. Existing v1 sub-step results (all PASS) re-validated current; pipeline_status bumped to v2 recording test_strategy's new version. Identical resolution to US-4.3's own changes_required_tests loop-back precedent. Advanced to QUALITY_GATE."
+  - "QUALITY_GATE PASS (v2, docs/evidence/US-4.4-implementation-report.md + US-4.4-quality-gate-report.md): full gate re-run from scratch against real Docker Postgres/Valkey. pre-commit 11/11 hooks passed; mypy app tests clean (147 files, the 9 prior errors gone); lint-imports 6 contracts kept/0 broken; pytest --cov=app --cov-fail-under=85: 836 passed, 96.39% coverage (up from 96.34%); migration cycle re-proven (downgrade -1 confirmed assignee_id/FK/3 indexes genuinely absent, upgrade restored all, pre-existing indexes untouched). Part B runtime rules (ORM containment, cross-module discipline, banned idioms, contract/security) all confirmed with direct evidence, no bypass proposed. One non-blocking finding: an intermittent, non-reproducible flake in an unrelated audit-module test (tests/integration/modules/audit/test_audit_router.py, last changed 2026-09-03, passed on immediate re-run) - not a US-4.4 defect, not routed back. Advanced to IMPLEMENTATION_VERIFICATION."
+  - "IMPLEMENTATION_VERIFICATION PASS (docs/verification/US-4.4-implementation-verification.md v1): independently re-verified AGENTS.md §5/§6.5/§6.6/§6.7 against the actual code, not gate-enforcer's claims - no ORM object crosses service->router; eager-loading/cache-TTL N/A (plain FK scalar, zero cache.py diff); cross-module discipline holds (RoleServiceProtocol Protocol-only); every route declares response_model+status_code; AssignTicketRequest has extra=forbid, no privilege field; customer/agent response-shape isolation proven both directions by tests; migration downgrade() does real guarded inverse ops. All five §5 security cases proven by name for both new protected routes; GET /support/tickets's changed authorization (lost its former 403) reasoned through as branch-containment, correctly substituted with a branch-isolation test. Full precondition sweep: all 13 upstream artifacts current, no TODO/TBD/FIXME, working tree matches both evidence reports' claimed file set. Advanced to SECURITY_REVIEW."
+  - "SECURITY_REVIEW PASS (docs/reviews/security/US-4.4-security-review.md v1): independent AGENTS.md §7 audit - no credential-handling code, no token/PII in logs, assignee_id (core NFR) confirmed absent from every customer-facing shape by both schema inspection and a runtime field-set-equality test, AssignTicketRequest extra=forbid, all SQL bound-parameter (including the IS NOT DISTINCT FROM concurrency check and migration index predicates), 401 path uses the same unmodified UnauthenticatedError. Two non-blocking findings, neither a §7 violation: [Medium] assign_ticket's two 422 branches use distinguishable message text letting a tickets:write holder enumerate whether an arbitrary UUID is a deactivated tickets:write-holding account - staff-only audience, no credential/token/hash disclosed, OD-4's reject outcome itself is correct; recommend collapsing to one shared message. [Low] a stale test comment claims OD-4 is unconfirmed when open-decisions.md shows it APPROVED - comment-only, behavior is correct. Advanced to RECONCILIATION."
+  - "RECONCILIATION PASS (docs/reviews/reconciliation/US-4.4-reconciliation.md + US-4.4-traceability.md, both v1): all ten ACs (AQ-AC1-AQ-AC10) have exactly one ac-test-matrix row, a confirmed-existing named test function, and a test body confirmed to assert the AC's actual stated behavior, not just proximity. Direct code read against the approved spec found no drift: FR-7 check order, FR-10's IS NOT DISTINCT FROM mechanism, all four problem+json type slugs, OD-1's schema split, and FR-1's updated_at/id ordering all match exactly; the mid-pipeline assignee_id->new_assignee_id rename fully reconciled across service.py and both test suites. Three non-blocking findings carried, none blocking: the two security-review advisories (stale OD-3/OD-4 test comment, distinguishable-422-message oracle) plus a self-identified tightening opportunity (no test directly proves FR-1's id-tiebreak or multi-requester queue pooling) that isn't a gap against any AC's literal text. Entering human_gate HUMAN_PR_APPROVAL, pending_human_gate built, awaiting /so:approve or /so:reject."
+  - "HUMAN_PR_APPROVAL APPROVED by sbruhov@gmail.com - implementation_verification, security_review, reconciliation, and traceability (all v1, automated verdict PASS, no blocking findings) confirmed current before recording approval; bumped DRAFT -> APPROVED. Advanced to PR_PREPARATION."
+  - "PR_PREPARATION PASS (docs/pr/US-4.4-pr-summary.md v1): pr-preparer independently re-verified all four upstream gates (gate-enforcer, implementation-verifier, security-reviewer, reconciliation-reviewer, all PASS) and HUMAN_PR_APPROVAL's recorded approval before drafting the PR title, description, and full AC-by-AC test-plan checklist; confirmed no .env.example changes needed. Non-blocking: flagged four uncommitted workflow-harness files (.claude/commands/so/next.md, .claude/skills/story-orchestrator/SKILL.md and continue-flow.md, docs/workflow/stages.md) outside US-4.4's claimed diff scope for the human to confirm or split out before committing; carried forward the prior Medium/Low security and reconciliation findings. No commit, branch, or PR created. Entering human_gate READY_FOR_PR, pending_human_gate built, awaiting /so:approve."
+  - "READY_FOR_PR APPROVED by sbruhov@gmail.com - pr_summary (v1, automated verdict PASS, no blocking findings) confirmed current before recording approval; bumped DRAFT -> APPROVED. No PR pushed, opened, or merged by the orchestrator (AGENTS.md section 1: propose, never execute unilaterally). Advanced to COMPLETED; pending_human_gate rebuilt for COMPLETED, which requires independent repository verification that the Pull Request is actually merged into the default branch before /so:approve can advance to ARCHIVED."
 
 started_at: "2026-09-08T00:30:00Z"
-updated_at: "2026-09-08T00:30:00Z"
+updated_at: "2026-09-08T09:00:00Z"
 completed_at: null
 archived_at: null

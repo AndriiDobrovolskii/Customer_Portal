@@ -2,7 +2,7 @@ import base64
 import uuid
 from collections.abc import Sequence
 from datetime import datetime
-from typing import NamedTuple
+from typing import Literal, NamedTuple
 
 from sqlalchemy import delete, func, literal, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -90,6 +90,83 @@ class TicketRepository:
 
         return TicketListPage(items=rows, next_cursor=next_cursor)
 
+    async def list_for_agent_queue(
+        self,
+        *,
+        cursor: str | None,
+        limit: int,
+        status: str | None = None,
+        category: str | None = None,
+        assignee_id: uuid.UUID | Literal["none"] | None = None,
+    ) -> TicketListPage | None:
+        """DR-5 (FR-1/FR-2): the agent-branch queue - every ticket regardless
+        of requester, oldest-`updated_at` first, stable-tiebroken by `id`.
+        This is a **new** method, not an extension of `list_for_requester`
+        (which stays byte-for-byte unchanged) - the two serve genuinely
+        different callers/orderings/cursor encodings.
+
+        `status=None` (the default, filterless branch, AQ-AC1) emits the
+        literal `Ticket.status != "closed"` predicate - never an `.in_([...])`
+        enumeration of the four non-closed values - so PostgreSQL's
+        partial-index predicate-implication check selects
+        `ix_tickets_queue_default_updated_at_id` (US-4.4-db-design.md
+        "Indexes"). An explicit `status` value instead filters
+        `Ticket.status == status` (including `"closed"`, AQ-AC2), served by
+        `ix_tickets_status_updated_at_id`.
+
+        `assignee_id` accepts an already-resolved UUID (a specific agent, or
+        the caller's own id for the `me` filter - "me" is resolved to a real
+        UUID by the service before this call) or the literal sentinel
+        `"none"` (the unassigned filter, `assignee_id IS NULL`), served by
+        `ix_tickets_assignee_id_updated_at_id`. `None` means the filter is
+        absent entirely.
+
+        Cursor comparison is ascending (`Ticket.updated_at > cursor_updated_at`),
+        mirroring `TicketReplyRepository.list_for_ticket`'s oldest-first
+        pattern - the reverse of this method's own `list_for_requester`'s
+        descending comparison. Returns `None` for a malformed cursor,
+        resolved to 422 validation-failed at the service layer, matching
+        `list_for_requester`'s own precedent.
+        """
+        stmt = select(Ticket)
+
+        if status is None:
+            stmt = stmt.where(Ticket.status != "closed")
+        else:
+            stmt = stmt.where(Ticket.status == status)
+
+        if category is not None:
+            stmt = stmt.where(Ticket.category == category)
+
+        if assignee_id == "none":
+            stmt = stmt.where(Ticket.assignee_id.is_(None))
+        elif assignee_id is not None:
+            stmt = stmt.where(Ticket.assignee_id == assignee_id)
+
+        if cursor is not None:
+            decoded = _decode_cursor(cursor)
+            if decoded is None:
+                return None
+            cursor_updated_at, cursor_ticket_id = decoded
+            stmt = stmt.where(
+                or_(
+                    Ticket.updated_at > cursor_updated_at,
+                    (Ticket.updated_at == cursor_updated_at) & (Ticket.id > cursor_ticket_id),
+                )
+            )
+
+        stmt = stmt.order_by(Ticket.updated_at.asc(), Ticket.id.asc()).limit(limit + 1)
+        result = await self._session.execute(stmt)
+        rows = list(result.scalars().all())
+
+        next_cursor = None
+        if len(rows) > limit:
+            rows = rows[:limit]
+            last = rows[-1]
+            next_cursor = _encode_cursor(last.updated_at, last.id)
+
+        return TicketListPage(items=rows, next_cursor=next_cursor)
+
     async def update(
         self,
         ticket_id: uuid.UUID,
@@ -158,6 +235,74 @@ class TicketRepository:
 
         result = await self._session.execute(
             update(Ticket).where(*conditions).values(**values).returning(Ticket)
+        )
+        return result.scalar_one_or_none()
+
+    async def assign_ticket(
+        self,
+        ticket_id: uuid.UUID,
+        *,
+        new_assignee_id: uuid.UUID,
+        expected_assignee_id: uuid.UUID | None,
+    ) -> Ticket | None:
+        """DR-3 (FR-3/FR-10): conditional `UPDATE tickets SET assignee_id =
+        :new WHERE id = :id AND status != 'closed' AND assignee_id
+        IS NOT DISTINCT FROM :expected RETURNING *`. `is_not_distinct_from`
+        (not `==`) so a first assignment (`expected_assignee_id=None`)
+        correctly matches `assignee_id IS NULL` - SQL's `NULL = NULL` is
+        `NULL`, not `true`, so `==` would make every unraced first
+        assignment fail with a false-positive `409`.
+
+        Zero rows affected (returns `None`) means either the ticket is
+        `closed` (FR-9) or another request already changed `assignee_id`
+        since `expected_assignee_id` was read (FR-10, `409
+        assignment-conflict`) - the caller cannot distinguish these from row
+        count alone and must already know the ticket's status from an
+        earlier lookup in the same request.
+
+        `updated_at=Ticket.updated_at` is a self-referential `SET`,
+        overriding the column's `onupdate=func.now()` default, so a bare
+        ownership change does not disturb `list_for_agent_queue`'s
+        oldest-`updated_at`-first ordering (DR-3's load-bearing fix - see
+        `unassign_ticket` for the symmetric half of this fix).
+        """
+        result = await self._session.execute(
+            update(Ticket)
+            .where(
+                Ticket.id == ticket_id,
+                Ticket.status != "closed",
+                Ticket.assignee_id.is_not_distinct_from(expected_assignee_id),
+            )
+            .values(assignee_id=new_assignee_id, updated_at=Ticket.updated_at)
+            .returning(Ticket)
+        )
+        return result.scalar_one_or_none()
+
+    async def unassign_ticket(self, ticket_id: uuid.UUID) -> Ticket | None:
+        """DR-3 (FR-4/OD-3 APPROVED): unconditional `UPDATE tickets SET
+        assignee_id = NULL WHERE id = :id AND status != 'closed' RETURNING
+        *` - no `assignee_id IS NOT DISTINCT FROM` guard (unlike
+        `assign_ticket`): unassigning is idempotent by its own postcondition
+        (`assignee_id IS NULL`), so there is no "loser" to detect
+        (US-4.4-api-design.md "Concurrency Design").
+
+        Zero rows affected (returns `None`) means the ticket is `closed` -
+        OD-3 APPROVED: unassign on a closed ticket is a `409
+        invalid-state-transition`, not a silent no-op, enforced by this
+        `WHERE` clause excluding closed tickets so the service sees zero
+        rows updated and can raise accordingly. The caller must already know
+        the ticket exists via an earlier lookup in the same request.
+
+        `updated_at=Ticket.updated_at` is the same self-referential `SET` as
+        `assign_ticket`, for the identical reason (DR-3) - a half-applied fix
+        on only one of the two methods would still corrupt queue ordering on
+        whichever one lacked it.
+        """
+        result = await self._session.execute(
+            update(Ticket)
+            .where(Ticket.id == ticket_id, Ticket.status != "closed")
+            .values(assignee_id=None, updated_at=Ticket.updated_at)
+            .returning(Ticket)
         )
         return result.scalar_one_or_none()
 

@@ -1,15 +1,17 @@
 import uuid
 from typing import Annotated, Literal
 
-from fastapi import APIRouter, Depends, Header, Query, status
+from fastapi import APIRouter, Header, Query, status
 
 from app.modules.support.dependencies import (
     TicketReplyServiceDep,
     TicketServiceDep,
-    reject_agent_queue_access,
     resolve_actor_kind,
 )
 from app.modules.support.schemas import (
+    AgentTicketListResponse,
+    AgentTicketStateRead,
+    AssignTicketRequest,
     CloseTicketRequest,
     CreateReplyRequest,
     CreateTicketRequest,
@@ -57,26 +59,93 @@ async def create_ticket(
 
 @router.get(
     "",
-    response_model=TicketListResponse,
+    response_model=TicketListResponse | AgentTicketListResponse,
     status_code=status.HTTP_200_OK,
-    dependencies=[Depends(reject_agent_queue_access)],
 )
 async def list_own_tickets(
     current_user: CurrentUserDep,
     service: TicketServiceDep,
     status: _TicketStatus | None = None,
+    category: str | None = None,
+    assignee_id: str | None = None,
     cursor: str | None = None,
     limit: int = 100,
-) -> TicketListResponse:
-    """FR-2. Authorization is two-branch: this route body only handles the
-    customer-facing branch (identity/ownership only, `CurrentUserDep`); the
-    staff-rejection branch is the `reject_agent_queue_access` dependency
-    above (US-4.1-api-design.md). Parameter named `status`, shadowing the
-    `fastapi.status` module import only within this function's own scope —
-    same precedent as `app/modules/admin_users/router.py::list_users`.
+) -> TicketListResponse | AgentTicketListResponse:
+    """FR-1/FR-2/FR-5/FR-6 (US-4.4). Single route, two branches selected
+    purely by whether the caller's token carries `tickets:read` — no ticket
+    lookup or ownership check is needed to pick the branch
+    (US-4.4-api-design.md "Two Branches, One Route"). The former staff-
+    rejection dependency (`reject_agent_queue_access`) is retired — there is
+    no `403` on this route any more; a caller holding neither `tickets:read`
+    nor an owned ticket simply receives an empty customer-branch page.
+    `category`/`assignee_id` are agent-branch-only filters — the customer
+    branch ignores both, never validating them even when malformed (FR-6).
+    Parameter named `status`, shadowing the `fastapi.status` module import
+    only within this function's own scope — same precedent as
+    `app/modules/admin_users/router.py::list_users`.
     """
+    if "tickets:read" in current_user.scopes:
+        return await service.list_agent_queue(
+            agent_id=current_user.user_id,
+            status=status,
+            category=category,
+            assignee_id=assignee_id,
+            cursor=cursor,
+            limit=limit,
+        )
     return await service.list_own_tickets(
         requester_id=current_user.user_id, status=status, cursor=cursor, limit=limit
+    )
+
+
+# =============================================================================
+# US-4.4 (Agent Ticket Queue & Assignment)
+# =============================================================================
+
+
+@router.post(
+    "/{id}/assign",
+    response_model=AgentTicketStateRead,
+    status_code=status.HTTP_200_OK,
+)
+async def assign_ticket(
+    id: uuid.UUID,
+    body: AssignTicketRequest,
+    current_user: CurrentUserDep,
+    service: TicketServiceDep,
+) -> AgentTicketStateRead:
+    """FR-3/FR-7/FR-8/FR-9/FR-10. Authorization/check-order is enforced by
+    `TicketService.assign_ticket` itself (US-4.4-api-design.md's stated
+    permission-gate-first order, task_breakdown.md's resolution of that
+    design's Open Questions #1: inline in the service, not a reusable
+    `Depends`) — this router passes the caller's full scope list through
+    rather than a single derived `actor_kind`, since the 404-vs-403 split
+    needs three-way information (`resolve_actor_kind`'s existing two-value
+    vocabulary cannot express "tickets:read only").
+    """
+    return await service.assign_ticket(
+        ticket_id=id,
+        actor_id=current_user.user_id,
+        actor_scopes=current_user.scopes,
+        assignee_id=body.assignee_id,
+    )
+
+
+@router.delete(
+    "/{id}/assign",
+    response_model=AgentTicketStateRead,
+    status_code=status.HTTP_200_OK,
+)
+async def unassign_ticket(
+    id: uuid.UUID,
+    current_user: CurrentUserDep,
+    service: TicketServiceDep,
+) -> AgentTicketStateRead:
+    """FR-4/FR-7. Same permission-gate shape as `assign_ticket` above."""
+    return await service.unassign_ticket(
+        ticket_id=id,
+        actor_id=current_user.user_id,
+        actor_scopes=current_user.scopes,
     )
 
 

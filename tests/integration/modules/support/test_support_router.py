@@ -12,6 +12,7 @@ from app.core.security import encode_access_token, hash_password
 from app.modules.audit.models import AuditLog
 from app.modules.roles.models import Role, UserRole
 from app.modules.support.models import Attachment, Ticket, TicketReply
+from app.modules.support.repository import TicketRepository
 from app.modules.users.models import User, UserSession
 
 pytestmark = pytest.mark.integration
@@ -37,6 +38,10 @@ def _close_path(ticket_id: uuid.UUID) -> str:
 
 def _reopen_path(ticket_id: uuid.UUID) -> str:
     return f"{_TICKETS_PATH}/{ticket_id}/reopen"
+
+
+def _assign_path(ticket_id: uuid.UUID) -> str:
+    return f"{_TICKETS_PATH}/{ticket_id}/assign"
 
 
 async def _seed_user(db_session: AsyncSession, *, email: str, status: str = "active") -> User:
@@ -133,19 +138,36 @@ async def _seed_ticket(
     *,
     requester_id: uuid.UUID,
     status: str = "open",
+    category: str = "billing",
     resolved_at: datetime | None = None,
     resolution_note: str | None = None,
     closed_at: datetime | None = None,
     closed_by: uuid.UUID | None = None,
+    assignee_id: uuid.UUID | None = None,
+    updated_at: datetime | None = None,
 ) -> Ticket:
+    """`assignee_id` (US-4.4, nullable FK, no default — omitting it leaves
+    the row unassigned) and `updated_at` are both new, optional kwargs. Every
+    US-4.4 test that asserts ordering by `updated_at` (AQ-AC1) or that
+    `updated_at` is *unchanged* by assign/unassign (DR-3) MUST pass an
+    explicit, distinct value here — `updated_at` carries
+    `server_default=func.now()`, frozen for the lifetime of one transaction
+    (AGENTS.md §5), so several tickets seeded within one test's `db_session`
+    would otherwise share a byte-identical timestamp and any assertion about
+    it would silently degrade to primary-key tiebreak order instead.
+    """
     ticket = Ticket(
         ticket_number=f"CP-2026-{uuid.uuid4().hex[:10]}",
         requester_id=requester_id,
         subject="Cannot log in",
         body="My login keeps failing after the last update.",
-        category="billing",
+        category=category,
         status=status,
     )
+    if assignee_id is not None:
+        ticket.assignee_id = assignee_id
+    if updated_at is not None:
+        ticket.updated_at = updated_at
     # US-4.3 db-design.md v3's CHECK constraints require both resolution
     # fields together whenever status="resolved" (ck_tickets_resolved_
     # requires_resolution_fields) and both closure fields together whenever
@@ -691,7 +713,14 @@ async def test_create_ticket_attachment_owned_and_unbound_is_bound_and_immutable
     assert attachment.ticket_id == ticket_id
 
 
-# --- Agent-scope rejection on GET (OD-4 / design review DR-4) ---------------
+# --- US-4.4: `reject_agent_queue_access` retired — agent branch now live ---
+# NFR ("Removing reject_agent_queue_access MUST update, not delete, the
+# US-4.1 tests that assert its 403 — the replacement assertion is the new
+# agent branch") / implementation_plan.md Risk 7 / task_breakdown.md T9's
+# explicit instruction to confirm this diff. This is the same test function
+# US-4.1/US-4.2 named (`test_list_own_tickets_agent_scope_caller_returns_403`),
+# updated in place — not deleted and not replaced by a differently-named test
+# — to assert the new AQ-AC1 agent-branch `200` instead of the retired `403`.
 
 
 async def test_list_own_tickets_agent_scope_caller_returns_403(
@@ -705,9 +734,11 @@ async def test_list_own_tickets_agent_scope_caller_returns_403(
     # Act
     response = await client.get(_TICKETS_PATH, headers=_auth_headers(token))
 
-    # Assert
-    assert response.status_code == 403
-    assert response.json()["type"].endswith("agent-queue-not-available")
+    # Assert: AQ-AC1 — a tickets:read caller now reaches the live agent
+    # branch (`AgentTicketListResponse`), never the retired `403
+    # agent-queue-not-available`.
+    assert response.status_code == 200
+    assert "items" in response.json()
 
 
 # =============================================================================
@@ -2265,3 +2296,833 @@ async def test_create_reply_customer_on_resolved_outside_window_makes_no_status_
         select(AuditLog).where(AuditLog.target_id == ticket.id, AuditLog.event == "ticket_reopened")
     )
     assert audit_result.first() is None
+
+
+# =============================================================================
+# US-4.4 (Agent Ticket Queue & Assignment)
+# =============================================================================
+
+_CUSTOMER_TICKET_READ_FIELDS = {
+    "id",
+    "ticket_number",
+    "status",
+    "requester_id",
+    "subject",
+    "body",
+    "category",
+    "created_at",
+    "updated_at",
+}
+_AGENT_TICKET_READ_FIELDS = _CUSTOMER_TICKET_READ_FIELDS | {"assignee_id"}
+
+
+async def _seed_agent_only(db_session: AsyncSession, *, email: str, status: str = "active") -> User:
+    """A `support_agent`-holding user seeded for use as an assign *target*
+    only — no session/token needed, since the target is referenced by id in
+    the request body, never authenticated itself in these tests.
+    """
+    agent = await _seed_user(db_session, email=email, status=status)
+    await _assign_role(db_session, user_id=agent.id, role_name="support_agent")
+    return agent
+
+
+# --- AQ-AC1/FR-1: agent sees the queue --------------------------------------
+
+
+async def test_list_own_tickets_agent_branch_orders_oldest_updated_first(
+    client: AsyncClient, db_session: AsyncSession
+) -> None:
+    # Arrange: explicit, distinct `updated_at` values (AGENTS.md §5) — the
+    # frozen-per-transaction `now()` would otherwise tie-break on (random)
+    # primary key, not the ordering under test.
+    requester = await _seed_user(db_session, email="queue.order@example.com")
+    now = datetime.now(UTC)
+    oldest = await _seed_ticket(
+        db_session, requester_id=requester.id, status="open", updated_at=now - timedelta(hours=2)
+    )
+    middle = await _seed_ticket(
+        db_session,
+        requester_id=requester.id,
+        status="waiting_on_support",
+        updated_at=now - timedelta(hours=1),
+    )
+    newest = await _seed_ticket(
+        db_session, requester_id=requester.id, status="open", updated_at=now
+    )
+    _, token = await _seed_agent(db_session, email="queue.agent@example.com")
+
+    # Act
+    response = await client.get(_TICKETS_PATH, headers=_auth_headers(token))
+
+    # Assert: AQ-AC1 — "every non-closed ticket regardless of requester,
+    # ordered oldest-updated first"; every item carries `assignee_id`; no
+    # total count field anywhere in the envelope.
+    assert response.status_code == 200
+    body = response.json()
+    ids = [item["id"] for item in body["items"]]
+    assert ids.index(str(oldest.id)) < ids.index(str(middle.id)) < ids.index(str(newest.id))
+    for item in body["items"]:
+        assert set(item.keys()) == _AGENT_TICKET_READ_FIELDS
+    assert "total" not in body
+    assert "count" not in body
+
+
+async def test_list_own_tickets_agent_branch_excludes_closed_by_default(
+    client: AsyncClient, db_session: AsyncSession
+) -> None:
+    # Arrange
+    requester = await _seed_user(db_session, email="queue.excludeclosed@example.com")
+    open_ticket = await _seed_ticket(db_session, requester_id=requester.id, status="open")
+    closed_ticket = await _seed_ticket(db_session, requester_id=requester.id, status="closed")
+    _, token = await _seed_agent(db_session, email="queue.agent2@example.com")
+
+    # Act
+    response = await client.get(_TICKETS_PATH, headers=_auth_headers(token))
+
+    # Assert
+    ids = [item["id"] for item in response.json()["items"]]
+    assert str(open_ticket.id) in ids
+    assert str(closed_ticket.id) not in ids
+
+
+async def test_list_own_tickets_agent_branch_status_closed_is_the_only_way_closed_appears(
+    client: AsyncClient, db_session: AsyncSession
+) -> None:
+    # Arrange: AQ-AC2 — "status=closed is the only way a closed ticket appears".
+    requester = await _seed_user(db_session, email="queue.explicitclosed@example.com")
+    closed_ticket = await _seed_ticket(db_session, requester_id=requester.id, status="closed")
+    _, token = await _seed_agent(db_session, email="queue.agent3@example.com")
+
+    # Act
+    response = await client.get(
+        _TICKETS_PATH, params={"status": "closed"}, headers=_auth_headers(token)
+    )
+
+    # Assert
+    ids = [item["id"] for item in response.json()["items"]]
+    assert str(closed_ticket.id) in ids
+
+
+# --- AQ-AC2/FR-2: queue filters ----------------------------------------------
+
+
+async def test_list_own_tickets_agent_branch_filters_by_category(
+    client: AsyncClient, db_session: AsyncSession
+) -> None:
+    # Arrange
+    requester = await _seed_user(db_session, email="queue.category@example.com")
+    billing = await _seed_ticket(
+        db_session, requester_id=requester.id, status="open", category="billing"
+    )
+    technical = await _seed_ticket(
+        db_session, requester_id=requester.id, status="open", category="technical"
+    )
+    _, token = await _seed_agent(db_session, email="queue.agent4@example.com")
+
+    # Act
+    response = await client.get(
+        _TICKETS_PATH, params={"category": "billing"}, headers=_auth_headers(token)
+    )
+
+    # Assert
+    ids = [item["id"] for item in response.json()["items"]]
+    assert str(billing.id) in ids
+    assert str(technical.id) not in ids
+
+
+async def test_list_own_tickets_agent_branch_assignee_id_me_returns_only_own(
+    client: AsyncClient, db_session: AsyncSession
+) -> None:
+    # Arrange
+    requester = await _seed_user(db_session, email="queue.assignedme@example.com")
+    agent, token = await _seed_agent(db_session, email="queue.agent5@example.com")
+    other_agent = await _seed_agent_only(db_session, email="queue.otheragent@example.com")
+    mine = await _seed_ticket(
+        db_session, requester_id=requester.id, status="open", assignee_id=agent.id
+    )
+    not_mine = await _seed_ticket(
+        db_session, requester_id=requester.id, status="open", assignee_id=other_agent.id
+    )
+
+    # Act
+    response = await client.get(
+        _TICKETS_PATH, params={"assignee_id": "me"}, headers=_auth_headers(token)
+    )
+
+    # Assert: AQ-AC2 — "assignee_id=me resolves to the calling agent's own id".
+    ids = [item["id"] for item in response.json()["items"]]
+    assert str(mine.id) in ids
+    assert str(not_mine.id) not in ids
+
+
+async def test_list_own_tickets_agent_branch_assignee_id_none_returns_only_unassigned(
+    client: AsyncClient, db_session: AsyncSession
+) -> None:
+    # Arrange
+    requester = await _seed_user(db_session, email="queue.unassigned@example.com")
+    agent, token = await _seed_agent(db_session, email="queue.agent6@example.com")
+    unassigned = await _seed_ticket(db_session, requester_id=requester.id, status="open")
+    assigned = await _seed_ticket(
+        db_session, requester_id=requester.id, status="open", assignee_id=agent.id
+    )
+
+    # Act
+    response = await client.get(
+        _TICKETS_PATH, params={"assignee_id": "none"}, headers=_auth_headers(token)
+    )
+
+    # Assert: AQ-AC2 — "assignee_id=none returns only unassigned tickets".
+    ids = [item["id"] for item in response.json()["items"]]
+    assert str(unassigned.id) in ids
+    assert str(assigned.id) not in ids
+
+
+async def test_list_own_tickets_agent_branch_assignee_id_specific_uuid(
+    client: AsyncClient, db_session: AsyncSession
+) -> None:
+    # Arrange
+    requester = await _seed_user(db_session, email="queue.specific@example.com")
+    _, token = await _seed_agent(db_session, email="queue.agent7@example.com")
+    target_agent = await _seed_agent_only(db_session, email="queue.targetagent@example.com")
+    theirs = await _seed_ticket(
+        db_session, requester_id=requester.id, status="open", assignee_id=target_agent.id
+    )
+    unrelated = await _seed_ticket(db_session, requester_id=requester.id, status="open")
+
+    # Act
+    response = await client.get(
+        _TICKETS_PATH, params={"assignee_id": str(target_agent.id)}, headers=_auth_headers(token)
+    )
+
+    # Assert
+    ids = [item["id"] for item in response.json()["items"]]
+    assert str(theirs.id) in ids
+    assert str(unrelated.id) not in ids
+
+
+async def test_list_own_tickets_agent_branch_malformed_assignee_id_returns_422(
+    client: AsyncClient, db_session: AsyncSession
+) -> None:
+    # Arrange
+    _, token = await _seed_agent(db_session, email="queue.malformed@example.com")
+
+    # Act
+    response = await client.get(
+        _TICKETS_PATH, params={"assignee_id": "not-a-uuid"}, headers=_auth_headers(token)
+    )
+
+    # Assert
+    assert response.status_code == 422
+    assert response.json()["type"].endswith("validation-failed")
+
+
+async def test_list_own_tickets_agent_branch_paginates_by_cursor(
+    client: AsyncClient, db_session: AsyncSession
+) -> None:
+    # Arrange: three tickets, page size 2 — the agent branch's own
+    # `(updated_at, id)` cursor encoding (not `list_for_requester`'s).
+    requester = await _seed_user(db_session, email="queue.paginate@example.com")
+    now = datetime.now(UTC)
+    for i in range(3):
+        await _seed_ticket(
+            db_session,
+            requester_id=requester.id,
+            status="open",
+            updated_at=now - timedelta(hours=3 - i),
+        )
+    _, token = await _seed_agent(db_session, email="queue.agent8@example.com")
+
+    # Act
+    first_page = await client.get(_TICKETS_PATH, params={"limit": 2}, headers=_auth_headers(token))
+    assert first_page.status_code == 200
+    first_body = first_page.json()
+    assert len(first_body["items"]) == 2
+    assert first_body["next_cursor"] is not None
+    second_page = await client.get(
+        _TICKETS_PATH,
+        params={"limit": 2, "cursor": first_body["next_cursor"]},
+        headers=_auth_headers(token),
+    )
+
+    # Assert
+    assert second_page.status_code == 200
+    second_body = second_page.json()
+    assert len(second_body["items"]) == 1
+    assert {item["id"] for item in first_body["items"]}.isdisjoint(
+        {item["id"] for item in second_body["items"]}
+    )
+
+
+# --- AQ-AC5/AQ-AC6/FR-5/FR-6: customer branch is unaffected -----------------
+
+
+async def test_list_own_tickets_customer_branch_response_has_no_assignee_id_field(
+    client: AsyncClient, db_session: AsyncSession
+) -> None:
+    # Arrange: AQ-AC5 — byte-identical to the pre-existing US-4.1 contract,
+    # not merely "no assignee_id key present alongside others"
+    # (implementation_plan.md Risk 1).
+    requester = await _seed_user(db_session, email="customer.shape@example.com")
+    await _seed_ticket(db_session, requester_id=requester.id, status="open")
+    token = await _seed_session_and_token(db_session, user_id=requester.id)
+
+    # Act
+    response = await client.get(_TICKETS_PATH, headers=_auth_headers(token))
+
+    # Assert
+    assert response.status_code == 200
+    body = response.json()
+    assert len(body["items"]) == 1
+    assert set(body["items"][0].keys()) == _CUSTOMER_TICKET_READ_FIELDS
+
+
+async def test_list_own_tickets_customer_branch_ignores_agent_only_query_params(
+    client: AsyncClient, db_session: AsyncSession
+) -> None:
+    # Arrange: AQ-AC6 — a customer's own-tickets result is unaffected by
+    # agent-only query params, and no 422 is returned for them either (the
+    # ownership filter, not parameter validation, protects the data).
+    requester = await _seed_user(db_session, email="customer.ignoreparams@example.com")
+    mine = await _seed_ticket(db_session, requester_id=requester.id, status="open")
+    other = await _seed_user(db_session, email="customer.other@example.com")
+    await _seed_ticket(db_session, requester_id=other.id, status="open")
+    token = await _seed_session_and_token(db_session, user_id=requester.id)
+
+    # Act
+    plain_response = await client.get(_TICKETS_PATH, headers=_auth_headers(token))
+    with_agent_params_response = await client.get(
+        _TICKETS_PATH,
+        params={"assignee_id": "not-a-real-uuid-or-me-or-none", "category": "anything"},
+        headers=_auth_headers(token),
+    )
+
+    # Assert: identical result set either way — never another customer's
+    # ticket, never a 422 for the malformed agent-only `assignee_id`.
+    assert with_agent_params_response.status_code == 200
+    plain_ids = {item["id"] for item in plain_response.json()["items"]}
+    with_params_ids = {item["id"] for item in with_agent_params_response.json()["items"]}
+    assert plain_ids == with_params_ids == {str(mine.id)}
+
+
+# --- AQ-AC3/FR-3: assign ----------------------------------------------------
+
+
+async def test_assign_ticket_returns_200_and_persists_assignee_with_audit_row(
+    client: AsyncClient, db_session: AsyncSession
+) -> None:
+    # Arrange
+    requester = await _seed_user(db_session, email="assign.happy.customer@example.com")
+    ticket = await _seed_ticket(db_session, requester_id=requester.id, status="open")
+    caller, token = await _seed_agent(db_session, email="assign.happy.caller@example.com")
+    target = await _seed_agent_only(db_session, email="assign.happy.target@example.com")
+
+    # Act
+    response = await client.post(
+        _assign_path(ticket.id),
+        json={"assignee_id": str(target.id)},
+        headers=_auth_headers(token),
+    )
+
+    # Assert: AQ-AC3 — 200 with assignee_id set, audit entry written in the
+    # same transaction as the write.
+    assert response.status_code == 200
+    body = response.json()
+    assert body["assignee_id"] == str(target.id)
+    await db_session.refresh(ticket)
+    assert ticket.assignee_id == target.id
+    audit_result = await db_session.execute(
+        select(AuditLog).where(AuditLog.target_id == ticket.id, AuditLog.event == "ticket_assigned")
+    )
+    audit_row = audit_result.scalar_one()
+    assert audit_row.actor_id == caller.id
+
+
+async def test_assign_ticket_reassign_replaces_assignee_and_audits_the_change(
+    client: AsyncClient, db_session: AsyncSession
+) -> None:
+    # Arrange: AQ-AC3 — "re-assigning an already-assigned ticket replaces
+    # the assignee and audits the change".
+    requester = await _seed_user(db_session, email="assign.reassign.customer@example.com")
+    first_target = await _seed_agent_only(db_session, email="assign.reassign.first@example.com")
+    ticket = await _seed_ticket(
+        db_session, requester_id=requester.id, status="open", assignee_id=first_target.id
+    )
+    _, token = await _seed_agent(db_session, email="assign.reassign.caller@example.com")
+    second_target = await _seed_agent_only(db_session, email="assign.reassign.second@example.com")
+
+    # Act
+    response = await client.post(
+        _assign_path(ticket.id),
+        json={"assignee_id": str(second_target.id)},
+        headers=_auth_headers(token),
+    )
+
+    # Assert
+    assert response.status_code == 200
+    assert response.json()["assignee_id"] == str(second_target.id)
+    await db_session.refresh(ticket)
+    assert ticket.assignee_id == second_target.id
+    audit_result = await db_session.execute(
+        select(AuditLog).where(AuditLog.target_id == ticket.id, AuditLog.event == "ticket_assigned")
+    )
+    # The ticket is seeded directly with `assignee_id=first_target.id` (no
+    # prior service call, so no prior audit row) and exactly one
+    # `POST /assign` call is made above — `TicketService.assign_ticket`
+    # writes exactly one `ticket_assigned` audit row per call
+    # (service.py's `assign_ticket`, ~lines 561-568), so only 1 row exists.
+    assert len(audit_result.scalars().all()) == 1
+
+
+async def test_assign_ticket_self_assign_succeeds(
+    client: AsyncClient, db_session: AsyncSession
+) -> None:
+    # Arrange: Assumption #5 — the caller may name their own id.
+    requester = await _seed_user(db_session, email="assign.self.customer@example.com")
+    ticket = await _seed_ticket(db_session, requester_id=requester.id, status="open")
+    caller, token = await _seed_agent(db_session, email="assign.self.caller@example.com")
+
+    # Act
+    response = await client.post(
+        _assign_path(ticket.id), json={"assignee_id": str(caller.id)}, headers=_auth_headers(token)
+    )
+
+    # Assert
+    assert response.status_code == 200
+    assert response.json()["assignee_id"] == str(caller.id)
+
+
+# --- AQ-AC7/FR-7: assignment requires the scope -----------------------------
+
+
+async def test_assign_ticket_customer_returns_404_indistinguishable_from_unknown_id(
+    client: AsyncClient, db_session: AsyncSession
+) -> None:
+    # Arrange: AQ-AC7 — a customer (no tickets:* scope) gets 404, and the
+    # body is identical whether the ticket exists or not (never confirming
+    # the ticket id exists).
+    requester = await _seed_user(db_session, email="assign.customer404@example.com")
+    ticket = await _seed_ticket(db_session, requester_id=requester.id, status="open")
+    token = await _seed_session_and_token(db_session, user_id=requester.id)
+    target = await _seed_agent_only(db_session, email="assign.customer404.target@example.com")
+
+    # Act
+    existing_ticket_response = await client.post(
+        _assign_path(ticket.id), json={"assignee_id": str(target.id)}, headers=_auth_headers(token)
+    )
+    unknown_ticket_response = await client.post(
+        _assign_path(uuid.uuid4()),
+        json={"assignee_id": str(target.id)},
+        headers=_auth_headers(token),
+    )
+
+    # Assert: identical on every field that could leak whether the ticket
+    # id exists. `instance` is deliberately excluded from this comparison —
+    # `app/main.py`'s ProblemBase handler sets it to `request.url.path`,
+    # which legitimately differs between the two request paths themselves
+    # (a different ticket id in the URL) without that difference revealing
+    # anything about the ticket's existence.
+    assert existing_ticket_response.status_code == 404
+    assert unknown_ticket_response.status_code == 404
+    existing_body = existing_ticket_response.json()
+    unknown_body = unknown_ticket_response.json()
+    existing_body.pop("instance", None)
+    unknown_body.pop("instance", None)
+    assert existing_body == unknown_body
+
+
+async def test_assign_ticket_read_only_agent_returns_403(
+    client: AsyncClient, db_session: AsyncSession
+) -> None:
+    # Arrange
+    requester = await _seed_user(db_session, email="assign.readonly.customer@example.com")
+    ticket = await _seed_ticket(db_session, requester_id=requester.id, status="open")
+    reader = await _seed_user(db_session, email="assign.readonly.agent@example.com")
+    await _assign_role(db_session, user_id=reader.id, role_name="support_agent")
+    token = await _seed_session_and_token(db_session, user_id=reader.id, scopes=["tickets:read"])
+    target = await _seed_agent_only(db_session, email="assign.readonly.target@example.com")
+
+    # Act
+    response = await client.post(
+        _assign_path(ticket.id), json={"assignee_id": str(target.id)}, headers=_auth_headers(token)
+    )
+
+    # Assert
+    assert response.status_code == 403
+    assert response.json()["type"].endswith("insufficient-permission")
+
+
+# --- AQ-AC8/FR-8 (and OD-4): assignee must be an agent ----------------------
+
+
+async def test_assign_ticket_target_lacking_tickets_write_returns_422(
+    client: AsyncClient, db_session: AsyncSession
+) -> None:
+    # Arrange
+    requester = await _seed_user(db_session, email="assign.badtarget.customer@example.com")
+    ticket = await _seed_ticket(db_session, requester_id=requester.id, status="open")
+    _, token = await _seed_agent(db_session, email="assign.badtarget.caller@example.com")
+    non_agent_target = await _seed_user(db_session, email="assign.badtarget.target@example.com")
+
+    # Act
+    response = await client.post(
+        _assign_path(ticket.id),
+        json={"assignee_id": str(non_agent_target.id)},
+        headers=_auth_headers(token),
+    )
+
+    # Assert
+    assert response.status_code == 422
+    assert response.json()["type"].endswith("validation-failed")
+    await db_session.refresh(ticket)
+    assert ticket.assignee_id is None
+
+
+async def test_assign_ticket_deactivated_target_returns_422(
+    client: AsyncClient, db_session: AsyncSession
+) -> None:
+    # Arrange: OD-4's adopted default — a target holding tickets:write but
+    # a deactivated account is rejected the same way. Not yet
+    # human-confirmed (docs/decisions/US-4.4-open-decisions.md OD-4) — see
+    # docs/tests/US-4.4-test-strategy.md for the reversal blast radius.
+    requester = await _seed_user(db_session, email="assign.deactivated.customer@example.com")
+    ticket = await _seed_ticket(db_session, requester_id=requester.id, status="open")
+    _, token = await _seed_agent(db_session, email="assign.deactivated.caller@example.com")
+    deactivated_target = await _seed_agent_only(
+        db_session, email="assign.deactivated.target@example.com", status="deactivated"
+    )
+
+    # Act
+    response = await client.post(
+        _assign_path(ticket.id),
+        json={"assignee_id": str(deactivated_target.id)},
+        headers=_auth_headers(token),
+    )
+
+    # Assert
+    assert response.status_code == 422
+    assert response.json()["type"].endswith("validation-failed")
+
+
+# --- AQ-AC9/FR-9: assigning a closed ticket ---------------------------------
+
+
+async def test_assign_ticket_closed_ticket_returns_409(
+    client: AsyncClient, db_session: AsyncSession
+) -> None:
+    # Arrange
+    requester = await _seed_user(db_session, email="assign.closed.customer@example.com")
+    ticket = await _seed_ticket(db_session, requester_id=requester.id, status="closed")
+    _, token = await _seed_agent(db_session, email="assign.closed.caller@example.com")
+    target = await _seed_agent_only(db_session, email="assign.closed.target@example.com")
+
+    # Act
+    response = await client.post(
+        _assign_path(ticket.id), json={"assignee_id": str(target.id)}, headers=_auth_headers(token)
+    )
+
+    # Assert
+    assert response.status_code == 409
+    assert response.json()["type"].endswith("invalid-state-transition")
+    await db_session.refresh(ticket)
+    assert ticket.assignee_id is None
+
+
+# --- AQ-AC10/FR-10: concurrent assignment -----------------------------------
+
+
+async def test_assign_ticket_repository_conditional_update_rejects_stale_expected_value(
+    db_session: AsyncSession,
+) -> None:
+    # Arrange: FR-10/AQ-AC10's actual mechanism is the repository's
+    # conditional `UPDATE ... WHERE assignee_id IS NOT DISTINCT FROM
+    # :expected` (implementation_plan.md Architectural Change #6). Driving
+    # two genuinely simultaneous HTTP requests through this project's
+    # `real_client`+`db_session` combined-fixture pattern does NOT prove
+    # this for `assign`: unlike the pattern's existing precedents
+    # (`test_refresh_concurrent_requests_exactly_one_succeeds`,
+    # `test_password_reset_confirm_concurrent_same_token_exactly_one_succeeds`
+    # in tests/integration/modules/users/test_users_router.py, both guarded
+    # by a *consumed-state* check where a second reader already sees
+    # "consumed"), `db_session`'s override means both requests share one
+    # session, so they execute serially, not concurrently — the second
+    # request's own `get_by_id` read would see the *first* request's
+    # already-committed `assignee_id`, take that as its own `expected`
+    # value, and its conditional UPDATE would then also match and succeed
+    # (the API design deliberately generalized this guard to cover
+    # re-assignment too, "Concurrency Design" in
+    # US-4.4-api-design.md) — yielding `[200, 200]`, not `[200, 409]`,
+    # against a perfectly correct implementation. This test instead drives
+    # the repository directly with a deliberately **stale** `expected_
+    # assignee_id` for the second call — the exact condition FR-10
+    # describes (two agents who both read the ticket as unassigned before
+    # either wrote) — which is real, deterministic, and requires no second
+    # DB connection. The `None` → `AssignmentConflictError` mapping itself
+    # is proven at the unit layer
+    # (test_assign_ticket_concurrency_loss_raises_409_assignment_conflict);
+    # together the two form complete AQ-AC10 coverage.
+    requester = await _seed_user(db_session, email="assign.race.repo@example.com")
+    ticket = await _seed_ticket(db_session, requester_id=requester.id, status="open")
+    target_one = await _seed_agent_only(db_session, email="assign.race.repo.target1@example.com")
+    target_two = await _seed_agent_only(db_session, email="assign.race.repo.target2@example.com")
+    repository = TicketRepository(db_session)
+
+    # Act: both calls read the ticket as unassigned (`expected_assignee_id
+    # =None`) before either wrote — the first's conditional UPDATE matches
+    # and wins; the second's still carries the now-stale `None` and must
+    # find zero matching rows.
+    first = await repository.assign_ticket(
+        ticket.id, new_assignee_id=target_one.id, expected_assignee_id=None
+    )
+    second = await repository.assign_ticket(
+        ticket.id, new_assignee_id=target_two.id, expected_assignee_id=None
+    )
+
+    # Assert
+    assert first is not None
+    assert first.assignee_id == target_one.id
+    assert second is None
+    await db_session.refresh(ticket)
+    assert ticket.assignee_id == target_one.id
+
+
+# --- AQ-AC4/FR-4: unassign ---------------------------------------------------
+
+
+async def test_unassign_ticket_returns_200_and_clears_assignee_with_audit_row(
+    client: AsyncClient, db_session: AsyncSession
+) -> None:
+    # Arrange
+    requester = await _seed_user(db_session, email="unassign.happy.customer@example.com")
+    previous = await _seed_agent_only(db_session, email="unassign.happy.previous@example.com")
+    ticket = await _seed_ticket(
+        db_session, requester_id=requester.id, status="open", assignee_id=previous.id
+    )
+    caller, token = await _seed_agent(db_session, email="unassign.happy.caller@example.com")
+
+    # Act
+    response = await client.delete(_assign_path(ticket.id), headers=_auth_headers(token))
+
+    # Assert: AQ-AC4 — 200 with assignee_id null, audit entry written.
+    assert response.status_code == 200
+    assert response.json()["assignee_id"] is None
+    await db_session.refresh(ticket)
+    assert ticket.assignee_id is None
+    audit_result = await db_session.execute(
+        select(AuditLog).where(
+            AuditLog.target_id == ticket.id, AuditLog.event == "ticket_unassigned"
+        )
+    )
+    audit_row = audit_result.scalar_one()
+    assert audit_row.actor_id == caller.id
+
+
+async def test_unassign_ticket_already_unassigned_is_idempotent_200(
+    client: AsyncClient, db_session: AsyncSession
+) -> None:
+    # Arrange
+    requester = await _seed_user(db_session, email="unassign.idempotent.customer@example.com")
+    ticket = await _seed_ticket(db_session, requester_id=requester.id, status="open")
+    _, token = await _seed_agent(db_session, email="unassign.idempotent.caller@example.com")
+
+    # Act
+    response = await client.delete(_assign_path(ticket.id), headers=_auth_headers(token))
+
+    # Assert: idempotent — not a 404/409 for a ticket that was already unassigned.
+    assert response.status_code == 200
+    assert response.json()["assignee_id"] is None
+
+
+# --- AQ-AC7/FR-7 (unassign) --------------------------------------------------
+
+
+async def test_unassign_ticket_customer_returns_404(
+    client: AsyncClient, db_session: AsyncSession
+) -> None:
+    # Arrange
+    requester = await _seed_user(db_session, email="unassign.customer404@example.com")
+    agent = await _seed_agent_only(db_session, email="unassign.customer404.agent@example.com")
+    ticket = await _seed_ticket(
+        db_session, requester_id=requester.id, status="open", assignee_id=agent.id
+    )
+    token = await _seed_session_and_token(db_session, user_id=requester.id)
+
+    # Act
+    response = await client.delete(_assign_path(ticket.id), headers=_auth_headers(token))
+
+    # Assert
+    assert response.status_code == 404
+
+
+async def test_unassign_ticket_read_only_agent_returns_403(
+    client: AsyncClient, db_session: AsyncSession
+) -> None:
+    # Arrange
+    requester = await _seed_user(db_session, email="unassign.readonly.customer@example.com")
+    agent = await _seed_agent_only(db_session, email="unassign.readonly.assignee@example.com")
+    ticket = await _seed_ticket(
+        db_session, requester_id=requester.id, status="open", assignee_id=agent.id
+    )
+    reader = await _seed_user(db_session, email="unassign.readonly.caller@example.com")
+    await _assign_role(db_session, user_id=reader.id, role_name="support_agent")
+    token = await _seed_session_and_token(db_session, user_id=reader.id, scopes=["tickets:read"])
+
+    # Act
+    response = await client.delete(_assign_path(ticket.id), headers=_auth_headers(token))
+
+    # Assert
+    assert response.status_code == 403
+    assert response.json()["type"].endswith("insufficient-permission")
+
+
+# --- FR-4/OD-3: unassign on a closed ticket ---------------------------------
+
+
+async def test_unassign_ticket_closed_ticket_returns_409(
+    client: AsyncClient, db_session: AsyncSession
+) -> None:
+    # Arrange: OD-3's adopted default (not yet human-confirmed — see
+    # docs/decisions/US-4.4-open-decisions.md OD-3 and
+    # docs/tests/US-4.4-test-strategy.md for the reversal blast radius).
+    requester = await _seed_user(db_session, email="unassign.closed.customer@example.com")
+    agent = await _seed_agent_only(db_session, email="unassign.closed.assignee@example.com")
+    ticket = await _seed_ticket(
+        db_session, requester_id=requester.id, status="closed", assignee_id=agent.id
+    )
+    _, token = await _seed_agent(db_session, email="unassign.closed.caller@example.com")
+
+    # Act
+    response = await client.delete(_assign_path(ticket.id), headers=_auth_headers(token))
+
+    # Assert
+    assert response.status_code == 409
+    assert response.json()["type"].endswith("invalid-state-transition")
+    await db_session.refresh(ticket)
+    assert ticket.assignee_id == agent.id
+
+
+# --- DR-3: assign/unassign must not bump updated_at -------------------------
+
+
+async def test_assign_ticket_does_not_change_updated_at(
+    client: AsyncClient, db_session: AsyncSession
+) -> None:
+    # Arrange: implementation_plan.md Architectural Change #9 (DR-3) — an
+    # explicit, distinct *past* `updated_at`, per AGENTS.md §5's frozen-
+    # `func.now()`-per-transaction rule: seeding via `server_default=func.now()`
+    # and asserting in the same transaction would pass identically whether
+    # or not the fix is present, proving nothing.
+    requester = await _seed_user(db_session, email="assign.updatedat.customer@example.com")
+    past = datetime.now(UTC) - timedelta(days=3)
+    ticket = await _seed_ticket(
+        db_session, requester_id=requester.id, status="open", updated_at=past
+    )
+    _, token = await _seed_agent(db_session, email="assign.updatedat.caller@example.com")
+    target = await _seed_agent_only(db_session, email="assign.updatedat.target@example.com")
+
+    # Act
+    response = await client.post(
+        _assign_path(ticket.id), json={"assignee_id": str(target.id)}, headers=_auth_headers(token)
+    )
+
+    # Assert: the queue's "longest-waiting-first" ordering must survive an
+    # assign cycle with zero actual work performed on the ticket.
+    assert response.status_code == 200
+    await db_session.refresh(ticket)
+    assert ticket.updated_at == past
+
+
+async def test_unassign_ticket_does_not_change_updated_at(
+    client: AsyncClient, db_session: AsyncSession
+) -> None:
+    # Arrange: same DR-3 proof, for `unassign_ticket`'s independent
+    # `.values()` clause — implementation_plan.md Risk 5's "half-applied fix"
+    # concern (assign preserves it but unassign doesn't, or vice versa).
+    requester = await _seed_user(db_session, email="unassign.updatedat.customer@example.com")
+    agent = await _seed_agent_only(db_session, email="unassign.updatedat.assignee@example.com")
+    past = datetime.now(UTC) - timedelta(days=3)
+    ticket = await _seed_ticket(
+        db_session,
+        requester_id=requester.id,
+        status="open",
+        assignee_id=agent.id,
+        updated_at=past,
+    )
+    _, token = await _seed_agent(db_session, email="unassign.updatedat.caller@example.com")
+
+    # Act
+    response = await client.delete(_assign_path(ticket.id), headers=_auth_headers(token))
+
+    # Assert
+    assert response.status_code == 200
+    await db_session.refresh(ticket)
+    assert ticket.updated_at == past
+
+
+# --- Authentication matrix (AGENTS.md §5) -----------------------------------
+
+
+@pytest.mark.parametrize("method", ["POST", "DELETE"])
+@pytest.mark.parametrize("token_factory_name", ["no_token", "malformed", "expired", "revoked"])
+async def test_assign_and_unassign_auth_matrix_returns_401(
+    client: AsyncClient, db_session: AsyncSession, method: str, token_factory_name: str
+) -> None:
+    # Arrange
+    requester = await _seed_user(
+        db_session, email=f"authmatrix.assign.{uuid.uuid4().hex}@example.com"
+    )
+    ticket = await _seed_ticket(db_session, requester_id=requester.id, status="open")
+    target = await _seed_agent_only(
+        db_session, email=f"authmatrix.assign.target.{uuid.uuid4().hex}@example.com"
+    )
+    headers: dict[str, str] = {}
+    if token_factory_name == "malformed":
+        headers = _auth_headers("not-a-real-jwt")
+    elif token_factory_name == "expired":
+        headers = _auth_headers(await _expired_token(db_session, user_id=requester.id))
+    elif token_factory_name == "revoked":
+        headers = _auth_headers(await _revoked_session_token(db_session, user_id=requester.id))
+    # "no_token": headers stays {}
+
+    # Act
+    if method == "POST":
+        response = await client.post(
+            _assign_path(ticket.id), json={"assignee_id": str(target.id)}, headers=headers
+        )
+    else:
+        response = await client.delete(_assign_path(ticket.id), headers=headers)
+
+    # Assert
+    assert response.status_code == 401
+
+
+# --- Index coverage: DR-1's literal `status != 'closed'` predicate ---------
+
+
+async def test_agent_queue_default_query_uses_partial_index(db_session: AsyncSession) -> None:
+    # Arrange/Act: Enforcement Matrix `[gate]` — DR-1's actual claim is that
+    # the partial index is *usable* (survives PostgreSQL's predicate-
+    # implication check) for the literal `status != 'closed'` filter, not
+    # that it is the planner's cheapest choice on whatever data happens to
+    # be in the table when this test runs — on a near-empty `tickets`
+    # table (this test seeds none) a sequential scan is cheaper regardless
+    # of how correct the index and predicate are, so asserting "no Seq Scan"
+    # directly would fail against a perfectly correct implementation.
+    # `SET LOCAL enable_seqscan = off` removes that cost-model confound: if
+    # the index were NOT usable for this predicate (e.g. the repository
+    # wrote `status.in_([...])` instead of the literal `!= 'closed'` —
+    # implementation_plan.md Architectural Change #10 / Risk 4), PostgreSQL
+    # would fall back to a Seq Scan anyway (disabling one plan never makes
+    # the planner error), so the index's *name* actually appearing in the
+    # plan is the real, discriminating proof — not a plain "no Seq Scan"
+    # assertion, which the empty-table cost model would fail on its own.
+    await db_session.execute(text("SET LOCAL enable_seqscan = off"))
+    result = await db_session.execute(
+        text(
+            "EXPLAIN SELECT * FROM tickets WHERE status != 'closed' "
+            "ORDER BY updated_at, id LIMIT 100"
+        )
+    )
+    plan = "\n".join(row[0] for row in result.all())
+
+    # Assert
+    assert "ix_tickets_queue_default_updated_at_id" in plan
