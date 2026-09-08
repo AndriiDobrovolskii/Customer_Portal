@@ -2,9 +2,9 @@
 artifact_type: entity_model
 story: US-4.4
 version: 1
-status: DRAFT
+status: ARCHIVED
 created_at: "2026-09-07T20:00:00Z"
-updated_at: "2026-09-07T20:00:00Z"
+updated_at: "2026-09-08T09:30:00Z"
 produced_by: db-designer
 inputs:
   - path: docs/specifications/US-4.4-spec.md

@@ -4,7 +4,7 @@
 # activation). Stage skills never write this file.
 
 version: 1
-active_story: US-4.4
+active_story: null
 story_path: docs/stories/US-4.4-agent-ticket-queue-and-assignment.md
 
 source:
@@ -16,9 +16,8 @@ source:
 activated_at: "2026-09-08T00:30:00Z"
 activated_by: sbruhov@gmail.com
 
-status: IN_PROGRESS
+status: ARCHIVED
 
 note: >
-  EPIC-4 (backend/support). Hard-blocks US-5.5 (Agent Console frontend).
-  Local story file and GitHub source already existed pre-activation - no
-  backlog-sync required.
+  US-4.4 archived 2026-09-08T09:30:00Z; see
+  docs/evidence/US-4.4-delivery-summary.md. No Story is currently active.

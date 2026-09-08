@@ -2,9 +2,9 @@
 artifact_type: implementation_plan
 story: US-4.4
 version: 1
-status: APPROVED
+status: ARCHIVED
 created_at: "2026-09-08T00:30:00Z"
-updated_at: "2026-09-07T15:54:29Z"
+updated_at: "2026-09-08T09:30:00Z"
 produced_by: planner
 inputs:
   - path: docs/specifications/US-4.4-spec.md

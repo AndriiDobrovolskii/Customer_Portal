@@ -149,3 +149,11 @@ An agent's public reply to an `open` or `waiting_on_support` ticket advances it 
 An agent with `tickets:write` resolves an open/waiting ticket, requiring a non-empty `resolution_note` (max 5000 chars); the requester is emailed and a `ticket_resolved` audit entry is written. The requester or an agent may close a ticket from any non-`closed` state; the audit actor is `self` when the requester closes and `agent:{id}` when an agent closes, and `closed_by` records who/what closed it (a reserved system-actor sentinel value when the auto-close job does). A resolved ticket may be reopened directly (by requester or agent) within the same 7-day window BR-017 describes, transitioning it to `waiting_on_support` and clearing `resolved_at`; this transition and the reply-driven reopen (BR-018) both write a `ticket_reopened` audit entry. Every illegal transition (e.g. any action on an already-`closed` ticket) returns `409` with an `allowed_events` field naming the transitions actually available from the ticket's current state. Acting on another customer's ticket returns a uniform `404` across all three endpoints (IDOR prevention, same pattern as ticket creation/replies).
 
 **Source:** `docs/specifications/US-4.3-spec.md` FR-1 through FR-9.
+
+---
+
+## BR-020
+
+A `support_agent`- or `admin`-scoped caller (`tickets:write`) may assign a ticket to any user who currently holds `tickets:write` and is not deactivated (`POST /v1/support/tickets/{id}/assign`), and clear an assignment (`DELETE .../assign`). Both operations reject a `closed` ticket with `409 invalid-state-transition` (symmetric with each other). Assigning to a target lacking `tickets:write`, a nonexistent target, or a deactivated target account all return `422 validation-failed`. Assignment is orthogonal to the resolve/close/reopen state machine (BR-017/BR-019) — it never changes `status`. `assignee_id` is never present on any customer-facing response shape; the agent-facing queue (`GET /v1/support/tickets`, agent branch) and the assign/unassign responses use two schemas (`AgentTicketRead`, `AgentTicketStateRead`) distinct from the customer-visible `TicketRead`/`TicketStateRead`.
+
+**Source:** `docs/specifications/US-4.4-spec.md` FR-1 through FR-10; `docs/decisions/US-4.4-open-decisions.md` OD-1–OD-4.

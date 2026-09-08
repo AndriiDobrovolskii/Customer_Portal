@@ -2,9 +2,9 @@
 artifact_type: test_generation_report
 story: US-4.4
 version: 2
-status: DRAFT
+status: ARCHIVED
 created_at: "2026-09-07T17:07:56Z"
-updated_at: "2026-09-07T19:00:00Z"
+updated_at: "2026-09-08T09:30:00Z"
 produced_by: test-writer
 inputs:
   - path: docs/tests/US-4.4-test-strategy.md

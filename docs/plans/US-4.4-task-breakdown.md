@@ -2,9 +2,9 @@
 artifact_type: task_breakdown
 story: US-4.4
 version: 1
-status: APPROVED
+status: ARCHIVED
 created_at: "2026-09-08T01:30:00Z"
-updated_at: "2026-09-07T15:54:29Z"
+updated_at: "2026-09-08T09:30:00Z"
 produced_by: implementation-planner
 inputs:
   - path: docs/stories/US-4.4-agent-ticket-queue-and-assignment.md

@@ -2,9 +2,9 @@
 artifact_type: pipeline_status
 story: US-4.4
 version: 2
-status: DRAFT
+status: ARCHIVED
 created_at: "2026-09-07T17:30:00Z"
-updated_at: "2026-09-07T19:10:00Z"
+updated_at: "2026-09-08T09:30:00Z"
 produced_by: story-orchestrator
 inputs:
   - path: docs/plans/US-4.4-task-breakdown.md

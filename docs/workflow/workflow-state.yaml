@@ -9,11 +9,11 @@ version: 1
 story: US-4.4
 workflow: story-delivery
 
-current_stage: COMPLETED
-previous_stage: READY_FOR_PR
-last_completed_stage: READY_FOR_PR
+current_stage: ARCHIVED
+previous_stage: COMPLETED
+last_completed_stage: COMPLETED
 
-status: WAITING_FOR_HUMAN
+status: ARCHIVED
 attempt: 1
 
 last_invoked_skill: pr-preparer
@@ -30,19 +30,7 @@ last_artifacts:
 
 implementation_substep: null
 
-pending_human_gate:
-  stage: COMPLETED
-  status: PENDING
-  required_artifacts:
-    - type: pr_summary
-      path: docs/pr/US-4.4-pr-summary.md
-      version: 1
-  automated_verdict: PASS
-  blocking_findings: []
-  requested_at: "2026-09-08T09:00:00Z"
-  decided_at: null
-  decided_by: null
-  comment: null
+pending_human_gate: null
 
 blocking_issues: []
 
@@ -63,8 +51,11 @@ non_blocking_findings:
   - "HUMAN_PR_APPROVAL APPROVED by sbruhov@gmail.com - implementation_verification, security_review, reconciliation, and traceability (all v1, automated verdict PASS, no blocking findings) confirmed current before recording approval; bumped DRAFT -> APPROVED. Advanced to PR_PREPARATION."
   - "PR_PREPARATION PASS (docs/pr/US-4.4-pr-summary.md v1): pr-preparer independently re-verified all four upstream gates (gate-enforcer, implementation-verifier, security-reviewer, reconciliation-reviewer, all PASS) and HUMAN_PR_APPROVAL's recorded approval before drafting the PR title, description, and full AC-by-AC test-plan checklist; confirmed no .env.example changes needed. Non-blocking: flagged four uncommitted workflow-harness files (.claude/commands/so/next.md, .claude/skills/story-orchestrator/SKILL.md and continue-flow.md, docs/workflow/stages.md) outside US-4.4's claimed diff scope for the human to confirm or split out before committing; carried forward the prior Medium/Low security and reconciliation findings. No commit, branch, or PR created. Entering human_gate READY_FOR_PR, pending_human_gate built, awaiting /so:approve."
   - "READY_FOR_PR APPROVED by sbruhov@gmail.com - pr_summary (v1, automated verdict PASS, no blocking findings) confirmed current before recording approval; bumped DRAFT -> APPROVED. No PR pushed, opened, or merged by the orchestrator (AGENTS.md section 1: propose, never execute unilaterally). Advanced to COMPLETED; pending_human_gate rebuilt for COMPLETED, which requires independent repository verification that the Pull Request is actually merged into the default branch before /so:approve can advance to ARCHIVED."
+  - "COMPLETED APPROVED by sbruhov@gmail.com - approval_precondition independently verified against the actual repository, not the approver's word: gh pr view 32 confirmed state MERGED (mergedAt 2026-09-08T05:49:05Z, headRefName feat/us-4.4-agent-ticket-queue-and-assignment, mergeCommit 8ebcfa9); git fetch origin main then git merge-base --is-ancestor 8ebcfa9 origin/main confirmed the merge commit is an ancestor of origin/main; local main matched origin/main exactly (f239d3e). pr_summary (v1, APPROVED, automated verdict PASS, no blocking findings) confirmed current. Advanced to ARCHIVED (stage-map.yaml COMPLETED.on_approve target - archive-mode's own work had not yet run)."
+  - "ARCHIVED (archive mode, human-invoked /so:archive): all 23 story-scoped artifacts with a front-matter status field flipped DRAFT/APPROVED -> ARCHIVED; docs/catalog/stories.yaml US-4.4 state -> ARCHIVED (delivered_by pr 32); docs/knowledge/project-state.md updated with the delivered capability row and one Known Constraints entry (assignee_id schema isolation, distinguishable-422 enumeration advisory); delivery summary written at docs/evidence/US-4.4-delivery-summary.md (v1); active-story.yaml cleared (active_story: null). Proposed BR-020 (business-rules.md) and one ARCHITECTURE.md addition (assignment's IS NOT DISTINCT FROM concurrency pattern) recorded as proposals only, pending explicit human approval - not yet applied. GitHub Issue #28 sync not yet performed, pending explicit human approval. No PR merged by the orchestrator."
+  - "Post-archive approvals by sbruhov@gmail.com: (1) BR-020 applied to docs/product/business-rules.md and the assignment concurrency-pattern precedent applied to docs/ARCHITECTURE.md section 4.9, both exactly as proposed in docs/evidence/US-4.4-delivery-summary.md; (2) GitHub Issue #28 closed (reason: completed) with a comment referencing merged PR #32 and the delivery summary. Delivery summary updated to record both as applied/performed rather than proposed."
 
 started_at: "2026-09-08T00:30:00Z"
-updated_at: "2026-09-08T09:00:00Z"
-completed_at: null
-archived_at: null
+updated_at: "2026-09-08T09:30:00Z"
+completed_at: "2026-09-08T09:15:00Z"
+archived_at: "2026-09-08T09:30:00Z"

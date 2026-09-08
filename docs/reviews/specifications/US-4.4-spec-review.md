@@ -2,9 +2,9 @@
 artifact_type: specification_review
 story: US-4.4
 version: 1
-status: APPROVED
+status: ARCHIVED
 created_at: "2026-09-07T12:00:00Z"
-updated_at: "2026-09-07T16:00:00Z"
+updated_at: "2026-09-08T09:30:00Z"
 produced_by: story-spec-reviewer
 inputs:
   - path: docs/stories/US-4.4-agent-ticket-queue-and-assignment.md

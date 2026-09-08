@@ -924,6 +924,17 @@ what was tried and rejected first.
   ticket-status-mutating endpoint should reuse `transition_status` rather than introducing a second
   read-then-write path.
 
+**Precedent established by US-4.4 (agent ticket queue & assignment, 2026-09-08):**
+
+* **Same conditional-`UPDATE` pattern, keyed on `updated_at` instead of `status`.**
+  `assign_ticket`/`unassign_ticket` embed `updated_at IS NOT DISTINCT FROM :expected_updated_at`
+  in the `UPDATE ... WHERE` clause — whole-row optimistic concurrency rather than a status-specific
+  guard — and return the updated row via `RETURNING`, following US-4.3's `transition_status` shape
+  without extending that method itself (assignment is a separate concern from the
+  resolve/close/reopen state machine by design). A future story touching `assignee_id`, or adding
+  another optimistic-concurrency-guarded column outside the status state machine, should follow
+  this same `IS NOT DISTINCT FROM` idiom rather than a separate read-then-write path.
+
 ---
 
 ## 5. Testing Requirements

@@ -191,13 +191,13 @@ stories:
     path: docs/stories/US-4.4-agent-ticket-queue-and-assignment.md
     epic: EPIC-4
     title: Agent Ticket Queue & Assignment
-    state: IN_PROGRESS
+    state: ARCHIVED
     source:
       type: github_issue
       repository: AndriiDobrovolskii/Customer_Portal
       issue_number: 28
       issue_url: https://github.com/AndriiDobrovolskii/Customer_Portal/issues/28
-    delivered_by: { pr: null, note: null }
+    delivered_by: { pr: 32, note: "Merged 2026-09-08T05:49:05Z (8ebcfa9)" }
     note: >
       Raised out of EPIC-5 story-writing: reject_agent_queue_access closes the
       only ticket-listing endpoint to staff, leaving the support_agent persona
