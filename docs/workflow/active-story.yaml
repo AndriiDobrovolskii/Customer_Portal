@@ -4,23 +4,21 @@
 # activation). Stage skills never write this file.
 
 version: 1
-active_story: US-5.1
-story_path: docs/stories/US-5.1-authentication-session-management.md
+active_story: US-4.4
+story_path: docs/stories/US-4.4-agent-ticket-queue-and-assignment.md
 
 source:
   type: github_issue
   repository: AndriiDobrovolskii/Customer_Portal
-  issue_number: 22
-  issue_url: https://github.com/AndriiDobrovolskii/Customer_Portal/issues/22
+  issue_number: 28
+  issue_url: https://github.com/AndriiDobrovolskii/Customer_Portal/issues/28
 
-activated_at: "2026-09-07T13:00:00Z"
+activated_at: "2026-09-08T00:30:00Z"
 activated_by: sbruhov@gmail.com
 
 status: IN_PROGRESS
 
 note: >
-  First Story of EPIC-5 (frontend). Synced from GitHub Issue #22 as part of
-  /so:start (no local story file pre-existed). Pilot Story for the planned
-  sub-agent-dispatch change to continue-flow.md — not yet applied; this Story
-  proceeds under the current mechanism until that change is manually proven
-  and adopted.
+  EPIC-4 (backend/support). Hard-blocks US-5.5 (Agent Console frontend).
+  Local story file and GitHub source already existed pre-activation - no
+  backlog-sync required.

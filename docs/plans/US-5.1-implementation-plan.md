@@ -2,7 +2,7 @@
 artifact_type: implementation_plan
 story: US-5.1
 version: 1
-status: APPROVED
+status: ARCHIVED
 created_at: "2026-09-06T15:21:36Z"
 updated_at: "2026-09-07T19:15:00Z"
 produced_by: planner

@@ -191,7 +191,7 @@ stories:
     path: docs/stories/US-4.4-agent-ticket-queue-and-assignment.md
     epic: EPIC-4
     title: Agent Ticket Queue & Assignment
-    state: BACKLOG
+    state: IN_PROGRESS
     source:
       type: github_issue
       repository: AndriiDobrovolskii/Customer_Portal
@@ -203,7 +203,7 @@ stories:
       only ticket-listing endpoint to staff, leaving the support_agent persona
       with no reachable UI. Replaces that rejection with an agent branch under
       tickets:read and adds a nullable tickets.assignee_id (additive
-      migration). Hard-blocks US-5.5 and nothing else.
+      migration). Hard-blocks US-5.5 and nothing else. Activated 2026-09-08.
 
   # --- EPIC-5: Frontend ------------------------------------------------------
   - id: US-5.1
@@ -212,19 +212,20 @@ stories:
     path: docs/stories/US-5.1-authentication-session-management.md
     epic: EPIC-5
     title: Authentication & Session Management (Frontend)
-    state: IN_PROGRESS
+    state: ARCHIVED
     source:
       type: github_issue
       repository: AndriiDobrovolskii/Customer_Portal
       issue_number: 22
       issue_url: https://github.com/AndriiDobrovolskii/Customer_Portal/issues/22
-    delivered_by: { pr: null, note: null }
+    delivered_by: { pr: 23, note: "Merged 2026-09-07T08:15:40Z (d1bcca4)" }
     note: >
-      First Story of EPIC-5 (product frontend, React+Vite+TS). Also the pilot
-      Story for the new sub-agent-dispatch continue-flow.md mechanism -
-      continue-flow.md/SKILL.md are not yet rewritten; this Story's early
-      stages run under the current inline-invocation mechanism until that
-      change is proven manually and applied.
+      First Story of EPIC-5 (product frontend, React+Vite+TS) and the first
+      story delivered on the new frontend track (frontend-builder). Also the
+      pilot Story for the sub-agent-dispatch continue-flow.md mechanism, since
+      formally adopted. See docs/evidence/US-5.1-delivery-summary.md. Nine
+      Open Decisions (OD-1..OD-9) remain open, carried forward - most
+      notably OD-1 (CORS/allow_credentials gap for the dev-server origin).
 
   - id: US-5.2
     retired_id: null

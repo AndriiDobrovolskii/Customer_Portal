@@ -1267,3 +1267,51 @@ and PII are never logged or returned in responses; all user input crosses the bo
 validated Pydantic schema with `extra="forbid"`; privilege fields are never client-writable; all
 SQL is built through SQLAlchemy constructs with bound parameters — string-interpolated SQL is
 forbidden without exception.
+
+---
+
+## 8. Frontend Architecture (`frontend/`)
+
+Sections 1–7 above describe the backend (`app/`). This section documents the
+frontend delivered starting with US-5.1 (Authentication & Session
+Management) — the repository's first `frontend/` tree. The stack and
+scaffold conventions are prescribed in `AGENTS.md` §2/§3 Frontend
+subsections; this section records what has actually been built on top of
+them.
+
+**Stack:** React + Vite + TypeScript, TanStack Query (server state), React
+Router v6 (routing/guards), React Hook Form (form state), a hand-built React
+Context store rather than a third-party state library (`vitest-axe` is the
+one added test-only dependency, for accessibility assertions).
+
+**Layering:**
+
+| Directory | Responsibility |
+| --- | --- |
+| `api/` | The sole `fetch` boundary. No screen or hook calls `fetch` directly. |
+| `hooks/` | Wrap TanStack Query around `api/`; own all server-state caching/mutation. |
+| `store/` | Client-only session state (access token, current user), mutated only from a mutation hook's `onSuccess`. |
+| `routes/` | `ProtectedRoute` / `GuestOnlyRoute` gate on `store` state. |
+| `screens/` | Compose `hooks/` + shared UI components; own no direct API or store-mutation logic. |
+
+**Session/token handling:** the access token is held in memory only, inside
+`store/authStore.tsx` — never written to `localStorage`/`sessionStorage`.
+The refresh token is an `httpOnly` cookie the backend sets and the browser
+attaches automatically via `credentials: "include"`; client code never
+reads or parses it. Concurrent `401` responses are serialized through a
+single-flight `refreshCoordinator.ts` so at most one `/auth/refresh` call is
+in flight at a time — required to avoid the refresh-token-reuse /
+family-revocation trap in BR-008 (`docs/product/business-rules.md`), since
+the server rotates the refresh cookie on every call and two concurrent
+calls would otherwise present a stale, already-consumed value.
+
+**Known open item:** `app/main.py`'s `CORSMiddleware` does not currently
+cover a frontend dev-server origin and does not set `allow_credentials`.
+US-5.1 shipped without needing a backend change (dev proxy / same-origin
+setup); a future story that resolves this toward an actual CORS
+configuration change must treat `app/main.py` as newly in scope, unlike
+every backend module described in §§1–7, which this story did not touch.
+
+**Source:** `docs/evidence/US-5.1-delivery-summary.md`;
+`docs/plans/US-5.1-implementation-plan.md`;
+`docs/verification/US-5.1-implementation-verification.md`.

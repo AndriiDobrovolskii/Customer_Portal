@@ -2,7 +2,7 @@
 artifact_type: pr_summary
 story: US-5.1
 version: 1
-status: APPROVED
+status: ARCHIVED
 created_at: "2026-09-07T23:59:00Z"
 updated_at: "2026-09-07T23:59:30Z"
 produced_by: pr-preparer
