@@ -18,17 +18,30 @@ export interface AuthStateSeed {
   user: UserRead | null;
   mfaToken: string | null;
   mfaEnrollmentDeadline: string | null;
+  // US-5.2 Plan Change 6: derived from POST /auth/login's own response shape
+  // (LoginResponse vs MfaRequiredResponse) since no endpoint exposes an
+  // `mfa_enabled`-shaped field (OD-5, OPEN) — SecurityScreen's real,
+  // session-scoped basis for choosing enroll vs. disable. `false` here is a
+  // documented default, not an implied fact about an unauthenticated caller:
+  // /settings/security sits behind ProtectedRoute, so SecurityScreen never
+  // renders while isAuthenticated is false.
+  mfaEnabled: boolean;
 }
 
 interface SetSessionPayload {
   accessToken: string;
   user: UserRead;
   mfaEnrollmentDeadline?: string | null;
+  // Required (not optional-with-`?? null`, unlike mfaEnrollmentDeadline) so
+  // `tsc --noEmit` fails a build where either setSession call site
+  // (useLogin.ts's direct branch, useMfaVerify.ts) forgets to pass it.
+  mfaEnabled: boolean;
 }
 
 type Action =
   | { type: "SET_SESSION"; payload: SetSessionPayload }
   | { type: "SET_MFA_TOKEN"; token: string | null }
+  | { type: "SET_MFA_ENABLED"; enabled: boolean }
   | { type: "TOKEN_REFRESHED"; accessToken: string }
   | { type: "CLEAR_SESSION" };
 
@@ -41,9 +54,12 @@ function reducer(state: AuthStateSeed, action: Action): AuthStateSeed {
         user: action.payload.user,
         mfaToken: null,
         mfaEnrollmentDeadline: action.payload.mfaEnrollmentDeadline ?? null,
+        mfaEnabled: action.payload.mfaEnabled,
       };
     case "SET_MFA_TOKEN":
       return { ...state, mfaToken: action.token };
+    case "SET_MFA_ENABLED":
+      return { ...state, mfaEnabled: action.enabled };
     case "TOKEN_REFRESHED":
       return { ...state, accessToken: action.accessToken };
     case "CLEAR_SESSION":
@@ -53,6 +69,7 @@ function reducer(state: AuthStateSeed, action: Action): AuthStateSeed {
         user: null,
         mfaToken: null,
         mfaEnrollmentDeadline: null,
+        mfaEnabled: false,
       };
     default:
       return state;
@@ -65,11 +82,13 @@ const defaultState: AuthStateSeed = {
   user: null,
   mfaToken: null,
   mfaEnrollmentDeadline: null,
+  mfaEnabled: false,
 };
 
 export interface AuthStoreValue extends AuthStateSeed {
   setSession: (session: SetSessionPayload) => void;
   setMfaToken: (token: string | null) => void;
+  setMfaEnabled: (enabled: boolean) => void;
   clearSession: () => void;
 }
 
@@ -89,6 +108,9 @@ export function AuthProvider({ children, initialState }: AuthProviderProps) {
   }, []);
   const setMfaToken = useCallback((token: string | null) => {
     dispatch({ type: "SET_MFA_TOKEN", token });
+  }, []);
+  const setMfaEnabled = useCallback((enabled: boolean) => {
+    dispatch({ type: "SET_MFA_ENABLED", enabled });
   }, []);
   const clearSession = useCallback(() => {
     dispatch({ type: "CLEAR_SESSION" });
@@ -110,8 +132,8 @@ export function AuthProvider({ children, initialState }: AuthProviderProps) {
   }, []);
 
   const value = useMemo<AuthStoreValue>(
-    () => ({ ...state, setSession, setMfaToken, clearSession }),
-    [state, setSession, setMfaToken, clearSession],
+    () => ({ ...state, setSession, setMfaToken, setMfaEnabled, clearSession }),
+    [state, setSession, setMfaToken, setMfaEnabled, clearSession],
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

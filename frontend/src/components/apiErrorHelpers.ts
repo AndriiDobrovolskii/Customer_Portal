@@ -19,6 +19,14 @@ function asPresentable(error: unknown): PresentableApiError | undefined {
   return undefined;
 }
 
+// US-5.2 Plan Change 4: FR-2's 412 "changed elsewhere" detection needs the
+// numeric status without ProfileScreen.tsx importing api/httpClient.ts's
+// ApiError class directly (AGENTS.md §3's screens/components row).
+export function getErrorStatus(error: unknown): number | undefined {
+  const status = asPresentable(error)?.status;
+  return typeof status === "number" ? status : undefined;
+}
+
 export function getErrorKind(error: unknown): "network" | "server" | undefined {
   const kind = asPresentable(error)?.kind;
   return kind === "network" || kind === "server" ? kind : undefined;

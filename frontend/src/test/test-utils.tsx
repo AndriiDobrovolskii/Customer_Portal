@@ -32,6 +32,11 @@ export interface RenderWithProvidersOptions {
   /** Surfaced by PlaceholderHomeScreen via the auth store, per LoginResponse/
    * MfaVerifyResponse's own `mfa_enrollment_deadline` field. */
   mfaEnrollmentDeadline?: string | null;
+  /** US-5.2 Plan Change 6: seeds SecurityScreen's enroll-vs-disable branch.
+   * Required on AuthStateSeed once US-5.2 lands, so this defaults to `false`
+   * (the pre-US-5.2 tests that never pass it keep exercising the same
+   * "not enrolled" seed they always implicitly had). */
+  mfaEnabled?: boolean;
 }
 
 /**
@@ -62,6 +67,7 @@ function buildAuthSeed(options: RenderWithProvidersOptions): AuthStateSeed {
     user: options.user ?? null,
     mfaToken: options.mfaToken ?? null,
     mfaEnrollmentDeadline: options.mfaEnrollmentDeadline ?? null,
+    mfaEnabled: options.mfaEnabled ?? false,
   };
 }
 

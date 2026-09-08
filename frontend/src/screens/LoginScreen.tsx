@@ -13,6 +13,9 @@ interface LoginFormValues {
 
 interface LocationState {
   from?: { pathname?: string };
+  // FR-7: DeactivateAccountScreen navigates here with a confirmation message
+  // after clearing the session ("lands on /login with a confirmation message").
+  message?: string;
 }
 
 export function LoginScreen() {
@@ -26,7 +29,9 @@ export function LoginScreen() {
     formState: { errors },
   } = useForm<LoginFormValues>();
 
-  const returnTo = (location.state as LocationState | null)?.from?.pathname ?? "/";
+  const locationState = location.state as LocationState | null;
+  const returnTo = locationState?.from?.pathname ?? "/";
+  const confirmationMessage = locationState?.message;
 
   async function onSubmit(values: LoginFormValues) {
     try {
@@ -47,6 +52,7 @@ export function LoginScreen() {
   return (
     <section>
       <h1>Log in</h1>
+      {confirmationMessage && <p role="status">{confirmationMessage}</p>}
       <form onSubmit={handleSubmit(onSubmit)} noValidate>
         <div>
           <label htmlFor="login-email">Email</label>

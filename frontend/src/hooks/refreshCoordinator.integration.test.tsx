@@ -80,6 +80,7 @@ describe("silent refresh on concurrent 401s (FE-AC4)", () => {
     result.current.store.setSession({
       accessToken: "expired-token",
       user: { id: "u1", email: "a@example.com" },
+      mfaEnabled: false,
     });
 
     // Act: both hooks' underlying queries fire concurrently and both 401.
@@ -125,6 +126,7 @@ describe("silent refresh on concurrent 401s (FE-AC4)", () => {
     result.current.store.setSession({
       accessToken: "expired-token",
       user: { id: "u1", email: "a@example.com" },
+      mfaEnabled: false,
     });
 
     // Act / Assert: both consumers observe a failure; in-memory state is cleared once.

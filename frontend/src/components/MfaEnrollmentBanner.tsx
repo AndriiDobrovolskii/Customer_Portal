@@ -40,6 +40,11 @@ export function MfaEnrollmentBanner({ deadline }: MfaEnrollmentBannerProps) {
   return (
     <div role="status">
       <p>Multi-factor authentication enrollment is required by {deadline}.</p>
+      {/* US-5.2 spec Assumption #6 / Plan Task T12: links into the new MFA
+          enrollment flow. Plain <a href>, not react-router's <Link>, so this
+          component keeps rendering outside a Router context, matching this
+          file's existing tests (Plan Risk 7). */}
+      <a href="/settings/security">Enroll in MFA</a>
       <button
         type="button"
         onClick={() => {

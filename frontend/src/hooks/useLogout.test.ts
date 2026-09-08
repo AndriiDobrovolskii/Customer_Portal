@@ -14,7 +14,11 @@ describe("useLogout", () => {
       logout: useLogout(),
       store: useAuthStore(),
     }));
-    result.current.store.setSession({ accessToken: "tok", user: { id: "u1", email: "a@example.com" } });
+    result.current.store.setSession({
+      accessToken: "tok",
+      user: { id: "u1", email: "a@example.com" },
+      mfaEnabled: false,
+    });
 
     // Act
     await result.current.logout.mutateAsync();

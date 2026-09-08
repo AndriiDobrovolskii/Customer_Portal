@@ -233,7 +233,7 @@ stories:
     path: docs/stories/US-5.2-account-self-service-ui.md
     epic: EPIC-5
     title: Account & Profile Self-Service (Frontend)
-    state: BACKLOG
+    state: IN_PROGRESS
     source:
       type: github_issue
       repository: AndriiDobrovolskii/Customer_Portal

@@ -102,4 +102,64 @@ describe("AppRoutes (FE-AC10)", () => {
     // lands on the authenticated placeholder home.
     expect(await screen.findByTestId("route-location")).toHaveTextContent("/");
   });
+
+  // US-5.2 Plan Change 10: new ProtectedRoute-wrapped settings screens.
+  it("test_app_routes_settings_profile_redirects_unauthenticated_visitor_to_login", async () => {
+    // Arrange / Act
+    renderWithProviders(<AppRoutes />, { route: "/settings/profile", isAuthenticated: false });
+
+    // Assert
+    expect(await screen.findByTestId("route-location")).toHaveTextContent("/login");
+  });
+
+  it("test_app_routes_settings_security_redirects_unauthenticated_visitor_to_login", async () => {
+    // Arrange / Act
+    renderWithProviders(<AppRoutes />, { route: "/settings/security", isAuthenticated: false });
+
+    // Assert
+    expect(await screen.findByTestId("route-location")).toHaveTextContent("/login");
+  });
+
+  it("test_app_routes_settings_deactivate_redirects_unauthenticated_visitor_to_login", async () => {
+    // Arrange / Act
+    renderWithProviders(<AppRoutes />, { route: "/settings/deactivate", isAuthenticated: false });
+
+    // Assert
+    expect(await screen.findByTestId("route-location")).toHaveTextContent("/login");
+  });
+
+  // US-5.2 Plan Change 10: /verify-email and /confirm-email-change sit
+  // outside BOTH ProtectedRoute and GuestOnlyRoute — Plan Risk 9 calls out
+  // explicitly that both directions must be asserted, not just one.
+  it("test_app_routes_verify_email_renders_for_an_unauthenticated_visitor", async () => {
+    // Arrange / Act
+    renderWithProviders(<AppRoutes />, { route: "/verify-email?token=t", isAuthenticated: false });
+
+    // Assert
+    expect(await screen.findByTestId("route-location")).toHaveTextContent("/verify-email");
+  });
+
+  it("test_app_routes_verify_email_renders_for_an_authenticated_visitor", async () => {
+    // Arrange / Act
+    renderWithProviders(<AppRoutes />, { route: "/verify-email?token=t", isAuthenticated: true });
+
+    // Assert
+    expect(await screen.findByTestId("route-location")).toHaveTextContent("/verify-email");
+  });
+
+  it("test_app_routes_confirm_email_change_renders_for_an_unauthenticated_visitor", async () => {
+    // Arrange / Act
+    renderWithProviders(<AppRoutes />, { route: "/confirm-email-change?token=t", isAuthenticated: false });
+
+    // Assert
+    expect(await screen.findByTestId("route-location")).toHaveTextContent("/confirm-email-change");
+  });
+
+  it("test_app_routes_confirm_email_change_renders_for_an_authenticated_visitor", async () => {
+    // Arrange / Act
+    renderWithProviders(<AppRoutes />, { route: "/confirm-email-change?token=t", isAuthenticated: true });
+
+    // Assert
+    expect(await screen.findByTestId("route-location")).toHaveTextContent("/confirm-email-change");
+  });
 });

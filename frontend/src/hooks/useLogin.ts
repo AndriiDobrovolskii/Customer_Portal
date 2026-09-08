@@ -22,6 +22,9 @@ export function useLogin() {
           accessToken: response.access_token,
           user: response.user,
           mfaEnrollmentDeadline: response.mfa_enrollment_deadline ?? null,
+          // US-5.2 Plan Change 6: a plain LoginResponse (no MFA challenge)
+          // means MFA is NOT enabled on this account.
+          mfaEnabled: false,
         });
       }
     },
