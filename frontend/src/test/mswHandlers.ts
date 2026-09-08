@@ -58,6 +58,59 @@ export const handlers = [
   ),
 
   http.post(`${API}/auth/password-reset/confirm`, async () => new HttpResponse(null, { status: 200 })),
+
+  // US-5.2 baseline handlers — one per new endpoint (Task T1).
+  http.patch(`${API}/profile`, async () =>
+    HttpResponse.json(
+      {
+        id: "u1",
+        email: "user@example.com",
+        pending_email: null,
+        display_name: "Default Name",
+        locale: "en-US",
+        timezone: "America/New_York",
+        avatar_url: null,
+        email_verified: true,
+        created_at: "2026-01-01T00:00:00Z",
+      },
+      { status: 200, headers: { ETag: "default-etag" } },
+    ),
+  ),
+
+  http.post(`${API}/profile/confirm-email-change`, async () =>
+    HttpResponse.json({ email: "user@example.com" }, { status: 200 }),
+  ),
+
+  http.post(`${API}/auth/verify-email`, async () =>
+    HttpResponse.json({ email_verified: true }, { status: 200 }),
+  ),
+
+  http.post(`${API}/auth/verify-email/resend`, async () =>
+    HttpResponse.json(
+      { message: "If an account exists for that email, a verification link has been sent." },
+      { status: 200 },
+    ),
+  ),
+
+  http.post(`${API}/auth/mfa/enroll`, async () =>
+    HttpResponse.json(
+      {
+        secret: "JBSWY3DPEHPK3PXP", // pragma: allowlist secret
+        otpauth_uri: "otpauth://totp/CustomerPortal:user?secret=JBSWY3DPEHPK3PXP", // pragma: allowlist secret
+      },
+      { status: 200 },
+    ),
+  ),
+
+  http.post(`${API}/auth/mfa/activate`, async () =>
+    HttpResponse.json({ recovery_codes: ["AAAA-1111", "BBBB-2222"] }, { status: 200 }),
+  ),
+
+  http.delete(`${API}/auth/mfa`, async () => new HttpResponse(null, { status: 204 })),
+
+  http.post(`${API}/account/deactivate`, async () =>
+    HttpResponse.json({ status: "deactivated", deactivated_at: "2026-01-01T00:00:00Z" }, { status: 200 }),
+  ),
 ];
 
 /** OD-4: RegistrationValidationError — 400, plain application/json, no RFC 7807 envelope. */

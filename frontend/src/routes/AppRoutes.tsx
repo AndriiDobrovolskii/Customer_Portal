@@ -15,6 +15,11 @@ import { ForgotPasswordScreen } from "../screens/ForgotPasswordScreen";
 import { ResetPasswordScreen } from "../screens/ResetPasswordScreen";
 import { SessionsScreen } from "../screens/SessionsScreen";
 import { PlaceholderHomeScreen } from "../screens/PlaceholderHomeScreen";
+import { ProfileScreen } from "../screens/ProfileScreen";
+import { SecurityScreen } from "../screens/SecurityScreen";
+import { DeactivateAccountScreen } from "../screens/DeactivateAccountScreen";
+import { EmailVerificationScreen } from "../screens/EmailVerificationScreen";
+import { ConfirmEmailChangeScreen } from "../screens/ConfirmEmailChangeScreen";
 
 export function AppRoutes() {
   return (
@@ -54,6 +59,13 @@ export function AppRoutes() {
           }
         />
       </Route>
+      {/* US-5.2 Plan Change 10: FR-3/FR-4's routes sit outside BOTH guards —
+          neither ProtectedRoute (would block a signed-out visitor) nor
+          GuestOnlyRoute (would block a signed-in one) fits "works signed-in
+          and signed-out" / "a visitor opens a link". No new guard component
+          is introduced; "outside both" is achieved by simply not wrapping. */}
+      <Route path="/verify-email" element={<EmailVerificationScreen />} />
+      <Route path="/confirm-email-change" element={<ConfirmEmailChangeScreen />} />
       <Route
         element={
           <ProtectedRoute>
@@ -63,6 +75,9 @@ export function AppRoutes() {
       >
         <Route path="/" element={<PlaceholderHomeScreen />} />
         <Route path="/sessions" element={<SessionsScreen />} />
+        <Route path="/settings/profile" element={<ProfileScreen />} />
+        <Route path="/settings/security" element={<SecurityScreen />} />
+        <Route path="/settings/deactivate" element={<DeactivateAccountScreen />} />
       </Route>
     </Routes>
   );

@@ -15,6 +15,9 @@ export function useMfaVerify() {
         accessToken: response.access_token,
         user: response.user,
         mfaEnrollmentDeadline: response.mfa_enrollment_deadline ?? null,
+        // US-5.2 Plan Change 6: reaching this success path only happens
+        // after an MfaRequiredResponse challenge — MFA IS enabled.
+        mfaEnabled: true,
       });
     },
   });

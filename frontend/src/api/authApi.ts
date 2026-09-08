@@ -14,8 +14,12 @@ import type {
   PasswordResetRequestResponse,
   RefreshResponse,
   RegisterRequest,
+  ResendVerificationRequest,
+  ResendVerificationResponse,
   SessionListResponse,
   UserRead,
+  VerifyEmailRequest,
+  VerifyEmailResponse,
 } from "./types";
 
 export function register(payload: RegisterRequest): Promise<UserRead> {
@@ -58,4 +62,15 @@ export function requestPasswordReset(
 
 export function confirmPasswordReset(payload: PasswordResetConfirmRequest): Promise<void> {
   return httpPost<void>("/auth/password-reset/confirm", payload, { auth: false });
+}
+
+// FR-4: additive, /auth/* operations that aren't login/session-lifecycle.
+export function verifyEmail(payload: VerifyEmailRequest): Promise<VerifyEmailResponse> {
+  return httpPost<VerifyEmailResponse>("/auth/verify-email", payload, { auth: false });
+}
+
+export function resendVerificationEmail(
+  payload: ResendVerificationRequest,
+): Promise<ResendVerificationResponse> {
+  return httpPost<ResendVerificationResponse>("/auth/verify-email/resend", payload, { auth: false });
 }

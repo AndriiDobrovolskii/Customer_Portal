@@ -135,6 +135,70 @@ export function httpPost<T>(path: string, body?: unknown, options: { auth?: bool
   return performRequest<T>(path, { method: "POST", body, auth: options.auth });
 }
 
-export function httpDelete<T>(path: string, options: { auth?: boolean } = {}): Promise<T> {
-  return performRequest<T>(path, { method: "DELETE", auth: options.auth });
+// Additive: `body` is optional and new (US-5.2, FR-6's DELETE /auth/mfa
+// carries a request body) — existing call sites (e.g. authApi.revokeSession)
+// omit it and keep behaving exactly as before (Plan Risk 6).
+export function httpDelete<T>(path: string, options: { auth?: boolean; body?: unknown } = {}): Promise<T> {
+  return performRequest<T>(path, { method: "DELETE", auth: options.auth, body: options.body });
+}
+
+// US-5.2 Plan Change 1: a new, additive verb — `performRequest`/`parseResponse`
+// above are untouched. FR-2 needs to tell a 200 (edit succeeded) apart from a
+// 202 (email-change pending) apart from a 412 (conflict), and needs the
+// `ETag` response header, none of which `Promise<T>`-only `httpGet`/`httpPost`/
+// `httpDelete` can express. `httpPatch` stays transport-only: it threads
+// `If-Match` only when `options.ifMatch` is supplied, and never decides *what*
+// value to send — that policy belongs to `profileApi.ts`/`useProfileUpdate.ts`.
+export interface HttpResult<T> {
+  data: T;
+  status: number;
+  headers: Headers;
+}
+
+async function parseResponseWithMeta<T>(response: Response): Promise<HttpResult<T>> {
+  const contentType = response.headers.get("content-type");
+  const text = await response.text();
+  const body = await safeJsonParse(text);
+
+  if (response.ok) {
+    return { data: body as T, status: response.status, headers: response.headers };
+  }
+
+  const normalized = normalizeApiError({ status: response.status, contentType, body });
+  throw new ApiError(normalized);
+}
+
+export async function httpPatch<T>(
+  path: string,
+  body: unknown,
+  options: { auth?: boolean; ifMatch?: string } = {},
+): Promise<HttpResult<T>> {
+  const auth = options.auth ?? true;
+
+  const doFetch = () =>
+    rawFetch(path, {
+      method: "PATCH",
+      headers: {
+        ...buildHeaders(true, auth),
+        ...(options.ifMatch !== undefined ? { "If-Match": options.ifMatch } : {}),
+      },
+      credentials: "include",
+      body: JSON.stringify(body),
+    });
+
+  let response = await doFetch();
+
+  if (response.status === 401 && auth) {
+    const bridge = getSessionBridge();
+    try {
+      const refreshed = await coordinateRefresh(performRefreshRequest);
+      bridge.onTokenRefreshed(refreshed.access_token);
+      response = await doFetch();
+    } catch {
+      bridge.onSessionExpired();
+      throw new ApiError({ status: 401, message: "Your session has expired. Please log in again." });
+    }
+  }
+
+  return parseResponseWithMeta<T>(response);
 }

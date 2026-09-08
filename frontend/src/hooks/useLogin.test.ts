@@ -87,4 +87,33 @@ describe("useLogin", () => {
       result.current.mutateAsync({ email: "nobody@example.com", password: "wrong" }), // pragma: allowlist secret
     ).rejects.toMatchObject({ status: 401, message: "The email or password is incorrect." });
   });
+
+  // US-5.2 Plan Change 6: a plain LoginResponse (no MFA challenge) is the
+  // signal SecurityScreen's enroll-vs-disable branch relies on — it means
+  // MFA is NOT enabled on this account.
+  it("test_use_login_success_without_mfa_sets_auth_store_mfa_enabled_false", async () => {
+    // Arrange
+    server.use(
+      http.post("/api/v1/auth/login", async () =>
+        HttpResponse.json(
+          { access_token: "access-token-1", expires_in: 900, user: { id: "u1", email: "a@example.com" } },
+          { status: 200 },
+        ),
+      ),
+    );
+    const { result } = renderHookWithProviders(() => ({
+      login: useLogin(),
+      store: useAuthStore(),
+    }));
+
+    // Act
+    await result.current.login.mutateAsync({
+      email: "a@example.com",
+      password: "correct-password", // pragma: allowlist secret
+    });
+
+    // Assert
+    await waitFor(() => expect(result.current.store.isAuthenticated).toBe(true));
+    expect(result.current.store.mfaEnabled).toBe(false);
+  });
 });

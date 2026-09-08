@@ -78,4 +78,30 @@ describe("useMfaVerify", () => {
     ).rejects.toMatchObject({ status: 401 });
     expect(result.current.store.isAuthenticated).toBe(false);
   });
+
+  // US-5.2 Plan Change 6: reaching this hook's success path only happens
+  // after an MfaRequiredResponse challenge — it means MFA IS enabled on this
+  // account, the other branch SecurityScreen's initial state depends on.
+  it("test_use_mfa_verify_success_sets_auth_store_mfa_enabled_true", async () => {
+    // Arrange
+    server.use(
+      http.post("/api/v1/auth/mfa/verify", async () =>
+        HttpResponse.json(
+          { access_token: "access-token-2", expires_in: 900, user: { id: "u1", email: "a@example.com" } },
+          { status: 200 },
+        ),
+      ),
+    );
+    const { result } = renderHookWithProviders(() => ({
+      verify: useMfaVerify(),
+      store: useAuthStore(),
+    }));
+
+    // Act
+    await result.current.verify.mutateAsync({ mfa_token: "mfa-token-1", code: "123456" });
+
+    // Assert
+    await waitFor(() => expect(result.current.store.isAuthenticated).toBe(true));
+    expect(result.current.store.mfaEnabled).toBe(true);
+  });
 });
