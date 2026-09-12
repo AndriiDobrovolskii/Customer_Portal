@@ -39,20 +39,21 @@ describe("AppRoutes (FE-AC10)", () => {
     expect(await screen.findByTestId("route-location")).toHaveTextContent("/sessions");
   });
 
-  it("test_app_routes_authenticated_user_visiting_login_is_redirected_to_placeholder_home", async () => {
-    // Arrange / Act
+  it("test_app_routes_authenticated_user_visiting_login_is_redirected_to_tickets", async () => {
+    // Arrange / Act: US-5.3 FR-15/Change 11 — this redirect target moves
+    // from the retired PlaceholderHomeScreen's "/" to "/tickets".
     renderWithProviders(<AppRoutes />, { route: "/login", isAuthenticated: true });
 
     // Assert
-    expect(await screen.findByTestId("route-location")).toHaveTextContent("/");
+    expect(await screen.findByTestId("route-location")).toHaveTextContent("/tickets");
   });
 
-  it("test_app_routes_authenticated_user_visiting_register_is_redirected_to_placeholder_home", async () => {
+  it("test_app_routes_authenticated_user_visiting_register_is_redirected_to_tickets", async () => {
     // Arrange / Act
     renderWithProviders(<AppRoutes />, { route: "/register", isAuthenticated: true });
 
     // Assert
-    expect(await screen.findByTestId("route-location")).toHaveTextContent("/");
+    expect(await screen.findByTestId("route-location")).toHaveTextContent("/tickets");
   });
 
   // plan_review's Test-Strategy Realism [Low] finding: impact-analysis
@@ -66,7 +67,7 @@ describe("AppRoutes (FE-AC10)", () => {
   // (LoginScreen.test.tsx only proves the initial MFA-required branch;
   // MfaVerifyScreen.test.tsx only proves the second step in isolation) —
   // closed here, not left as a gap.
-  it("test_app_routes_full_mfa_challenge_login_flow_from_credentials_through_verify_to_placeholder_home", async () => {
+  it("test_app_routes_full_mfa_challenge_login_flow_from_credentials_through_verify_to_tickets", async () => {
     // Arrange
     server.use(
       http.post("/api/v1/auth/login", async () =>
@@ -81,6 +82,11 @@ describe("AppRoutes (FE-AC10)", () => {
           },
           { status: 200 },
         ),
+      ),
+      // US-5.3: /tickets (the new post-verify landing target) renders
+      // TicketListScreen, which calls GET /support/tickets on mount.
+      http.get("/api/v1/support/tickets", async () =>
+        HttpResponse.json({ items: [], next_cursor: null }, { status: 200 }),
       ),
     );
     const user = userEvent.setup();
@@ -99,8 +105,8 @@ describe("AppRoutes (FE-AC10)", () => {
     await user.click(screen.getByRole("button", { name: /verify/i }));
 
     // Assert: the flow completes exactly as the non-MFA login flow does —
-    // lands on the authenticated placeholder home.
-    expect(await screen.findByTestId("route-location")).toHaveTextContent("/");
+    // lands on /tickets (US-5.3 FR-15's new authenticated home).
+    expect(await screen.findByTestId("route-location")).toHaveTextContent("/tickets");
   });
 
   // US-5.2 Plan Change 10: new ProtectedRoute-wrapped settings screens.
@@ -161,5 +167,122 @@ describe("AppRoutes (FE-AC10)", () => {
 
     // Assert
     expect(await screen.findByTestId("route-location")).toHaveTextContent("/confirm-email-change");
+  });
+
+  // US-5.3 Change 11 / FR-15: "/" becomes a redirect to "/tickets", and
+  // "/tickets", "/tickets/new", "/tickets/:id" become the new authenticated
+  // route family, replacing PlaceholderHomeScreen.
+  it("test_app_routes_root_redirects_authenticated_visitor_to_tickets", async () => {
+    // Arrange
+    server.use(
+      http.get("/api/v1/support/tickets", async () =>
+        HttpResponse.json({ items: [], next_cursor: null }, { status: 200 }),
+      ),
+    );
+
+    // Act
+    renderWithProviders(<AppRoutes />, { route: "/", isAuthenticated: true });
+
+    // Assert
+    expect(await screen.findByTestId("route-location")).toHaveTextContent("/tickets");
+  });
+
+  it("test_app_routes_tickets_renders_ticket_list_screen", async () => {
+    // Arrange
+    server.use(
+      http.get("/api/v1/support/tickets", async () =>
+        HttpResponse.json(
+          {
+            items: [
+              {
+                id: "t-1",
+                ticket_number: "TCK-0001",
+                subject: "s",
+                category: "c",
+                status: "open",
+                updated_at: "2026-09-01T10:00:00Z",
+              },
+            ],
+            next_cursor: null,
+          },
+          { status: 200 },
+        ),
+      ),
+    );
+
+    // Act
+    renderWithProviders(<AppRoutes />, { route: "/tickets", isAuthenticated: true });
+
+    // Assert
+    expect(await screen.findByText("TCK-0001")).toBeInTheDocument();
+  });
+
+  it("test_app_routes_tickets_redirects_unauthenticated_visitor_to_login", async () => {
+    // Arrange / Act
+    renderWithProviders(<AppRoutes />, { route: "/tickets", isAuthenticated: false });
+
+    // Assert
+    expect(await screen.findByTestId("route-location")).toHaveTextContent("/login");
+  });
+
+  it("test_app_routes_tickets_new_renders_new_ticket_screen_not_ticket_detail_screen", async () => {
+    // Arrange: implementation_plan v2 Risk 9 — React Router v6 ranks the
+    // static "/tickets/new" segment above the dynamic "/tickets/:id" when
+    // both could match. Proven by rendered content (NewTicketScreen's
+    // Subject field), not by a pathname substring match, since
+    // "/tickets/new" would also satisfy toHaveTextContent("/tickets").
+    // Arrange / Act
+    renderWithProviders(<AppRoutes />, { route: "/tickets/new", isAuthenticated: true });
+
+    // Assert
+    expect(await screen.findByLabelText(/subject/i)).toBeInTheDocument();
+  });
+
+  it("test_app_routes_tickets_new_redirects_unauthenticated_visitor_to_login", async () => {
+    // Arrange / Act
+    renderWithProviders(<AppRoutes />, { route: "/tickets/new", isAuthenticated: false });
+
+    // Assert
+    expect(await screen.findByTestId("route-location")).toHaveTextContent("/login");
+  });
+
+  it("test_app_routes_tickets_id_renders_ticket_detail_screen", async () => {
+    // Arrange
+    server.use(
+      http.get("/api/v1/support/tickets/t-1", async () =>
+        HttpResponse.json(
+          {
+            id: "t-1",
+            ticket_number: "TCK-0001",
+            status: "open",
+            requester_id: "u-1",
+            subject: "s",
+            body: "b",
+            category: "c",
+            first_response_at: null,
+            created_at: "2026-09-01T10:00:00Z",
+            updated_at: "2026-09-01T10:00:00Z",
+            replies: { items: [], next_cursor: null },
+          },
+          { status: 200 },
+        ),
+      ),
+    );
+
+    // Act
+    renderWithProviders(<AppRoutes />, { route: "/tickets/t-1", isAuthenticated: true });
+
+    // Assert: TicketDetailScreen-specific content renders; NewTicketScreen's
+    // Subject field does not (ruling out the reverse misroute).
+    expect(await screen.findByText("TCK-0001")).toBeInTheDocument();
+    expect(screen.queryByLabelText(/subject/i)).not.toBeInTheDocument();
+  });
+
+  it("test_app_routes_tickets_id_redirects_unauthenticated_visitor_to_login", async () => {
+    // Arrange / Act
+    renderWithProviders(<AppRoutes />, { route: "/tickets/t-1", isAuthenticated: false });
+
+    // Assert
+    expect(await screen.findByTestId("route-location")).toHaveTextContent("/login");
   });
 });

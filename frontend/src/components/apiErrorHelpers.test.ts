@@ -7,7 +7,13 @@
 // importing `api/httpClient.ts`'s `ApiError` class directly (AGENTS.md §3
 // Frontend table).
 import { describe, it, expect } from "vitest";
-import { getErrorKind, getErrorMessage, getFieldErrors, getErrorStatus } from "./apiErrorHelpers";
+import {
+  getErrorKind,
+  getErrorMessage,
+  getFieldErrors,
+  getErrorStatus,
+  getRetryAfterSeconds,
+} from "./apiErrorHelpers";
 
 describe("apiErrorHelpers", () => {
   describe("getErrorStatus", () => {
@@ -63,6 +69,26 @@ describe("apiErrorHelpers", () => {
     it("test_get_field_errors_returns_undefined_when_absent", () => {
       expect(getFieldErrors({ message: "no field errors" })).toBeUndefined();
       expect(getFieldErrors(undefined)).toBeUndefined();
+    });
+  });
+
+  // US-5.3 implementation_plan v2 Change 2 (OD-1's binding resolution): the
+  // permanent, layering-correct read path for ApiError.retryAfterSeconds, so
+  // NewTicketScreen.tsx/TicketDetailScreen.tsx never import api/httpClient.ts's
+  // ApiError class directly (AGENTS.md §3 screens/components row). FR-12.
+  describe("getRetryAfterSeconds", () => {
+    it("test_get_retry_after_seconds_returns_the_numeric_value_from_a_structural_error", () => {
+      expect(getRetryAfterSeconds({ status: 429, retryAfterSeconds: 30 })).toBe(30);
+    });
+
+    it("test_get_retry_after_seconds_returns_undefined_when_field_is_absent", () => {
+      expect(getRetryAfterSeconds({ status: 429 })).toBeUndefined();
+    });
+
+    it("test_get_retry_after_seconds_returns_undefined_for_a_non_object_error", () => {
+      expect(getRetryAfterSeconds("not an error object")).toBeUndefined();
+      expect(getRetryAfterSeconds(undefined)).toBeUndefined();
+      expect(getRetryAfterSeconds(null)).toBeUndefined();
     });
   });
 });

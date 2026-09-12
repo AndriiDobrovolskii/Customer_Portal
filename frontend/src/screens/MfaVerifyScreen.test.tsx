@@ -10,8 +10,9 @@ import { renderWithProviders } from "../test/test-utils";
 import { MfaVerifyScreen } from "./MfaVerifyScreen";
 
 describe("MfaVerifyScreen", () => {
-  it("test_mfa_verify_screen_valid_totp_code_completes_login_same_as_login_without_mfa", async () => {
-    // Arrange
+  it("test_mfa_verify_screen_valid_totp_code_completes_login_and_lands_on_tickets", async () => {
+    // Arrange: US-5.3 FR-15 moves the post-verify navigation target from
+    // the retired PlaceholderHomeScreen's "/" to "/tickets".
     server.use(
       http.post("/api/v1/auth/mfa/verify", async () =>
         HttpResponse.json(
@@ -28,10 +29,10 @@ describe("MfaVerifyScreen", () => {
     await user.click(screen.getByRole("button", { name: /verify/i }));
 
     // Assert
-    expect(await screen.findByTestId("route-location")).toHaveTextContent("/");
+    expect(await screen.findByTestId("route-location")).toHaveTextContent("/tickets");
   });
 
-  it("test_mfa_verify_screen_valid_recovery_code_completes_login_same_as_login_without_mfa", async () => {
+  it("test_mfa_verify_screen_valid_recovery_code_completes_login_and_lands_on_tickets", async () => {
     // Arrange
     server.use(
       http.post("/api/v1/auth/mfa/verify", async () =>
@@ -49,7 +50,7 @@ describe("MfaVerifyScreen", () => {
     await user.click(screen.getByRole("button", { name: /verify/i }));
 
     // Assert
-    expect(await screen.findByTestId("route-location")).toHaveTextContent("/");
+    expect(await screen.findByTestId("route-location")).toHaveTextContent("/tickets");
   });
 
   it("test_mfa_verify_screen_blocks_submission_on_empty_code_without_calling_api", async () => {

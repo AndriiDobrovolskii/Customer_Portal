@@ -30,7 +30,8 @@ export function LoginScreen() {
   } = useForm<LoginFormValues>();
 
   const locationState = location.state as LocationState | null;
-  const returnTo = locationState?.from?.pathname ?? "/";
+  // US-5.3 FR-15: the authenticated home route moved from "/" to "/tickets".
+  const returnTo = locationState?.from?.pathname ?? "/tickets";
   const confirmationMessage = locationState?.message;
 
   async function onSubmit(values: LoginFormValues) {
