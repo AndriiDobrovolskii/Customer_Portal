@@ -170,7 +170,12 @@ stage responsible. Do not route.
   explicit user sign-off (`AGENTS.md` §7.8). Track sub-steps in
   `pipeline_status` instead.
 - Never rewrite `history.jsonl`. It is append-only, one event per transition.
-- Never create, push, or merge a Pull Request (`AGENTS.md` §1).
+- Never merge a Pull Request — that stays a human action outside the harness.
+- Never dispatch `PR_CREATION` (`pr-creator`) on its own initiative, including
+  inside a `continue` run — reaching it is a stop condition exactly like
+  `BACKLOG_SYNC` (`AGENTS.md` §10). Dispatch it only on its own separate,
+  explicit human instruction (e.g. "create the PR for US-x.y"), the same
+  dispatch-and-record pattern as any other stage skill.
 
 ## Verification Checklist
 

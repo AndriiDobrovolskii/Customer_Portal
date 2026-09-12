@@ -51,6 +51,7 @@ stage_order:
   - RECONCILIATION
   - HUMAN_PR_APPROVAL
   - PR_PREPARATION
+  - PR_CREATION
   - READY_FOR_PR
   - COMPLETED
   - ARCHIVED
@@ -358,20 +359,44 @@ stages:
              implementation_report, implementation_verification, security_review,
              reconciliation, traceability]
     outputs: [pr_summary]
-    next: READY_FOR_PR
+    next: PR_CREATION
     loop_back:
       stale_reconciliation: RECONCILIATION
+
+  PR_CREATION:
+    type: automated_skill
+    skill: pr-creator
+    purpose: >
+      Push the story's branch to origin and open (or update) the GitHub Pull
+      Request via the github MCP server, using pr-preparer's drafted title and
+      body verbatim. The one stage in this workflow that performs a real,
+      externally-visible side effect against the remote repository.
+    inputs: [story, pr_summary]
+    outputs: [pull_request]
+    next: READY_FOR_PR
+    run_policy: >
+      Never auto-run during a `/so:next` continue chain, the same as
+      BACKLOG_SYNC - pushing a branch and opening a Pull Request are
+      externally-visible actions on shared state. Runs only when a human gives
+      an explicit instruction to create/open the PR for this Story (e.g.
+      "create the PR for US-x.y"). story-orchestrator still dispatches it and
+      records the transition exactly like any other stage skill; it simply
+      never does so on its own initiative inside `continue`.
+    loop_back:
+      stale_pr_summary: PR_PREPARATION
 
   READY_FOR_PR:
     type: human_gate
     owner: human
-    required_artifacts: [pr_summary]
+    required_artifacts: [pr_summary, pull_request]
     meaning: >
-      All harness checks have passed. A human creates or finalizes the Pull
-      Request and records that it is open/ready. No new artifact prerequisites
-      beyond what PR_PREPARATION produced. Consistent with AGENTS.md section 1:
-      the harness proposes, a human executes shared-state actions (push, PR
-      creation, merge).
+      All harness checks have passed and PR_CREATION has pushed the branch and
+      opened the actual GitHub Pull Request (pull_request records its URL,
+      number, and pushed commit SHA). A human reviews the real, open Pull
+      Request and records that it is ready. Consistent with AGENTS.md section
+      1/10: the harness proposes and executes only on an explicit per-action
+      instruction; a human still decides when it is ready and, later, when it
+      is merged (COMPLETED).
     approve_command: "/so:approve"
     on_approve: COMPLETED
     on_reject: PR_PREPARATION
