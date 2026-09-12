@@ -9,26 +9,41 @@ version: 1
 story: US-5.3
 workflow: story-delivery
 
-current_stage: PR_CREATION
-previous_stage: PR_PREPARATION
-last_completed_stage: PR_PREPARATION
+current_stage: READY_FOR_PR
+previous_stage: PR_CREATION
+last_completed_stage: PR_CREATION
 
-status: IN_PROGRESS
+status: WAITING_FOR_HUMAN
 attempt: 1
 
-last_invoked_skill: pr-preparer
+last_invoked_skill: pr-creator
 
 last_result:
   verdict: PASS
-  stage: PR_PREPARATION
-  recorded_at: "2026-09-12T21:32:00Z"
+  stage: PR_CREATION
+  recorded_at: "2026-09-12T19:22:26Z"
 
 last_artifacts:
-  - "docs/pr/US-5.3-pr-summary.md"
+  - "docs/pr/US-5.3-pr-record.md"
 
 implementation_substep: null
 
-pending_human_gate: null
+pending_human_gate:
+  stage: READY_FOR_PR
+  status: PENDING
+  required_artifacts:
+    - type: pr_summary
+      path: "docs/pr/US-5.3-pr-summary.md"
+      version: 1
+    - type: pull_request
+      path: "docs/pr/US-5.3-pr-record.md"
+      version: 1
+  automated_verdict: PASS
+  blocking_findings: []
+  requested_at: "2026-09-12T19:22:26Z"
+  decided_at: null
+  decided_by: null
+  comment: null
 
 note: >
   Plan v2 incorporates the human's binding OD-1..OD-6 resolutions
@@ -87,8 +102,9 @@ non_blocking_findings:
   - "HUMAN_PR_APPROVAL: APPROVED (2026-09-12T18:25:25Z, sbruhov@gmail.com, no comment). All four required artifacts reconfirmed current (DRAFT, not superseded/archived) with automated_verdict PASS and zero blocking findings. Advanced to PR_PREPARATION."
   - "PR_PREPARATION (pr-preparer, attempt 1): PASS. docs/pr/US-5.3-pr-summary.md v1 (DRAFT) produced - PR title, summary linking story/spec/plan, 17-item AC-traceability test-plan checklist, risk/rollback notes, .env.example confirmed unaffected (no new setting). stale_reconciliation checked and does not apply (no frontend/src or .eslintrc.cjs file newer than the reconciliation report by mtime). Full commit-hygiene disclosure included for three known non-scope items: the human-approved eslintrc override for TicketDetailScreen.tsx, the out-of-scope ProfileScreen.test.tsx timing-flake fix, and the incidental tsconfig.app.tsbuildinfo regeneration. Also flagged: docs/specifications/US-5.3-spec.md's Open Questions/FR-12 prose still reads OD-1..OD-6 as unresolved, stale relative to implementation_plan v2's binding resolutions actually implemented - correcting the spec is us-clarifier/story-spec-writer's ownership, not this stage's."
   - "WORKFLOW-DEFINITION CHANGE + CORRECTION (2026-09-12, sbruhov@gmail.com request): a new PR_CREATION stage (skill pr-creator) was added to stage-map.yaml between PR_PREPARATION and READY_FOR_PR, per human decision to update AGENTS.md section 10's push/PR-creation principle - pr-creator is the one named, explicit-trigger-only exception, never auto-run by /so:next. This was added AFTER this run had already advanced current_stage to READY_FOR_PR on the old (pre-PR_CREATION) map. Corrected: current_stage rolled back to PR_CREATION (no PR had actually been opened yet, so no real state was lost), pending_human_gate cleared, status reset to IN_PROGRESS. history.jsonl's already-appended PR_PREPARATION->READY_FOR_PR event is not rewritten (append-only); this note plus the next transition event are the authoritative correction."
+  - "PR_CREATION (pr-creator, explicit human trigger 'create the PR for US-5.3'): PASS. Precondition failure found first: working tree had all of US-5.3's implementation uncommitted on top of the already-merged feat/us-5.2-account-self-service-ui branch (no feat/us-5.3-* branch existed). Per human decision, created feat/us-5.3-support-tickets-ui from that HEAD and committed the US-5.3-scoped changes (commit e24078a), excluding unrelated .agents/ and this session's own harness/pr-creator changes (stashed separately). Pushed and opened GitHub PR #34 (https://github.com/AndriiDobrovolskii/Customer_Portal/pull/34) using pr_summary's title/body verbatim. Staleness check (commit timestamp postdates pr_summary.updated_at) judged a false positive and disclosed rather than looped back: no new code landed, only pre-existing work got committed. SECOND FINDING: the initial branch carried a stray, never-pushed US-5.2 archive commit (c174f38) inherited from HEAD, bloating PR #34 to 2 commits. Per human decision, rebased feat/us-5.3-support-tickets-ui onto origin/main (dropping c174f38, intact on its original branch), hand-resolved conflicts in workflow-state.yaml/active-story.yaml/history.jsonl (all pure staleness - origin/main's copies predate US-5.2's own archive-mode run; took the US-5.3-current side throughout, verified each file still parses), and force-pushed (--force-with-lease; safe - brand-new branch, zero reviews). A second prettier --write + amend was needed after the rebase re-triggered CRLF conversion (core.autocrlf=true, no .gitattributes) that broke the pre-push format:check hook again. PR #34 now correctly shows 1 commit (dc7e081), verified against origin post-push. docs/pr/US-5.3-pr-record.md v1 written. STORY IS NOW AT READY_FOR_PR (human_gate)."
 
 started_at: "2026-09-08T18:35:00Z"
-updated_at: "2026-09-12T21:32:00Z"
+updated_at: "2026-09-12T19:22:26Z"
 completed_at: null
 archived_at: null
