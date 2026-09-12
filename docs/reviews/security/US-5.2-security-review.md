@@ -2,9 +2,9 @@
 artifact_type: security_review
 story: US-5.2
 version: 1
-status: APPROVED
+status: ARCHIVED
 created_at: "2026-09-08T19:00:00Z"
-updated_at: "2026-09-08T14:50:55Z"
+updated_at: "2026-09-08T18:25:00Z"
 produced_by: security-reviewer
 inputs:
   - path: docs/stories/US-5.2-account-self-service-ui.md

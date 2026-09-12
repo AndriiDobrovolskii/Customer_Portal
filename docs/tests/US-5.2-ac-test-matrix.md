@@ -2,9 +2,9 @@
 artifact_type: ac_test_matrix
 story: US-5.2
 version: 1
-status: DRAFT
+status: ARCHIVED
 created_at: "2026-09-08T10:00:00Z"
-updated_at: "2026-09-08T10:00:00Z"
+updated_at: "2026-09-08T18:25:00Z"
 produced_by: test-writer
 inputs:
   - path: docs/stories/US-5.2-account-self-service-ui.md

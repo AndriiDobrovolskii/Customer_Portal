@@ -2,9 +2,9 @@
 artifact_type: design_review
 story: US-5.2
 version: 1
-status: DRAFT
+status: ARCHIVED
 created_at: "2026-09-08T08:15:00Z"
-updated_at: "2026-09-08T08:15:00Z"
+updated_at: "2026-09-08T18:25:00Z"
 produced_by: design-reviewer
 inputs:
   - path: docs/stories/US-5.2-account-self-service-ui.md
