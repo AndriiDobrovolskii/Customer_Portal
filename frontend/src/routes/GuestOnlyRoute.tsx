@@ -12,7 +12,8 @@ export function GuestOnlyRoute({ children }: GuestOnlyRouteProps) {
   const { isAuthenticated } = useAuthStore();
 
   if (isAuthenticated) {
-    return <Navigate to="/" replace />;
+    // US-5.3 FR-15: the authenticated home route moved from "/" to "/tickets".
+    return <Navigate to="/tickets" replace />;
   }
 
   return <>{children}</>;

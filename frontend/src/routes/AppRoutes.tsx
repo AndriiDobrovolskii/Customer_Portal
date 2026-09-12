@@ -3,7 +3,7 @@
 // `BrowserRouter` in App.tsx, a `MemoryRouter` in tests) rather than owning
 // its own `createBrowserRouter` instance, so it can be rendered directly
 // inside `test/test-utils.tsx`'s `MemoryRouter`.
-import { Route, Routes } from "react-router-dom";
+import { Navigate, Route, Routes } from "react-router-dom";
 import { ProtectedRoute } from "./ProtectedRoute";
 import { GuestOnlyRoute } from "./GuestOnlyRoute";
 import { AuthLayout } from "../layouts/AuthLayout";
@@ -14,7 +14,9 @@ import { MfaVerifyScreen } from "../screens/MfaVerifyScreen";
 import { ForgotPasswordScreen } from "../screens/ForgotPasswordScreen";
 import { ResetPasswordScreen } from "../screens/ResetPasswordScreen";
 import { SessionsScreen } from "../screens/SessionsScreen";
-import { PlaceholderHomeScreen } from "../screens/PlaceholderHomeScreen";
+import { TicketListScreen } from "../screens/TicketListScreen";
+import { NewTicketScreen } from "../screens/NewTicketScreen";
+import { TicketDetailScreen } from "../screens/TicketDetailScreen";
 import { ProfileScreen } from "../screens/ProfileScreen";
 import { SecurityScreen } from "../screens/SecurityScreen";
 import { DeactivateAccountScreen } from "../screens/DeactivateAccountScreen";
@@ -73,7 +75,13 @@ export function AppRoutes() {
           </ProtectedRoute>
         }
       >
-        <Route path="/" element={<PlaceholderHomeScreen />} />
+        {/* US-5.3 FR-15/Change 11: "/" is retired as its own screen — a
+            bookmarked or hand-typed "/" still lands an authenticated
+            customer on their tickets. */}
+        <Route path="/" element={<Navigate to="/tickets" replace />} />
+        <Route path="/tickets" element={<TicketListScreen />} />
+        <Route path="/tickets/new" element={<NewTicketScreen />} />
+        <Route path="/tickets/:id" element={<TicketDetailScreen />} />
         <Route path="/sessions" element={<SessionsScreen />} />
         <Route path="/settings/profile" element={<ProfileScreen />} />
         <Route path="/settings/security" element={<SecurityScreen />} />

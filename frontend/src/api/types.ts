@@ -168,3 +168,72 @@ export interface AccountDeactivateResponse {
   status: string;
   deactivated_at: string;
 }
+
+// US-5.3 Support Tickets DTOs
+export type TicketStatus = "open" | "waiting_on_support" | "waiting_on_customer" | "resolved" | "closed";
+
+export interface TicketRead {
+  id: string;
+  ticket_number: string;
+  subject: string;
+  category: string;
+  status: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface TicketListResponse {
+  items: TicketRead[];
+  next_cursor: string | null;
+}
+
+export interface CreateTicketRequest {
+  subject: string;
+  body: string;
+  category: string;
+  attachment_ids: string[];
+}
+
+export interface ReplyRead {
+  id: string;
+  author_id: string;
+  author_kind: string;
+  body: string;
+  created_at: string;
+}
+
+export interface ReplyThreadPage {
+  items: ReplyRead[];
+  next_cursor: string | null;
+}
+
+export interface TicketDetailRead {
+  id: string;
+  ticket_number: string;
+  subject: string;
+  category: string;
+  status: string;
+  created_at: string;
+  updated_at: string;
+  first_response_at?: string | null;
+  replies: ReplyThreadPage;
+}
+
+export interface CreateReplyRequest {
+  body: string;
+  attachment_ids: string[];
+}
+
+export interface TicketStateRead {
+  id: string;
+  status: string;
+  updated_at: string;
+}
+
+export interface CloseTicketRequest {
+  reason?: string;
+}
+
+export interface ReopenTicketRequest {
+  reason?: string;
+}

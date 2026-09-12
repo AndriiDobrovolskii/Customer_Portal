@@ -5,8 +5,9 @@ import { renderWithProviders } from "../test/test-utils";
 import { GuestOnlyRoute } from "./GuestOnlyRoute";
 
 describe("GuestOnlyRoute", () => {
-  it("test_guest_only_route_authenticated_user_is_redirected_to_placeholder_home", () => {
-    // Arrange / Act
+  it("test_guest_only_route_authenticated_user_is_redirected_to_tickets", () => {
+    // Arrange / Act: US-5.3 FR-15 moves this redirect target from the
+    // retired PlaceholderHomeScreen's "/" to "/tickets".
     renderWithProviders(
       <GuestOnlyRoute>
         <div>Login form</div>
@@ -16,7 +17,7 @@ describe("GuestOnlyRoute", () => {
 
     // Assert
     expect(screen.queryByText("Login form")).not.toBeInTheDocument();
-    expect(screen.getByTestId("route-location").textContent).toBe("/");
+    expect(screen.getByTestId("route-location").textContent).toBe("/tickets");
   });
 
   it("test_guest_only_route_unauthenticated_visitor_renders_the_guest_children", () => {

@@ -17,8 +17,9 @@ async function fillAndSubmit(user: ReturnType<typeof userEvent.setup>, email: st
 }
 
 describe("LoginScreen", () => {
-  it("test_login_screen_valid_credentials_without_mfa_stores_token_in_memory_and_redirects_to_home", async () => {
-    // Arrange
+  it("test_login_screen_valid_credentials_without_mfa_stores_token_in_memory_and_redirects_to_tickets", async () => {
+    // Arrange: US-5.3 FR-15 moves the no-`from`-state landing target from
+    // the retired PlaceholderHomeScreen's "/" to "/tickets".
     server.use(
       http.post("/api/v1/auth/login", async () =>
         HttpResponse.json(
@@ -34,7 +35,7 @@ describe("LoginScreen", () => {
     await fillAndSubmit(user, "a@example.com", "correct-password");
 
     // Assert
-    expect(await screen.findByTestId("route-location")).toHaveTextContent("/");
+    expect(await screen.findByTestId("route-location")).toHaveTextContent("/tickets");
   });
 
   it("test_login_screen_mfa_required_response_navigates_to_mfa_verify_screen_holding_mfa_token_in_transient_state", async () => {

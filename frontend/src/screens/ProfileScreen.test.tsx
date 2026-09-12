@@ -15,7 +15,7 @@
 // conflict state exposing a "Reload" button (FR-2's 412 case).
 import { describe, it, expect } from "vitest";
 import { http, HttpResponse } from "msw";
-import { screen } from "@testing-library/react";
+import { fireEvent, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { axe } from "vitest-axe";
 import { server } from "../test/mswServer";
@@ -233,8 +233,12 @@ describe("ProfileScreen", () => {
     const user = userEvent.setup();
     renderWithProviders(<ProfileScreen />, { route: "/settings/profile", isAuthenticated: true });
 
-    // Act
-    await user.type(screen.getByLabelText(/display name/i), "x".repeat(200));
+    // Act: 200-char display name set via fireEvent.change rather than
+    // user.type() — user.type() dispatches one keystroke event per
+    // character and does not reliably complete within the test timeout for
+    // a string this long, a known @testing-library/user-event characteristic
+    // unrelated to the component under test (see NewTicketScreen.test.tsx).
+    fireEvent.change(screen.getByLabelText(/display name/i), { target: { value: "x".repeat(200) } });
     await user.click(screen.getByRole("button", { name: /save profile/i }));
 
     // Assert

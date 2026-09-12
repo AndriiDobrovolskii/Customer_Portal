@@ -20,19 +20,22 @@ export interface HttpRequestInit {
   body?: unknown;
   /** Whether this call carries the in-memory Bearer token. Default true. */
   auth?: boolean;
+  idempotencyKey?: string;
 }
 
 export class ApiError extends Error {
   readonly status: number;
   readonly fieldErrors?: Record<string, string>;
   readonly kind?: "network" | "server";
+  readonly retryAfterSeconds?: number;
 
-  constructor(normalized: NormalizedApiError, kind?: "network" | "server") {
+  constructor(normalized: NormalizedApiError, kind?: "network" | "server", retryAfterSeconds?: number) {
     super(normalized.message);
     this.name = "ApiError";
     this.status = normalized.status;
     this.fieldErrors = normalized.fieldErrors;
     this.kind = kind ?? (normalized.status >= 500 ? "server" : undefined);
+    this.retryAfterSeconds = retryAfterSeconds;
   }
 }
 
@@ -64,7 +67,19 @@ async function parseResponse<T>(response: Response): Promise<T> {
   }
 
   const normalized = normalizeApiError({ status: response.status, contentType, body });
-  throw new ApiError(normalized);
+
+  let retryAfterSeconds: number | undefined;
+  if (response.status === 429) {
+    const retryAfter = response.headers.get("Retry-After");
+    if (retryAfter !== null) {
+      const parsed = parseInt(retryAfter, 10);
+      if (!Number.isNaN(parsed)) {
+        retryAfterSeconds = parsed;
+      }
+    }
+  }
+
+  throw new ApiError(normalized, undefined, retryAfterSeconds);
 }
 
 async function rawFetch(path: string, init: RequestInit): Promise<Response> {
@@ -84,7 +99,7 @@ async function performRefreshRequest(): Promise<RefreshResponse> {
   return parseResponse<RefreshResponse>(response);
 }
 
-function buildHeaders(hasBody: boolean, auth: boolean): Record<string, string> {
+function buildHeaders(hasBody: boolean, auth: boolean, idempotencyKey?: string): Record<string, string> {
   const headers: Record<string, string> = { Accept: "application/json" };
   if (hasBody) {
     headers["Content-Type"] = "application/json";
@@ -94,6 +109,9 @@ function buildHeaders(hasBody: boolean, auth: boolean): Record<string, string> {
     if (token) {
       headers.Authorization = `Bearer ${token}`;
     }
+  }
+  if (idempotencyKey !== undefined) {
+    headers["Idempotency-Key"] = idempotencyKey;
   }
   return headers;
 }
@@ -105,7 +123,7 @@ async function performRequest<T>(path: string, init: HttpRequestInit): Promise<T
   const doFetch = () =>
     rawFetch(path, {
       method: init.method,
-      headers: buildHeaders(hasBody, auth),
+      headers: buildHeaders(hasBody, auth, init.idempotencyKey),
       credentials: "include",
       body: hasBody ? JSON.stringify(init.body) : undefined,
     });
@@ -131,8 +149,17 @@ export function httpGet<T>(path: string, options: { auth?: boolean } = {}): Prom
   return performRequest<T>(path, { method: "GET", auth: options.auth });
 }
 
-export function httpPost<T>(path: string, body?: unknown, options: { auth?: boolean } = {}): Promise<T> {
-  return performRequest<T>(path, { method: "POST", body, auth: options.auth });
+export function httpPost<T>(
+  path: string,
+  body?: unknown,
+  options: { auth?: boolean; idempotencyKey?: string } = {},
+): Promise<T> {
+  return performRequest<T>(path, {
+    method: "POST",
+    body,
+    auth: options.auth,
+    idempotencyKey: options.idempotencyKey,
+  });
 }
 
 // Additive: `body` is optional and new (US-5.2, FR-6's DELETE /auth/mfa

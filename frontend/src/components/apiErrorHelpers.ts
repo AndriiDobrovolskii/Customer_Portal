@@ -10,6 +10,7 @@ export interface PresentableApiError {
   message?: string;
   fieldErrors?: Record<string, string>;
   kind?: "network" | "server";
+  retryAfterSeconds?: number;
 }
 
 function asPresentable(error: unknown): PresentableApiError | undefined {
@@ -42,4 +43,9 @@ export function getErrorMessage(
 
 export function getFieldErrors(error: unknown): Record<string, string> | undefined {
   return asPresentable(error)?.fieldErrors;
+}
+
+export function getRetryAfterSeconds(error: unknown): number | undefined {
+  const retryAfter = asPresentable(error)?.retryAfterSeconds;
+  return typeof retryAfter === "number" ? retryAfter : undefined;
 }

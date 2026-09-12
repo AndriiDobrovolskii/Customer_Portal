@@ -42,5 +42,15 @@ module.exports = {
       files: ["src/test/vitest-axe.d.ts"],
       rules: { "@typescript-eslint/no-unused-vars": "off" },
     },
+    {
+      // TK-AC9 mandates `offeredActionsForStatus` as a named export alongside
+      // the `TicketDetailScreen` component (implementation_plan v2 Change 6 /
+      // test_strategy item 10 place it in this file by design, not a separate
+      // module) — Fast Refresh's component-only-export heuristic is a false
+      // positive for that deliberate export shape, not a real code-quality
+      // finding. Human sign-off: 2026-09-12.
+      files: ["src/screens/TicketDetailScreen.tsx"],
+      rules: { "react-refresh/only-export-components": "off" },
+    },
   ],
 };
