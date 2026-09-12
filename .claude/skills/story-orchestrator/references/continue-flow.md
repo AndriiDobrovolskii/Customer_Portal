@@ -41,6 +41,11 @@ the moment any of these **stop conditions** is hit:
 - **`BACKLOG_SYNC` reached.** Its `run_policy` still applies — never auto-run
   it on a `continue`. End the run and report that an explicit backlog sync (or
   Story activation) is needed.
+- **`PR_CREATION` reached.** Its `run_policy` applies — never auto-run it on a
+  `continue` (`AGENTS.md` §10): it pushes the branch and opens the real Pull
+  Request, an externally-visible action on shared state. End the run and
+  report that an explicit instruction to create/open the PR (e.g. "create the
+  PR for `<StoryId>`") is needed before this stage can proceed.
 - **Safety fuse.** `MAX_TRANSITIONS_PER_RUN` (25) transitions have been
   recorded in this single invocation. End the run and report that `/so:next`
   should be invoked again to keep going. `stage_order` has ~24 entries end to
@@ -149,10 +154,19 @@ registry paths — never assume success from the sub-agent's own narration, and
 never accept a report that omits the Result Envelope block; re-dispatch or
 hold `BLOCKED` if it does.
 
-Two stages are special:
+Three stages are special:
 
 - **`BACKLOG_SYNC`** — an outer-loop stop condition (see above). Never
   auto-dispatch it on a `continue`.
+- **`PR_CREATION`** — also an outer-loop stop condition (see above). Never
+  auto-dispatch it on a `continue`; dispatch it only when the user gives an
+  explicit, separate instruction to create/open the PR. Because it performs a
+  real `git push` and calls the `github` MCP server's
+  `create_pull_request`/`update_pull_request`, prefer running it directly in
+  the interactive session rather than as an isolated background sub-agent, so
+  the human sees the push output, the resulting PR URL, and any tool
+  permission prompts as they happen — unlike every other stage skill, its
+  work is not safely invisible.
 - **`IMPLEMENTATION`** — `type: composite_skill`. Resolve the Story's `track`
   (`docs/stories/<StoryId>.md` front matter; absent means `backend`) and
   dispatch each skill in `stages.IMPLEMENTATION.skills_by_track[track]` as its

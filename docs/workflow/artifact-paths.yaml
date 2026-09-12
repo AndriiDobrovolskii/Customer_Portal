@@ -150,6 +150,15 @@ artifacts:
     pattern: docs/pr/{story_id}-pr-summary.md
     owner: pr-preparer
 
+  pull_request:
+    pattern: docs/pr/{story_id}-pr-record.md
+    owner: pr-creator
+    note: >
+      Records the actual GitHub Pull Request opened for the story: URL,
+      number, head/base branch, and the pushed commit SHA. Distinct from
+      pr_summary (drafted content) - this is proof the PR exists in the
+      remote, for READY_FOR_PR's human gate to point at.
+
   # --- Delivery / Archive ---------------------------------------------------
   delivery_summary:
     pattern: docs/evidence/{story_id}-delivery-summary.md

@@ -21,7 +21,7 @@ TEST_WRITING ──→ IMPLEMENTATION ──→ QUALITY_GATE ──→ IMPLEMENT
                                                           ↓
 SECURITY_REVIEW ──→ RECONCILIATION ──→ ⛌ HUMAN_PR_APPROVAL
                                                           ↓
-PR_PREPARATION ──→ ⛌ READY_FOR_PR ──→ ⛌ COMPLETED ──→ ARCHIVED
+PR_PREPARATION ──→ PR_CREATION ──→ ⛌ READY_FOR_PR ──→ ⛌ COMPLETED ──→ ARCHIVED
 
 ⛌ = the workflow stops for a person.
 ```
@@ -48,6 +48,7 @@ PR_PREPARATION ──→ ⛌ READY_FOR_PR ──→ ⛌ COMPLETED ──→ ARCH
 | `SECURITY_REVIEW` | `security-reviewer` | Threat-oriented review of what shipped. |
 | `RECONCILIATION` | `reconciliation-reviewer` | Did we build and *prove* the thing the spec asked for? |
 | `PR_PREPARATION` | `pr-preparer` | Draft the PR title, description, and test plan. |
+| `PR_CREATION` | `pr-creator` | Push the branch and open the real Pull Request (explicit-trigger only). |
 | `ARCHIVED` | `story-orchestrator` | Consolidate what was learned into `project-state.md`. |
 
 ## The three review layers, and why they are not redundant
@@ -73,8 +74,13 @@ Five stages stop for a person: `HUMAN_SPEC_APPROVAL`, `HUMAN_PLAN_APPROVAL`,
 only by `/so:approve` (or `/so:reject`). The orchestrator may never infer one
 from the other.
 
-Consistent with `AGENTS.md` §1, the harness proposes and a human executes every
-shared-state action: skills do not push, open, or merge Pull Requests.
+Consistent with `AGENTS.md` §1/§10, the harness proposes and a human decides
+when to act: no skill pushes or opens a Pull Request on its own initiative.
+`pr-creator` (`PR_CREATION`) is the one named exception — it performs the
+actual `git push` and `create_pull_request`/`update_pull_request` call, but
+only on its own separate, explicit human instruction, never automatically
+during `/so:next` (the same treatment `BACKLOG_SYNC` gets). No skill merges a
+Pull Request; that stays entirely a human action outside the harness.
 
 ## Commands
 
