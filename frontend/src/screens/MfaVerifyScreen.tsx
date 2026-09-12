@@ -29,7 +29,8 @@ export function MfaVerifyScreen() {
     }
     try {
       await verifyMutation.mutateAsync({ mfa_token: mfaToken, code: values.code });
-      navigate("/");
+      // US-5.3 FR-15: the authenticated home route moved from "/" to "/tickets".
+      navigate("/tickets");
     } catch {
       // surfaced via verifyMutation.error below
     }

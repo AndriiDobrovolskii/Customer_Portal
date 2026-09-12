@@ -11,7 +11,7 @@
 import { describe, it, expect } from "vitest";
 import { http, HttpResponse } from "msw";
 import { server } from "../test/mswServer";
-import { httpPatch } from "./httpClient";
+import { httpPatch, httpPost, httpGet } from "./httpClient";
 
 describe("httpPatch", () => {
   it("test_http_patch_resolves_with_data_status_and_headers_on_200", async () => {
@@ -106,5 +106,138 @@ describe("httpPatch", () => {
     await expect(httpPatch("/test-resource", { name: "x" }, { ifMatch: "stale-etag" })).rejects.toMatchObject(
       { status: 412 },
     );
+  });
+});
+
+// US-5.3 implementation_plan v2 Architectural Change 1 (OD-1 unaffected —
+// this is the additive-only `idempotencyKey` option on `httpPost`, mirroring
+// `httpPatch`'s existing `ifMatch` precedent). FR-3/FR-4.
+describe("httpPost idempotencyKey option", () => {
+  it("test_http_post_threads_idempotency_key_header_when_option_supplied", async () => {
+    // Arrange
+    let receivedHeader: string | null = null;
+    server.use(
+      http.post("/api/v1/test-resource", async ({ request }) => {
+        receivedHeader = request.headers.get("idempotency-key");
+        return HttpResponse.json({ id: "1" }, { status: 201 });
+      }),
+    );
+
+    // Act
+    await httpPost("/test-resource", { name: "x" }, { idempotencyKey: "key-123" });
+
+    // Assert
+    expect(receivedHeader).toBe("key-123");
+  });
+
+  it("test_http_post_omits_idempotency_key_header_when_option_not_supplied", async () => {
+    // Arrange: every existing httpPost call site (authApi.ts, mfaApi.ts,
+    // accountApi.ts) omits this option and must keep behaving exactly as
+    // before — purely additive.
+    let sawHeader = false;
+    server.use(
+      http.post("/api/v1/test-resource", async ({ request }) => {
+        sawHeader = request.headers.get("idempotency-key") !== null;
+        return HttpResponse.json({ id: "1" }, { status: 201 });
+      }),
+    );
+
+    // Act
+    await httpPost("/test-resource", { name: "x" });
+
+    // Assert
+    expect(sawHeader).toBe(false);
+  });
+});
+
+// US-5.3 implementation_plan v2 Architectural Change 2 (OD-1's binding
+// resolution): `ApiError.retryAfterSeconds` is a permanent, first-class field
+// set by `parseResponse` on ANY `429` it parses — not a mechanism scoped to
+// this story's two rate-limited endpoints. Proven here via `httpPost` (one of
+// several verbs `performRequest`/`parseResponse` back) rather than a
+// support-domain-specific helper, per the plan's explicit "any future 429
+// reached through performRequest/parseResponse... automatically carries this
+// field" requirement.
+describe("ApiError.retryAfterSeconds (429 Retry-After threading, OD-1)", () => {
+  it("test_parse_response_429_with_retry_after_header_populates_api_error_retry_after_seconds", async () => {
+    // Arrange
+    server.use(
+      http.post("/api/v1/test-resource", async () =>
+        HttpResponse.json(
+          { type: "https://errors.example/rate-limited", title: "Rate limited", status: 429 },
+          { status: 429, headers: { "Retry-After": "30", "content-type": "application/problem+json" } },
+        ),
+      ),
+    );
+
+    // Act / Assert
+    await expect(httpPost("/test-resource", { name: "x" })).rejects.toMatchObject({
+      status: 429,
+      retryAfterSeconds: 30,
+    });
+  });
+
+  it("test_parse_response_429_without_a_retry_after_header_leaves_retry_after_seconds_undefined", async () => {
+    // Arrange
+    server.use(
+      http.post("/api/v1/test-resource", async () => HttpResponse.json({ status: 429 }, { status: 429 })),
+    );
+
+    // Act / Assert
+    await expect(httpPost("/test-resource", { name: "x" })).rejects.toMatchObject({
+      status: 429,
+      retryAfterSeconds: undefined,
+    });
+  });
+
+  it("test_parse_response_non_429_4xx_never_populates_retry_after_seconds_even_when_header_present", async () => {
+    // Arrange: a `Retry-After` header on an unrelated 503/4xx must not be
+    // misread as this story's rate-limit signal — the plan gates this
+    // strictly to status === 429.
+    server.use(
+      http.post("/api/v1/test-resource", async () =>
+        HttpResponse.json(
+          { type: "https://errors.example/service-unavailable", title: "Unavailable", status: 503 },
+          { status: 503, headers: { "Retry-After": "30" } },
+        ),
+      ),
+    );
+
+    // Act / Assert
+    await expect(httpPost("/test-resource", { name: "x" })).rejects.toMatchObject({
+      status: 503,
+      retryAfterSeconds: undefined,
+    });
+  });
+
+  it("test_parse_response_429_with_a_non_numeric_retry_after_header_leaves_retry_after_seconds_undefined", async () => {
+    // Arrange
+    server.use(
+      http.post("/api/v1/test-resource", async () =>
+        HttpResponse.json(
+          { status: 429 },
+          { status: 429, headers: { "Retry-After": "Wed, 21 Oct 2026 07:28:00 GMT" } },
+        ),
+      ),
+    );
+
+    // Act / Assert
+    await expect(httpPost("/test-resource", { name: "x" })).rejects.toMatchObject({
+      status: 429,
+      retryAfterSeconds: undefined,
+    });
+  });
+
+  it("test_parse_response_429_threading_applies_to_httpget_not_only_httppost", async () => {
+    // Arrange: the plan's explicit claim is that this is a shared-client
+    // property of `parseResponse`, not a `httpPost`-only special case.
+    server.use(
+      http.get("/api/v1/test-resource", async () =>
+        HttpResponse.json({ status: 429 }, { status: 429, headers: { "Retry-After": "15" } }),
+      ),
+    );
+
+    // Act / Assert
+    await expect(httpGet("/test-resource")).rejects.toMatchObject({ status: 429, retryAfterSeconds: 15 });
   });
 });

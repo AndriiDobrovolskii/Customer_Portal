@@ -111,6 +111,67 @@ export const handlers = [
   http.post(`${API}/account/deactivate`, async () =>
     HttpResponse.json({ status: "deactivated", deactivated_at: "2026-01-01T00:00:00Z" }, { status: 200 }),
   ),
+
+  // US-5.3 Support Tickets baseline handlers
+  http.get(`${API}/support/tickets`, async () =>
+    HttpResponse.json({ items: [], next_cursor: null }, { status: 200 }),
+  ),
+
+  http.post(`${API}/support/tickets`, async () =>
+    HttpResponse.json(
+      {
+        id: "t1",
+        ticket_number: "TCK-1001",
+        subject: "Default Subject",
+        category: "General",
+        status: "open",
+        created_at: "2026-01-01T00:00:00Z",
+        updated_at: "2026-01-01T00:00:00Z",
+      },
+      { status: 201 },
+    ),
+  ),
+
+  http.get(`${API}/support/tickets/:id`, async () =>
+    HttpResponse.json(
+      {
+        id: "t1",
+        ticket_number: "TCK-1001",
+        subject: "Default Subject",
+        category: "General",
+        status: "open",
+        created_at: "2026-01-01T00:00:00Z",
+        updated_at: "2026-01-01T00:00:00Z",
+        first_response_at: null,
+        replies: { items: [], next_cursor: null },
+      },
+      { status: 200 },
+    ),
+  ),
+
+  http.post(`${API}/support/tickets/:id/replies`, async () =>
+    HttpResponse.json(
+      {
+        id: "r1",
+        author_id: "u1",
+        author_kind: "customer",
+        body: "Default reply",
+        created_at: "2026-01-01T00:00:00Z",
+      },
+      { status: 201 },
+    ),
+  ),
+
+  http.post(`${API}/support/tickets/:id/close`, async () =>
+    HttpResponse.json({ id: "t1", status: "closed", updated_at: "2026-01-01T00:00:00Z" }, { status: 200 }),
+  ),
+
+  http.post(`${API}/support/tickets/:id/reopen`, async () =>
+    HttpResponse.json(
+      { id: "t1", status: "waiting_on_support", updated_at: "2026-01-01T00:00:00Z" },
+      { status: 200 },
+    ),
+  ),
 ];
 
 /** OD-4: RegistrationValidationError — 400, plain application/json, no RFC 7807 envelope. */
