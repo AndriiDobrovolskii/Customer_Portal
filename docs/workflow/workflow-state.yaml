@@ -16,23 +16,29 @@ last_completed_stage: COMPLETED
 status: ARCHIVED
 attempt: 1
 
-last_invoked_skill: pr-preparer
+last_invoked_skill: story-orchestrator
 
 last_result:
-  verdict: PASS
-  stage: PR_PREPARATION
-  recorded_at: "2026-09-12T21:32:00Z"
+  verdict: ARCHIVED
+  stage: ARCHIVED
+  recorded_at: "2026-09-12T19:50:00Z"
 
 last_artifacts:
-  - type: delivery_summary
-    path: docs/evidence/US-5.2-delivery-summary.md
-    version: 1
+  - "docs/evidence/US-5.3-delivery-summary.md"
 
 implementation_substep: null
 
 pending_human_gate: null
 
-note: "Archived 2026-09-08T18:25:00Z via /so:archive. Delivery summary at docs/evidence/US-5.2-delivery-summary.md. No business-rules.md/ARCHITECTURE.md updates proposed (pure frontend consumer of already-documented backend rules and layering). GitHub issue #25 closed 2026-09-08T18:30:00Z on explicit human approval."
+note: >
+  Plan v2 incorporates the human's binding OD-1..OD-6 resolutions
+  (2026-09-08T21:00:00Z rejection comment) as firm architecture, superseding
+  v1. docs/decisions/US-5.3-open-decisions.md (v1, DRAFT) and
+  docs/specifications/US-5.3-spec.md FR-12 prose are now stale relative to
+  these resolutions but remain unedited (out of story-orchestrator's
+  ownership) - downstream stages should treat the plan's resolutions as
+  authoritative until us-clarifier/story-spec-writer formally update their
+  own artifacts.
 
 blocking_issues: []
 
@@ -81,8 +87,12 @@ non_blocking_findings:
   - "HUMAN_PR_APPROVAL: APPROVED (2026-09-12T18:25:25Z, sbruhov@gmail.com, no comment). All four required artifacts reconfirmed current (DRAFT, not superseded/archived) with automated_verdict PASS and zero blocking findings. Advanced to PR_PREPARATION."
   - "PR_PREPARATION (pr-preparer, attempt 1): PASS. docs/pr/US-5.3-pr-summary.md v1 (DRAFT) produced - PR title, summary linking story/spec/plan, 17-item AC-traceability test-plan checklist, risk/rollback notes, .env.example confirmed unaffected (no new setting). stale_reconciliation checked and does not apply (no frontend/src or .eslintrc.cjs file newer than the reconciliation report by mtime). Full commit-hygiene disclosure included for three known non-scope items: the human-approved eslintrc override for TicketDetailScreen.tsx, the out-of-scope ProfileScreen.test.tsx timing-flake fix, and the incidental tsconfig.app.tsbuildinfo regeneration. Also flagged: docs/specifications/US-5.3-spec.md's Open Questions/FR-12 prose still reads OD-1..OD-6 as unresolved, stale relative to implementation_plan v2's binding resolutions actually implemented - correcting the spec is us-clarifier/story-spec-writer's ownership, not this stage's."
   - "WORKFLOW-DEFINITION CHANGE + CORRECTION (2026-09-12, sbruhov@gmail.com request): a new PR_CREATION stage (skill pr-creator) was added to stage-map.yaml between PR_PREPARATION and READY_FOR_PR, per human decision to update AGENTS.md section 10's push/PR-creation principle - pr-creator is the one named, explicit-trigger-only exception, never auto-run by /so:next. This was added AFTER this run had already advanced current_stage to READY_FOR_PR on the old (pre-PR_CREATION) map. Corrected: current_stage rolled back to PR_CREATION (no PR had actually been opened yet, so no real state was lost), pending_human_gate cleared, status reset to IN_PROGRESS. history.jsonl's already-appended PR_PREPARATION->READY_FOR_PR event is not rewritten (append-only); this note plus the next transition event are the authoritative correction."
+  - "PR_CREATION (pr-creator, explicit human trigger 'create the PR for US-5.3'): PASS. Precondition failure found first: working tree had all of US-5.3's implementation uncommitted on top of the already-merged feat/us-5.2-account-self-service-ui branch (no feat/us-5.3-* branch existed). Per human decision, created feat/us-5.3-support-tickets-ui from that HEAD and committed the US-5.3-scoped changes (commit e24078a), excluding unrelated .agents/ and this session's own harness/pr-creator changes (stashed separately). Pushed and opened GitHub PR #34 (https://github.com/AndriiDobrovolskii/Customer_Portal/pull/34) using pr_summary's title/body verbatim. Staleness check (commit timestamp postdates pr_summary.updated_at) judged a false positive and disclosed rather than looped back: no new code landed, only pre-existing work got committed. SECOND FINDING: the initial branch carried a stray, never-pushed US-5.2 archive commit (c174f38) inherited from HEAD, bloating PR #34 to 2 commits. Per human decision, rebased feat/us-5.3-support-tickets-ui onto origin/main (dropping c174f38, intact on its original branch), hand-resolved conflicts in workflow-state.yaml/active-story.yaml/history.jsonl (all pure staleness - origin/main's copies predate US-5.2's own archive-mode run; took the US-5.3-current side throughout, verified each file still parses), and force-pushed (--force-with-lease; safe - brand-new branch, zero reviews). A second prettier --write + amend was needed after the rebase re-triggered CRLF conversion (core.autocrlf=true, no .gitattributes) that broke the pre-push format:check hook again. PR #34 now correctly shows 1 commit (dc7e081), verified against origin post-push. docs/pr/US-5.3-pr-record.md v1 written. STORY IS NOW AT READY_FOR_PR (human_gate)."
+  - "READY_FOR_PR: APPROVED (2026-09-12T19:35:00Z, sbruhov@gmail.com, no comment). Both required artifacts (pr_summary v1, pull_request v1) reconfirmed current with automated_verdict PASS and zero blocking findings; front matter bumped DRAFT->APPROVED. Advanced to COMPLETED, which is itself a human_gate - status set WAITING_FOR_HUMAN (not COMPLETED) and a fresh pending_human_gate built for it, per state-schema.md rule 5 and to avoid the exact premature-status bug AGENTS.md section 10 documents from the US-4.2 incident (COMPLETED must never be treated as satisfied merely by being reached - its own approval_precondition requires independently verifying the PR is actually merged into main before /so:approve may accept it)."
+  - "COMPLETED: APPROVED (2026-09-12T19:40:00Z, sbruhov@gmail.com, no comment). approval_precondition satisfied: independently verified against the actual repository, not the approver's word - `gh`/API showed PR #34 merged (merged: true, merged_at 2026-09-12T19:24:24Z, merged_by AndriiDobrovolskii), cross-checked with `git fetch origin main` + `git merge-base --is-ancestor dc7e081...(US-5.3's tip commit) origin/main`, which confirmed. pr_summary v1 reconfirmed current/APPROVED, automated_verdict PASS, zero blocking findings. current_stage deliberately kept at COMPLETED rather than advancing to stage-map.yaml's literal on_approve: ARCHIVED target - archive-flow.md's own precondition requires current_stage == COMPLETED to start archive mode, and this exact discrepancy already happened once before for US-5.2 (see that story's history.jsonl: a premature current_stage=ARCHIVED set by /so:approve was corrected same-session). Applying that precedent directly this time instead of repeating the mistake. status set to COMPLETED (workflow status enum, distinct from the stage id); pending_human_gate cleared. Actual archival (delivery_summary, project_state, catalog status) happens only via a separate, explicit /so:archive."
+  - "ARCHIVED (story-orchestrator, /so:archive, explicit human invocation): pre-flight fix applied first - HUMAN_PR_APPROVAL's four required_artifacts (implementation_verification, security_review, reconciliation, traceability) were still DRAFT despite that gate's approval (prior session's /so:approve confirmed them current but never applied the owed DRAFT->APPROVED bump); bumped to APPROVED before proceeding. All archive-flow.md preconditions reconfirmed: exactly one active Story, current_stage==COMPLETED, reconciliation/traceability/pr_summary all APPROVED, zero open Critical/Major findings, no blocking Open Decisions (OD-1..OD-6 resolved in substance via plan v2, open-decisions.md's own stale DRAFT status disclosed as a known documentation-lag limitation, not a real blocker). All 20 story artifacts bumped to ARCHIVED. docs/evidence/US-5.3-delivery-summary.md v1 written. docs/catalog/stories.yaml US-5.3 set to ARCHIVED (delivered_by.pr: 34). docs/knowledge/project-state.md updated with US-5.3's Delivered Capabilities/Known Constraints/Archived Stories rows - and, discovered missing during this run, US-5.2's own equivalent rows were backfilled too (that story's prior archive run never applied them), disclosed in the delivery summary's Process Note. No business-rules.md/ARCHITECTURE.md updates proposed (pure frontend consumer of already-documented backend rules and layering, one TanStack Query pattern application not novel enough for a dedicated entry). GitHub Issue #26 closed 2026-09-13 on separate explicit human approval per archive-flow.md step 8, with a comment referencing PR #34 and the delivery summary. active-story.yaml cleared (active_story: null). No Pull Request merged by this run."
 
-started_at: "2026-09-08T00:00:00Z"
-updated_at: "2026-09-08T18:25:00Z"
-completed_at: "2026-09-08T17:55:00Z"
-archived_at: "2026-09-08T18:25:00Z"
+started_at: "2026-09-08T18:35:00Z"
+updated_at: "2026-09-12T19:50:00Z"
+completed_at: "2026-09-12T19:40:00Z"
+archived_at: "2026-09-12T19:50:00Z"

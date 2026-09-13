@@ -2,9 +2,9 @@
 artifact_type: impact_analysis
 story: US-5.3
 version: 1
-status: DRAFT
+status: ARCHIVED
 created_at: "2026-09-08T20:15:00Z"
-updated_at: "2026-09-08T20:35:00Z"
+updated_at: "2026-09-12T19:50:00Z"
 produced_by: impact-analyzer
 inputs:
   - path: docs/stories/US-5.3-support-tickets-ui.md
