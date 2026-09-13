@@ -37,6 +37,13 @@ export interface RenderWithProvidersOptions {
    * (the pre-US-5.2 tests that never pass it keep exercising the same
    * "not enrolled" seed they always implicitly had). */
   mfaEnabled?: boolean;
+  /** US-5.4 Task T6: seeds the admin scopes XC-AC1's three `Given`s need
+   * (no admin scopes / users:read-only / a full admin) without requiring a
+   * real encoded JWT — `initialState` is consumed directly by the reducer's
+   * initial value, bypassing SET_SESSION, so this is set on the seed as-is
+   * rather than decoded from a token. Defaults to `[]`, so every existing
+   * caller that never passes this option keeps its current behavior. */
+  scopes?: string[];
 }
 
 /**
@@ -68,6 +75,7 @@ function buildAuthSeed(options: RenderWithProvidersOptions): AuthStateSeed {
     mfaToken: options.mfaToken ?? null,
     mfaEnrollmentDeadline: options.mfaEnrollmentDeadline ?? null,
     mfaEnabled: options.mfaEnabled ?? false,
+    scopes: options.scopes ?? [],
   };
 }
 

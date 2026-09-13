@@ -237,3 +237,88 @@ export interface CloseTicketRequest {
 export interface ReopenTicketRequest {
   reason?: string;
 }
+
+// US-5.4 Admin Console DTOs. `AdminUserRead.status`/`.roles` stay plain
+// `string`/`string[]` (never a union) — the story's own "an unrecognized
+// value renders verbatim" rule (Client State Notes); the fixed
+// invited/active/deactivated set FR-1's filter <select> offers is a UI-only
+// constant in AdminUserListScreen.tsx, not a change to this field's type —
+// the same split types.ts already has between TicketRead.status: string and
+// the separate TicketStatus union.
+export interface AdminUserRead {
+  id: string;
+  email: string;
+  display_name: string;
+  status: string;
+  roles: string[];
+  created_at: string;
+  last_login_at: string | null;
+}
+
+export interface AdminUserListResponse {
+  items: AdminUserRead[];
+  next_cursor: string | null;
+}
+
+// FR-3: exactly these three fields, no password field anywhere.
+export interface CreateAdminUserRequest {
+  email: string;
+  display_name: string;
+  roles: string[];
+}
+
+// FR-4: `roles` is deliberately absent — roles are a separate save path
+// (FR-5). `reason` is always required by the form, never optional here.
+export interface UpdateAdminUserRequest {
+  display_name?: string;
+  locale?: string;
+  timezone?: string;
+  avatar_url?: string;
+  reason: string;
+}
+
+export interface DeactivateUserRequest {
+  reason: string;
+}
+
+// FR-6: the 202 body is never displayed by any screen (only its receipt).
+export interface ResendInviteResponse {
+  message: string;
+}
+
+export interface RoleRead {
+  name: string;
+  permissions: string[];
+}
+
+export interface RoleListResponse {
+  roles: RoleRead[];
+}
+
+export interface ReplaceUserRolesRequest {
+  roles: string[];
+}
+
+export interface ReplaceUserRolesResponse {
+  roles: string[];
+}
+
+// FR-8: explicitly no `id` field — AdminAuditLogScreen.tsx must synthesize
+// its own stable per-row key. `event` is free text; `actor_role`, `outcome`,
+// `ip`, `user_agent`, `actor_id`, `target_id` are all nullable.
+export interface AuditLogEntry {
+  occurred_at: string;
+  actor_id: string | null;
+  actor_role: string | null;
+  event: string;
+  target_id: string | null;
+  outcome: string | null;
+  request_id: string | null;
+  ip: string | null;
+  user_agent: string | null;
+}
+
+export interface AuditLogListResponse {
+  items: AuditLogEntry[];
+  next_cursor: string | null;
+}

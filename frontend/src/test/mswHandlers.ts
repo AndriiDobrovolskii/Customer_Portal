@@ -172,6 +172,99 @@ export const handlers = [
       { status: 200 },
     ),
   ),
+
+  // US-5.4 Admin Console baseline handlers — one per adminApi.ts operation
+  // (nine total; task_breakdown v2 Task T7). GET /admin/users/:id carries an
+  // `ETag` response header, the same mechanism the `PATCH /profile` handler
+  // above already demonstrates (AD-AC2's capture-on-GET behavior).
+  http.get(`${API}/admin/users`, async () =>
+    HttpResponse.json({ items: [], next_cursor: null }, { status: 200 }),
+  ),
+
+  http.get(`${API}/admin/users/:id`, async ({ params }) =>
+    HttpResponse.json(
+      {
+        id: params.id,
+        email: "default.admin.target@example.com",
+        display_name: "Default Target User",
+        status: "active",
+        roles: ["support-agent"],
+        created_at: "2026-01-01T00:00:00Z",
+        last_login_at: "2026-01-02T00:00:00Z",
+      },
+      { status: 200, headers: { ETag: "default-user-etag" } },
+    ),
+  ),
+
+  http.post(`${API}/admin/users`, async () =>
+    HttpResponse.json(
+      {
+        id: "admin-u1",
+        email: "new.user@example.com",
+        display_name: "New User",
+        status: "invited",
+        roles: [],
+        created_at: "2026-01-01T00:00:00Z",
+        last_login_at: null,
+      },
+      { status: 201, headers: { ETag: "default-user-etag" } },
+    ),
+  ),
+
+  http.patch(`${API}/admin/users/:id`, async ({ params }) =>
+    HttpResponse.json(
+      {
+        id: params.id,
+        email: "default.admin.target@example.com",
+        display_name: "Updated Name",
+        status: "active",
+        roles: ["support-agent"],
+        created_at: "2026-01-01T00:00:00Z",
+        last_login_at: "2026-01-02T00:00:00Z",
+      },
+      { status: 200, headers: { ETag: "updated-user-etag" } },
+    ),
+  ),
+
+  http.post(`${API}/admin/users/:id/deactivate`, async ({ params }) =>
+    HttpResponse.json(
+      {
+        id: params.id,
+        email: "default.admin.target@example.com",
+        display_name: "Default Target User",
+        status: "deactivated",
+        roles: ["support-agent"],
+        created_at: "2026-01-01T00:00:00Z",
+        last_login_at: "2026-01-02T00:00:00Z",
+      },
+      { status: 200 },
+    ),
+  ),
+
+  http.post(`${API}/admin/users/:id/resend-invite`, async () =>
+    HttpResponse.json({ message: "Invite resent." }, { status: 202 }),
+  ),
+
+  http.get(`${API}/admin/roles`, async () =>
+    HttpResponse.json(
+      {
+        roles: [
+          { name: "support-agent", permissions: ["tickets:read", "tickets:write"] },
+          { name: "admin", permissions: ["users:read", "users:write", "roles:write", "audit:read"] },
+        ],
+      },
+      { status: 200 },
+    ),
+  ),
+
+  http.put(`${API}/admin/users/:id/roles`, async ({ request }) => {
+    const body = (await request.json()) as { roles: string[] };
+    return HttpResponse.json({ roles: body.roles }, { status: 200 });
+  }),
+
+  http.get(`${API}/admin/audit-logs`, async () =>
+    HttpResponse.json({ items: [], next_cursor: null }, { status: 200 }),
+  ),
 ];
 
 /** OD-4: RegistrationValidationError — 400, plain application/json, no RFC 7807 envelope. */
