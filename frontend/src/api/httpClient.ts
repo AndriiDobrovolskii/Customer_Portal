@@ -229,3 +229,48 @@ export async function httpPatch<T>(
 
   return parseResponseWithMeta<T>(response);
 }
+
+// US-5.4 Architectural Change 2: a same-shape additive extension of the
+// pattern `httpPatch` established — `HttpMethod` already includes `"PUT"`;
+// `performRequest`/`parseResponse`/`parseResponseWithMeta` stay untouched.
+// FR-5's `PUT /admin/users/{id}/roles` never needs the response `ETag`, so
+// this is a bare-`T` verb mirroring `httpPost`'s shape, not `httpPatch`'s.
+export function httpPut<T>(path: string, body?: unknown, options: { auth?: boolean } = {}): Promise<T> {
+  return performRequest<T>(path, { method: "PUT", body, auth: options.auth });
+}
+
+// US-5.4 Architectural Change 2 / impact analysis `api/adminApi.ts` row:
+// FR-2 needs `GET /admin/users/{id}`'s `ETag` response header, which plain
+// `httpGet<T>` (bare `Promise<T>`) cannot expose — this is the "header-
+// carrying path" that row calls for, the GET-verb analogue of `httpPatch`'s
+// existing `{data, status, headers}` shape, reusing `parseResponseWithMeta`
+// untouched.
+export async function httpGetWithMeta<T>(
+  path: string,
+  options: { auth?: boolean } = {},
+): Promise<HttpResult<T>> {
+  const auth = options.auth ?? true;
+
+  const doFetch = () =>
+    rawFetch(path, {
+      method: "GET",
+      headers: buildHeaders(false, auth),
+      credentials: "include",
+    });
+
+  let response = await doFetch();
+
+  if (response.status === 401 && auth) {
+    const bridge = getSessionBridge();
+    try {
+      const refreshed = await coordinateRefresh(performRefreshRequest);
+      bridge.onTokenRefreshed(refreshed.access_token);
+      response = await doFetch();
+    } catch {
+      bridge.onSessionExpired();
+      throw new ApiError({ status: 401, message: "Your session has expired. Please log in again." });
+    }
+  }
+
+  return parseResponseWithMeta<T>(response);
+}

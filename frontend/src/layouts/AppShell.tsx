@@ -22,13 +22,23 @@ export interface AppShellProps {
 }
 
 export function AppShell({ children }: AppShellProps) {
-  const { mfaEnrollmentDeadline } = useAuthStore();
+  const { mfaEnrollmentDeadline, scopes } = useAuthStore();
+
+  // US-5.4 FR-9: admin nav entries are derived from `scopes` read directly
+  // off the store (no hook call, no `api/` import) — cosmetic gating only,
+  // independently per entry ("Users" on `users:read`, "Audit Log" on
+  // `audit:read`); the server's own 403 remains the enforced boundary on
+  // every admin screen regardless of what this renders.
+  const canReadUsers = scopes.includes("users:read");
+  const canReadAudit = scopes.includes("audit:read");
 
   return (
     <div className="app-shell">
       <header>
         <nav>
           <Link to="/tickets">Tickets</Link>
+          {canReadUsers && <Link to="/admin/users">Users</Link>}
+          {canReadAudit && <Link to="/admin/audit-logs">Audit Log</Link>}
         </nav>
         <LogoutControls />
       </header>

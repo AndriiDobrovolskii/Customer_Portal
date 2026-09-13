@@ -14,7 +14,7 @@ import { http, HttpResponse } from "msw";
 import { screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { server } from "../test/mswServer";
-import { renderWithProviders } from "../test/test-utils";
+import { renderWithProviders, waitFor } from "../test/test-utils";
 import { AppShell } from "./AppShell";
 
 describe("AppShell logout controls", () => {
@@ -104,5 +104,56 @@ describe("AppShell navigation and MFA enrollment banner (US-5.3)", () => {
 
     // Assert
     expect(screen.queryByRole("status")).not.toBeInTheDocument();
+  });
+});
+
+// US-5.4 FR-9/XC-AC1: scope-derived admin navigation (Task T17).
+describe("AppShell admin navigation (US-5.4)", () => {
+  it("test_app_shell_renders_the_users_and_audit_log_nav_entries_when_scopes_include_users_read_and_audit_read", () => {
+    // Arrange / Act
+    renderWithProviders(<AppShell />, {
+      route: "/tickets",
+      isAuthenticated: true,
+      scopes: ["users:read", "audit:read"],
+    });
+
+    // Assert
+    expect(screen.getByRole("link", { name: /^users$/i })).toHaveAttribute("href", "/admin/users");
+    expect(screen.getByRole("link", { name: /audit log/i })).toHaveAttribute("href", "/admin/audit-logs");
+  });
+
+  it("test_app_shell_renders_no_admin_nav_entry_when_scopes_carry_no_admin_scope", () => {
+    // Arrange / Act
+    renderWithProviders(<AppShell />, {
+      route: "/tickets",
+      isAuthenticated: true,
+      scopes: [],
+    });
+
+    // Assert
+    expect(screen.queryByRole("link", { name: /^users$/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: /audit log/i })).not.toBeInTheDocument();
+  });
+
+  it("test_app_shell_clears_admin_nav_entries_after_a_clear_session_dispatch", async () => {
+    // Arrange: closes docs/reviews/plans/US-5.4-plan-review.md's Medium
+    // finding that authStore.tsx's CLEAR_SESSION branch (scopes reset to
+    // []) has no dedicated unit test — exercised here directly via the
+    // existing logout control, which dispatches CLEAR_SESSION.
+    server.use(http.post("/api/v1/auth/logout", async () => new HttpResponse(null, { status: 204 })));
+    const user = userEvent.setup();
+    renderWithProviders(<AppShell />, {
+      route: "/tickets",
+      isAuthenticated: true,
+      scopes: ["users:read", "audit:read"],
+    });
+    expect(screen.getByRole("link", { name: /^users$/i })).toBeInTheDocument();
+
+    // Act
+    await user.click(screen.getByRole("button", { name: /^log out$/i }));
+
+    // Assert
+    await waitFor(() => expect(screen.queryByRole("link", { name: /^users$/i })).not.toBeInTheDocument());
+    expect(screen.queryByRole("link", { name: /audit log/i })).not.toBeInTheDocument();
   });
 });

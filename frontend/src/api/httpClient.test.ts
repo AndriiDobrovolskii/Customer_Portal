@@ -11,7 +11,7 @@
 import { describe, it, expect } from "vitest";
 import { http, HttpResponse } from "msw";
 import { server } from "../test/mswServer";
-import { httpPatch, httpPost, httpGet } from "./httpClient";
+import { httpPatch, httpPost, httpGet, httpPut, httpGetWithMeta } from "./httpClient";
 
 describe("httpPatch", () => {
   it("test_http_patch_resolves_with_data_status_and_headers_on_200", async () => {
@@ -239,5 +239,65 @@ describe("ApiError.retryAfterSeconds (429 Retry-After threading, OD-1)", () => {
 
     // Act / Assert
     await expect(httpGet("/test-resource")).rejects.toMatchObject({ status: 429, retryAfterSeconds: 15 });
+  });
+});
+
+// US-5.4 implementation_plan v2 Architectural Change 2 (unconditional, not
+// gated on any Open Decision) — `HttpMethod` already included `"PUT"`; this
+// proves the new wrapper actually sends it and resolves the parsed body.
+describe("httpPut", () => {
+  it("test_http_put_sends_a_put_request_with_the_json_body_and_returns_the_parsed_response", async () => {
+    // Arrange
+    let receivedMethod: string | null = null;
+    let receivedBody: unknown = null;
+    server.use(
+      http.put("/api/v1/test-resource", async ({ request }) => {
+        receivedMethod = request.method;
+        receivedBody = await request.json();
+        return HttpResponse.json({ roles: ["admin"] }, { status: 200 });
+      }),
+    );
+
+    // Act
+    const result = await httpPut<{ roles: string[] }>("/test-resource", { roles: ["admin"] });
+
+    // Assert
+    expect(receivedMethod).toBe("PUT");
+    expect(receivedBody).toEqual({ roles: ["admin"] });
+    expect(result).toEqual({ roles: ["admin"] });
+  });
+});
+
+// US-5.4 impact analysis `api/adminApi.ts` row — FR-2's ETag capture needs a
+// GET verb that exposes response headers, mirroring httpPatch's shape.
+describe("httpGetWithMeta", () => {
+  it("test_http_get_with_meta_resolves_with_data_status_and_the_etag_response_header", async () => {
+    // Arrange
+    server.use(
+      http.get("/api/v1/test-resource", async () =>
+        HttpResponse.json({ id: "u1" }, { status: 200, headers: { ETag: "etag-xyz" } }),
+      ),
+    );
+
+    // Act
+    const result = await httpGetWithMeta<{ id: string }>("/test-resource");
+
+    // Assert
+    expect(result.status).toBe(200);
+    expect(result.data).toEqual({ id: "u1" });
+    expect(result.headers.get("etag")).toBe("etag-xyz");
+  });
+
+  it("test_http_get_with_meta_missing_etag_header_resolves_with_a_null_etag", async () => {
+    // Arrange
+    server.use(
+      http.get("/api/v1/test-resource", async () => HttpResponse.json({ id: "u1" }, { status: 200 })),
+    );
+
+    // Act
+    const result = await httpGetWithMeta<{ id: string }>("/test-resource");
+
+    // Assert
+    expect(result.headers.get("etag")).toBeNull();
   });
 });

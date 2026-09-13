@@ -285,4 +285,129 @@ describe("AppRoutes (FE-AC10)", () => {
     // Assert
     expect(await screen.findByTestId("route-location")).toHaveTextContent("/login");
   });
+
+  // US-5.4: four new routes registered inside the same ProtectedRoute/
+  // AppShell group as every route above — same auth-only gating, no new
+  // guard component (Implementation Plan Risk 2).
+  it("test_app_routes_admin_users_renders_admin_user_list_screen", async () => {
+    // Arrange
+    server.use(
+      http.get("/api/v1/admin/users", async () =>
+        HttpResponse.json({ items: [], next_cursor: null }, { status: 200 }),
+      ),
+    );
+
+    // Act
+    renderWithProviders(<AppRoutes />, {
+      route: "/admin/users",
+      isAuthenticated: true,
+      scopes: ["users:read"],
+    });
+
+    // Assert
+    expect(await screen.findByRole("heading", { name: /^users$/i })).toBeInTheDocument();
+  });
+
+  it("test_app_routes_admin_users_redirects_unauthenticated_visitor_to_login", async () => {
+    // Arrange / Act
+    renderWithProviders(<AppRoutes />, { route: "/admin/users", isAuthenticated: false });
+
+    // Assert
+    expect(await screen.findByTestId("route-location")).toHaveTextContent("/login");
+  });
+
+  it("test_app_routes_admin_users_new_renders_admin_user_create_screen", async () => {
+    // Arrange
+    server.use(
+      http.get("/api/v1/admin/roles", async () =>
+        HttpResponse.json({ roles: [{ name: "support-agent", permissions: [] }] }, { status: 200 }),
+      ),
+    );
+
+    // Act
+    renderWithProviders(<AppRoutes />, {
+      route: "/admin/users/new",
+      isAuthenticated: true,
+      scopes: ["users:write"],
+    });
+
+    // Assert
+    expect(await screen.findByRole("heading", { name: /create user/i })).toBeInTheDocument();
+  });
+
+  it("test_app_routes_admin_users_new_redirects_unauthenticated_visitor_to_login", async () => {
+    // Arrange / Act
+    renderWithProviders(<AppRoutes />, { route: "/admin/users/new", isAuthenticated: false });
+
+    // Assert
+    expect(await screen.findByTestId("route-location")).toHaveTextContent("/login");
+  });
+
+  it("test_app_routes_admin_users_id_renders_admin_user_detail_screen", async () => {
+    // Arrange
+    server.use(
+      http.get("/api/v1/admin/roles", async () =>
+        HttpResponse.json({ roles: [{ name: "support-agent", permissions: [] }] }, { status: 200 }),
+      ),
+      http.get("/api/v1/admin/users/user-a", async () =>
+        HttpResponse.json(
+          {
+            id: "user-a",
+            email: "target@example.com",
+            display_name: "Target User",
+            status: "active",
+            roles: ["support-agent"],
+            created_at: "2026-09-01T00:00:00Z",
+            last_login_at: null,
+          },
+          { status: 200, headers: { ETag: "etag-1" } },
+        ),
+      ),
+    );
+
+    // Act
+    renderWithProviders(<AppRoutes />, {
+      route: "/admin/users/user-a",
+      isAuthenticated: true,
+      scopes: ["users:read"],
+    });
+
+    // Assert
+    expect(await screen.findByRole("heading", { name: /target@example.com/i })).toBeInTheDocument();
+  });
+
+  it("test_app_routes_admin_users_id_redirects_unauthenticated_visitor_to_login", async () => {
+    // Arrange / Act
+    renderWithProviders(<AppRoutes />, { route: "/admin/users/user-a", isAuthenticated: false });
+
+    // Assert
+    expect(await screen.findByTestId("route-location")).toHaveTextContent("/login");
+  });
+
+  it("test_app_routes_admin_audit_logs_renders_admin_audit_log_screen", async () => {
+    // Arrange
+    server.use(
+      http.get("/api/v1/admin/audit-logs", async () =>
+        HttpResponse.json({ items: [], next_cursor: null }, { status: 200 }),
+      ),
+    );
+
+    // Act
+    renderWithProviders(<AppRoutes />, {
+      route: "/admin/audit-logs",
+      isAuthenticated: true,
+      scopes: ["audit:read"],
+    });
+
+    // Assert
+    expect(await screen.findByRole("heading", { name: /audit log/i })).toBeInTheDocument();
+  });
+
+  it("test_app_routes_admin_audit_logs_redirects_unauthenticated_visitor_to_login", async () => {
+    // Arrange / Act
+    renderWithProviders(<AppRoutes />, { route: "/admin/audit-logs", isAuthenticated: false });
+
+    // Assert
+    expect(await screen.findByTestId("route-location")).toHaveTextContent("/login");
+  });
 });

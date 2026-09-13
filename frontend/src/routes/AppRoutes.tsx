@@ -22,6 +22,10 @@ import { SecurityScreen } from "../screens/SecurityScreen";
 import { DeactivateAccountScreen } from "../screens/DeactivateAccountScreen";
 import { EmailVerificationScreen } from "../screens/EmailVerificationScreen";
 import { ConfirmEmailChangeScreen } from "../screens/ConfirmEmailChangeScreen";
+import { AdminUserListScreen } from "../screens/AdminUserListScreen";
+import { AdminUserCreateScreen } from "../screens/AdminUserCreateScreen";
+import { AdminUserDetailScreen } from "../screens/AdminUserDetailScreen";
+import { AdminAuditLogScreen } from "../screens/AdminAuditLogScreen";
 
 export function AppRoutes() {
   return (
@@ -86,6 +90,16 @@ export function AppRoutes() {
         <Route path="/settings/profile" element={<ProfileScreen />} />
         <Route path="/settings/security" element={<SecurityScreen />} />
         <Route path="/settings/deactivate" element={<DeactivateAccountScreen />} />
+        {/* US-5.4 FR-1 through FR-9: registered exactly like every other
+            route in this ProtectedRoute/AppShell group — auth-only gating
+            (Implementation Plan Risk 2/Architectural Change 4). Scope
+            gating lives only at the presentation layer (AppShell.tsx's nav,
+            each screen's own write-control disabling and server-403
+            rendering), never here. */}
+        <Route path="/admin/users" element={<AdminUserListScreen />} />
+        <Route path="/admin/users/new" element={<AdminUserCreateScreen />} />
+        <Route path="/admin/users/:id" element={<AdminUserDetailScreen />} />
+        <Route path="/admin/audit-logs" element={<AdminAuditLogScreen />} />
       </Route>
     </Routes>
   );

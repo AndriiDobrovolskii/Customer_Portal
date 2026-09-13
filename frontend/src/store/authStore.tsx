@@ -10,6 +10,7 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useReducer, useRef } from "react";
 import type { ReactNode } from "react";
 import { configureSessionBridge, resetSessionBridge } from "../session/sessionBridge";
+import { decodeTokenScopes } from "./decodeTokenScopes";
 import type { UserRead } from "../api/types";
 
 export interface AuthStateSeed {
@@ -26,6 +27,11 @@ export interface AuthStateSeed {
   // /settings/security sits behind ProtectedRoute, so SecurityScreen never
   // renders while isAuthenticated is false.
   mfaEnabled: boolean;
+  // US-5.4 FR-9: decoded (never verified) from `accessToken`'s `scopes`
+  // claim — re-derived on every `SET_SESSION`/`TOKEN_REFRESHED` (the two
+  // actions that change `accessToken`), reset to `[]` on `CLEAR_SESSION`,
+  // never independently mutated or persisted (Client State Notes).
+  scopes: string[];
 }
 
 interface SetSessionPayload {
@@ -55,13 +61,14 @@ function reducer(state: AuthStateSeed, action: Action): AuthStateSeed {
         mfaToken: null,
         mfaEnrollmentDeadline: action.payload.mfaEnrollmentDeadline ?? null,
         mfaEnabled: action.payload.mfaEnabled,
+        scopes: decodeTokenScopes(action.payload.accessToken),
       };
     case "SET_MFA_TOKEN":
       return { ...state, mfaToken: action.token };
     case "SET_MFA_ENABLED":
       return { ...state, mfaEnabled: action.enabled };
     case "TOKEN_REFRESHED":
-      return { ...state, accessToken: action.accessToken };
+      return { ...state, accessToken: action.accessToken, scopes: decodeTokenScopes(action.accessToken) };
     case "CLEAR_SESSION":
       return {
         accessToken: null,
@@ -70,6 +77,7 @@ function reducer(state: AuthStateSeed, action: Action): AuthStateSeed {
         mfaToken: null,
         mfaEnrollmentDeadline: null,
         mfaEnabled: false,
+        scopes: [],
       };
     default:
       return state;
@@ -83,6 +91,7 @@ const defaultState: AuthStateSeed = {
   mfaToken: null,
   mfaEnrollmentDeadline: null,
   mfaEnabled: false,
+  scopes: [],
 };
 
 export interface AuthStoreValue extends AuthStateSeed {
