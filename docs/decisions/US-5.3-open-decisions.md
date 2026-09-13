@@ -2,9 +2,9 @@
 artifact_type: open_decisions
 story: US-5.3
 version: 1
-status: DRAFT
+status: ARCHIVED
 created_at: "2026-09-08T16:44:04Z"
-updated_at: "2026-09-08T16:44:04Z"
+updated_at: "2026-09-12T19:50:00Z"
 produced_by: us-clarifier
 inputs:
   - path: docs/product/product-vision.md

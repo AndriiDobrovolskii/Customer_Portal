@@ -2,9 +2,9 @@
 artifact_type: implementation_plan
 story: US-5.3
 version: 2
-status: APPROVED
+status: ARCHIVED
 created_at: "2026-09-08T19:49:34Z"
-updated_at: "2026-09-08T22:30:00Z"
+updated_at: "2026-09-12T19:50:00Z"
 produced_by: planner
 inputs:
   - path: docs/stories/US-5.3-support-tickets-ui.md

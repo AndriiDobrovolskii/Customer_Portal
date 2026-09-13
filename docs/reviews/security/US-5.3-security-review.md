@@ -2,9 +2,9 @@
 artifact_type: security_review
 story: US-5.3
 version: 1
-status: DRAFT
+status: ARCHIVED
 created_at: "2026-09-12T01:00:00Z"
-updated_at: "2026-09-12T01:00:00Z"
+updated_at: "2026-09-12T19:50:00Z"
 produced_by: security-reviewer
 inputs:
   - path: docs/stories/US-5.3-support-tickets-ui.md
