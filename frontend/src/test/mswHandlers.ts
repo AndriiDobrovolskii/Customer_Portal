@@ -173,6 +173,32 @@ export const handlers = [
     ),
   ),
 
+  // US-5.5 Agent Console baseline handlers (Task T3) — none of these three
+  // existed before this Story. Both assign and unassign return an
+  // AgentTicketStateRead-shaped body (id/status/updated_at/assignee_id),
+  // never a full AgentTicketRead (Implementation Plan Risk 3).
+  http.post(`${API}/support/tickets/:id/assign`, async ({ params, request }) => {
+    const body = (await request.json()) as { assignee_id: string };
+    return HttpResponse.json(
+      { id: params.id, status: "open", updated_at: "2026-01-01T00:00:00Z", assignee_id: body.assignee_id },
+      { status: 200 },
+    );
+  }),
+
+  http.delete(`${API}/support/tickets/:id/assign`, async ({ params }) =>
+    HttpResponse.json(
+      { id: params.id, status: "open", updated_at: "2026-01-01T00:00:00Z", assignee_id: null },
+      { status: 200 },
+    ),
+  ),
+
+  http.post(`${API}/support/tickets/:id/resolve`, async ({ params }) =>
+    HttpResponse.json(
+      { id: params.id, status: "resolved", updated_at: "2026-01-01T00:00:00Z" },
+      { status: 200 },
+    ),
+  ),
+
   // US-5.4 Admin Console baseline handlers — one per adminApi.ts operation
   // (nine total; task_breakdown v2 Task T7). GET /admin/users/:id carries an
   // `ETag` response header, the same mechanism the `PATCH /profile` handler

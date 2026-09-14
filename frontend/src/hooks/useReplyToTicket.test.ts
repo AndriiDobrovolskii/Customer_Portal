@@ -54,4 +54,32 @@ describe("useReplyToTicket", () => {
     expect(capturedBody).not.toHaveProperty("visibility");
     expect(capturedBody).toMatchObject({ body: "Thanks", attachment_ids: [] });
   });
+
+  // US-5.5 Architectural Change 2: a supplied visibility (the agent
+  // composer's path) is included in the request body; the customer path
+  // above (no visibility supplied) is unaffected and keeps omitting the key
+  // entirely.
+  it.each(["public", "internal"] as const)(
+    "test_use_reply_to_ticket_a_supplied_visibility_%s_is_included_in_the_request_body",
+    async (visibility) => {
+      // Arrange
+      let capturedBody: Record<string, unknown> = {};
+      server.use(
+        http.post("/api/v1/support/tickets/t-1/replies", async ({ request }) => {
+          capturedBody = (await request.json()) as Record<string, unknown>;
+          return HttpResponse.json(
+            { id: "r-1", ticket_id: "t-1", author_kind: "agent", visibility, body: "Noted" },
+            { status: 201 },
+          );
+        }),
+      );
+      const { result } = renderHookWithProviders(() => useReplyToTicket("t-1"));
+
+      // Act
+      await result.current.mutateAsync({ body: "Noted", visibility });
+
+      // Assert
+      expect(capturedBody).toEqual({ body: "Noted", visibility, attachment_ids: [] });
+    },
+  );
 });

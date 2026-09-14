@@ -410,4 +410,79 @@ describe("AppRoutes (FE-AC10)", () => {
     // Assert
     expect(await screen.findByTestId("route-location")).toHaveTextContent("/login");
   });
+
+  // US-5.5 FR-11: two new routes registered inside the same ProtectedRoute/
+  // AppShell group as every route above — same auth-only gating, no new
+  // guard component.
+  it("test_app_routes_agent_tickets_renders_agent_ticket_queue_screen", async () => {
+    // Arrange
+    server.use(
+      http.get("/api/v1/support/tickets", async () =>
+        HttpResponse.json({ items: [], next_cursor: null }, { status: 200 }),
+      ),
+    );
+
+    // Act
+    renderWithProviders(<AppRoutes />, {
+      route: "/agent/tickets",
+      isAuthenticated: true,
+      scopes: ["tickets:read"],
+    });
+
+    // Assert
+    expect(await screen.findByRole("heading", { name: /agent queue/i })).toBeInTheDocument();
+  });
+
+  it("test_app_routes_agent_tickets_redirects_unauthenticated_visitor_to_login", async () => {
+    // Arrange / Act
+    renderWithProviders(<AppRoutes />, { route: "/agent/tickets", isAuthenticated: false });
+
+    // Assert
+    expect(await screen.findByTestId("route-location")).toHaveTextContent("/login");
+  });
+
+  it("test_app_routes_agent_tickets_id_renders_agent_ticket_detail_screen", async () => {
+    // Arrange
+    server.use(
+      http.get("/api/v1/support/tickets/t-1", async () =>
+        HttpResponse.json(
+          {
+            id: "t-1",
+            ticket_number: "TCK-0001",
+            status: "open",
+            requester_id: "u-1",
+            subject: "s",
+            body: "b",
+            category: "c",
+            first_response_at: null,
+            created_at: "2026-09-01T10:00:00Z",
+            updated_at: "2026-09-01T10:00:00Z",
+            replies: { items: [], next_cursor: null },
+          },
+          { status: 200 },
+        ),
+      ),
+    );
+
+    // Act
+    renderWithProviders(<AppRoutes />, {
+      route: "/agent/tickets/t-1",
+      isAuthenticated: true,
+      scopes: ["tickets:read"],
+    });
+
+    // Assert: AgentTicketDetailScreen-specific content renders; the customer
+    // TicketDetailScreen's "Load older replies" (with no thread) rules out
+    // neither directly, so assert on this screen's own "Assignment" section.
+    expect(await screen.findByText("TCK-0001")).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: /assignment/i })).toBeInTheDocument();
+  });
+
+  it("test_app_routes_agent_tickets_id_redirects_unauthenticated_visitor_to_login", async () => {
+    // Arrange / Act
+    renderWithProviders(<AppRoutes />, { route: "/agent/tickets/t-1", isAuthenticated: false });
+
+    // Assert
+    expect(await screen.findByTestId("route-location")).toHaveTextContent("/login");
+  });
 });

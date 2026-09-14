@@ -31,12 +31,18 @@ export function AppShell({ children }: AppShellProps) {
   // every admin screen regardless of what this renders.
   const canReadUsers = scopes.includes("users:read");
   const canReadAudit = scopes.includes("audit:read");
+  // US-5.5 FR-11/Resolution OD-4: one shared authenticated app shell, a
+  // `tickets:read`-gated nav entry alongside the existing `/tickets` entry —
+  // no separate entry point, no role switcher for a user holding both a
+  // customer identity and agent scopes.
+  const canReadAgentQueue = scopes.includes("tickets:read");
 
   return (
     <div className="app-shell">
       <header>
         <nav>
           <Link to="/tickets">Tickets</Link>
+          {canReadAgentQueue && <Link to="/agent/tickets">Agent Queue</Link>}
           {canReadUsers && <Link to="/admin/users">Users</Link>}
           {canReadAudit && <Link to="/admin/audit-logs">Audit Log</Link>}
         </nav>

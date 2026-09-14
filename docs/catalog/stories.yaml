@@ -273,18 +273,19 @@ stories:
     path: docs/stories/US-5.4-admin-console-ui.md
     epic: EPIC-5
     title: Admin Console (Frontend)
-    state: IN_PROGRESS
+    state: ARCHIVED
     source:
       type: github_issue
       repository: AndriiDobrovolskii/Customer_Portal
       issue_number: 27
       issue_url: https://github.com/AndriiDobrovolskii/Customer_Portal/issues/27
-    delivered_by: { pr: null, note: null }
+    delivered_by: { pr: 38, note: "Merged into main 2026-09-13T18:42:13Z" }
     note: >
       Originally drafted as "Slice B" of US-5.2 and peeled out - the two share
       no screens and no permission model. Depends on US-5.2 for the API
       client's ETag/response-header support. Permission scopes are available
       only by decoding the JWT scopes claim; LoginResponse carries no roles.
+      Archived 2026-09-14; see docs/evidence/US-5.4-delivery-summary.md.
 
   - id: US-5.5
     retired_id: null
@@ -292,7 +293,7 @@ stories:
     path: docs/stories/US-5.5-agent-console-ui.md
     epic: EPIC-5
     title: Agent Console (Frontend)
-    state: BACKLOG
+    state: IN_PROGRESS
     source:
       type: github_issue
       repository: AndriiDobrovolskii/Customer_Portal

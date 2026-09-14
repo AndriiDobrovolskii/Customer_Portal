@@ -46,7 +46,12 @@ describe("useTicketDetail", () => {
     server.use(
       http.get("/api/v1/support/tickets/t-1", async () =>
         HttpResponse.json(
-          detailBody({ replies: { items: [{ id: "r-1", author_kind: "customer" }], next_cursor: null } }),
+          detailBody({
+            replies: {
+              items: [{ id: "r-1", author_kind: "customer", visibility: "public" }],
+              next_cursor: null,
+            },
+          }),
           { status: 200 },
         ),
       ),
@@ -85,13 +90,24 @@ describe("useTicketDetail", () => {
         receivedCursors.push(cursor);
         if (!cursor) {
           return HttpResponse.json(
-            detailBody({ replies: { items: [{ id: "r-1" }], next_cursor: "replies-cursor-2" } }),
+            detailBody({
+              replies: {
+                items: [{ id: "r-1", author_kind: "customer", visibility: "public" }],
+                next_cursor: "replies-cursor-2",
+              },
+            }),
             { status: 200 },
           );
         }
-        return HttpResponse.json(detailBody({ replies: { items: [{ id: "r-2" }], next_cursor: null } }), {
-          status: 200,
-        });
+        return HttpResponse.json(
+          detailBody({
+            replies: {
+              items: [{ id: "r-2", author_kind: "agent", visibility: "public" }],
+              next_cursor: null,
+            },
+          }),
+          { status: 200 },
+        );
       }),
     );
     const { result } = renderHookWithProviders(() => useTicketDetail("t-1"));

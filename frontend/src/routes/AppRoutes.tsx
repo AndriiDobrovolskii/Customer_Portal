@@ -26,6 +26,8 @@ import { AdminUserListScreen } from "../screens/AdminUserListScreen";
 import { AdminUserCreateScreen } from "../screens/AdminUserCreateScreen";
 import { AdminUserDetailScreen } from "../screens/AdminUserDetailScreen";
 import { AdminAuditLogScreen } from "../screens/AdminAuditLogScreen";
+import { AgentTicketQueueScreen } from "../screens/AgentTicketQueueScreen";
+import { AgentTicketDetailScreen } from "../screens/AgentTicketDetailScreen";
 
 export function AppRoutes() {
   return (
@@ -100,6 +102,12 @@ export function AppRoutes() {
         <Route path="/admin/users/new" element={<AdminUserCreateScreen />} />
         <Route path="/admin/users/:id" element={<AdminUserDetailScreen />} />
         <Route path="/admin/audit-logs" element={<AdminAuditLogScreen />} />
+        {/* US-5.5 FR-11/Resolution OD-4: the agent console shares this same
+            ProtectedRoute/AppShell group — no separate entry point, same
+            auth-only gating as every route above. Scope gating (tickets:read/
+            tickets:write) lives only at the presentation layer. */}
+        <Route path="/agent/tickets" element={<AgentTicketQueueScreen />} />
+        <Route path="/agent/tickets/:id" element={<AgentTicketDetailScreen />} />
       </Route>
     </Routes>
   );

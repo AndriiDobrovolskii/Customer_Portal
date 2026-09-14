@@ -194,10 +194,16 @@ export interface CreateTicketRequest {
   attachment_ids: string[];
 }
 
+// US-5.5 Architectural Change 1: `visibility` is a required field — the
+// backend (`app/modules/support/schemas.py::ReplyRead`) has always returned
+// it; this closes impact analysis v2's carried-forward Non-Blocking Finding.
+// It is a hard prerequisite for FR-3's internal/public thread rendering and
+// FR-4's composer, not an optional cleanup.
 export interface ReplyRead {
   id: string;
   author_id: string;
   author_kind: string;
+  visibility: "public" | "internal";
   body: string;
   created_at: string;
 }
@@ -219,8 +225,12 @@ export interface TicketDetailRead {
   replies: ReplyThreadPage;
 }
 
+// `visibility` is optional and additive — the existing customer call site
+// (useReplyToTicket.ts's default path) never sets it, keeping its request
+// body byte-for-byte identical to before this Story (Architectural Change 2).
 export interface CreateReplyRequest {
   body: string;
+  visibility?: "public" | "internal";
   attachment_ids: string[];
 }
 
@@ -321,4 +331,49 @@ export interface AuditLogEntry {
 export interface AuditLogListResponse {
   items: AuditLogEntry[];
   next_cursor: string | null;
+}
+
+// US-5.5 Agent Console DTOs. FR-1's queue response (Resolution OD-1):
+// every TicketRead field plus assignee_id — confirmed against
+// app/modules/support/schemas.py::AgentTicketRead, mirrored here at this
+// frontend's own simplified TicketRead field set (no requester_id/body,
+// matching the existing TicketRead/TicketStateRead precedent of not
+// mirroring every backend field).
+export interface AgentTicketRead {
+  id: string;
+  ticket_number: string;
+  subject: string;
+  category: string;
+  status: string;
+  assignee_id: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface AgentTicketListResponse {
+  items: AgentTicketRead[];
+  next_cursor: string | null;
+}
+
+// FR-2: `{ assignee_id }` populated by "assign to me" (the caller's own id)
+// or the Resolution-OD-2 raw-UUID "assign to another agent" input.
+export interface AssignTicketRequest {
+  assignee_id: string;
+}
+
+// Implementation Plan Risk 3: the ACTUAL assign/unassign response shape
+// (router.py declares response_model=AgentTicketStateRead on both routes) —
+// distinct from AgentTicketRead. Carries assignee_id/status/updated_at but
+// never subject/category/body/requester_id; must never be conflated with a
+// full queue row.
+export interface AgentTicketStateRead {
+  id: string;
+  status: string;
+  updated_at: string;
+  assignee_id: string | null;
+}
+
+// FR-5: a non-empty (1-5000 char) resolution_note.
+export interface ResolveTicketRequest {
+  resolution_note: string;
 }

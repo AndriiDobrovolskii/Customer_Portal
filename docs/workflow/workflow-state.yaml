@@ -6,7 +6,7 @@
 
 version: 1
 
-story: US-5.4
+story: US-5.5
 workflow: story-delivery
 
 current_stage: PR_CREATION
@@ -21,11 +21,11 @@ last_invoked_skill: pr-preparer
 last_result:
   verdict: PASS
   stage: PR_PREPARATION
-  recorded_at: "2026-09-13T23:45:00Z"
+  recorded_at: "2026-09-14T17:15:00Z"
 
 last_artifacts:
   - type: pr_summary
-    path: docs/pr/US-5.4-pr-summary.md
+    path: docs/pr/US-5.5-pr-summary.md
     version: 1
 
 implementation_substep: null
@@ -33,64 +33,54 @@ implementation_substep: null
 pending_human_gate: null
 
 note: >
-  US-5.4 activated 2026-09-13. Story depends on US-5.1 (auth store, API
-  client, route guards) and US-5.2 (ETag/If-Match response-header support),
-  both ARCHIVED. First pass CLARIFICATION through IMPLEMENTATION_PLANNING
-  completed 2026-09-13, but PLAN_REVIEW returned BLOCKED on the v1 spec's four
-  unresolved Open Decisions (OD-1..OD-4). Human supplied resolutions and chose
-  the full correct re-run: HUMAN_REDIRECTED from PLAN_REVIEW to CLARIFICATION
-  (us-clarifier recorded OD-1..OD-4 RESOLVED in open_decisions.md v2), then
-  SPECIFICATION produced spec v2, SPEC_REVIEW/HUMAN_SPEC_APPROVAL/API_DESIGN
-  (NOT_APPLICABLE)/DB_DESIGN (NOT_APPLICABLE)/DESIGN_REVIEW/IMPACT_ANALYSIS/
-  ARCHITECTURE_PLANNING/IMPLEMENTATION_PLANNING/PLAN_REVIEW/HUMAN_PLAN_APPROVAL
-  all passed/approved. TEST_WRITING passed 2026-09-13: task_breakdown v2
-  assigns all frontend test-file authoring to frontend-builder during
-  IMPLEMENTATION (a deliberate divergence from prior US-5.x stories), so this
-  stage produced prescriptive test-strategy/ac-test-matrix/generation-report
-  guidance rather than test source files - existence-and-correctness of the
-  named test functions is checked at RECONCILIATION once frontend-builder has
-  run. AD-AC7's no-delete-affordance assertion mechanism was settled in this
-  pass: a static source-wide Vite import.meta.glob scan as primary proof.
-  Now entering IMPLEMENTATION (track: frontend -> frontend-builder).
-  QUALITY_GATE first pass (2026-09-13T20:20:00Z) returned BLOCKED solely on
-  npm run format:check failing on 31 pre-existing files (CRLF/Prettier LF
-  mismatch, core.autocrlf=true). Human chose fix option 1: added
-  frontend/.gitattributes ('* text=auto eol=lf') and renormalized the 31
-  files' line endings to LF on disk (git add --renormalize alone only fixed
-  the index, not working-tree bytes, so disk content was converted directly).
-  format:check re-verified clean. gate-enforcer re-dispatched fresh
-  (2026-09-13T21:15:00Z): full Definition-of-Done gate re-run independently
-  (lint/format/type-check/test:coverage all PASS, coverage 97.48%/94.83%/
-  86.58%/97.48%, Part B' runtime rules re-verified) -> PASS, no blocking or
-  non-blocking findings. Advancing to IMPLEMENTATION_VERIFICATION.
+  US-5.5 activated 2026-09-14. Story's own front matter records a hard
+  blocker on US-4.4 (agent queue + assignment backend) - US-4.4 is now
+  ARCHIVED (PR #32, merged), so the blocker is resolved.
+  Currently on branch feat/us-5.4-admin-console-ui with uncommitted US-5.4
+  archive-mode changes still pending commit - no US-5.5 branch created; per
+  branch policy this is reported, not resolved automatically.
+  Backfilled a front-matter DRAFT->APPROVED bump on docs/specifications/US-5.5-spec.md
+  (v2) and docs/reviews/specifications/US-5.5-spec-review.md (v2) on 2026-09-14
+  - missed at the 2026-09-14T03:15:00Z HUMAN_SPEC_APPROVAL transition, same
+  recurring gap seen on US-5.1 through US-5.4.
+  API_DESIGN re-run against spec v2 (independently re-derived, not assumed
+  from the prior v1-based NOT_APPLICABLE): NOT_APPLICABLE confirmed. Design
+  review, impact analysis, implementation plan, task breakdown, and plan
+  review still reference spec v1 and remain stale pending regeneration.
+  HUMAN_PR_APPROVAL approved 2026-09-14T17:00:00Z by sbruhov@gmail.com (no
+  comment); all four required artifacts (implementation_verification v2,
+  security_review v2, reconciliation v2, traceability v2) verified current
+  (DRAFT, not SUPERSEDED/ARCHIVED) with recorded PASS verdicts and no
+  blocking findings. Advanced to PR_PREPARATION.
 
 blocking_issues: []
 
 non_blocking_findings:
-  - "QUALITY_GATE (US-5.4) v1->v2: frontend/.gitattributes ('* text=auto eol=lf') added and the 31 affected pre-existing files renormalized to LF, resolving the CRLF/Prettier mismatch recorded in v1 - repo-config change made under explicit human sign-off (same category as the US-5.3 .eslintrc.cjs override precedent)."
-  - "[Low] SECURITY_REVIEW (US-5.4): request payload shape not schema-enforced at the type layer - CreateAdminUserRequest/UpdateAdminUserRequest (types.ts:264-278) are compile-time-only TS interfaces with no runtime extra=forbid-equivalent guard. Substantially mitigated by useCreateAdminUser.test.ts:40 asserting the exact key set. Not a section 7 violation - no Pydantic schema exists in this stack by design."
-  - "[Low] RECONCILIATION (US-5.4): shipped AuditLogEntry types request_id as nullable, beyond the story's literal Client State Notes nullable-field list - a defensive superset of AD-AC8's wording, not spec drift."
-  - "[Low] RECONCILIATION (US-5.4): NFR 'no audit-log row content in browser console in production builds' is proxy-tested via a dev-mode Vitest console-spy only; the production-build-specific claim was left to frontend-builder's self-check plus SECURITY_REVIEW, per test_strategy.md's own recorded limitation."
-  - "[Low] RECONCILIATION (US-5.4): responsive/viewport NFR (~375px through desktop, audit table horizontal scroll) has no automated Vitest assertion - consistent with US-5.3's identical recorded gap; no viewport-emulation tool exists in this project's test setup."
-  - "IMPLEMENTATION (US-5.4): httpClient.ts gained httpGetWithMeta<T> in addition to the plan-enumerated httpPut<T> - needed for FR-2's ETag capture on GET (adminApi.getUser), which impact-analysis's api/ row already anticipated in prose without naming it as its own Files-To-Modify bullet."
-  - "IMPLEMENTATION (US-5.4): npm run format:check on this Windows checkout (core.autocrlf=true) flags ~30 pre-existing files this story never touched, purely from CRLF line endings - a baseline environment artifact, not a defect introduced here; only files this story created/modified were normalized."
-  - "IMPLEMENTATION (US-5.4): AD-AC7's static source-wide scan (adminApi.test.ts) was empirically verified with a negative-control probe (a temporary httpDelete<void> call, confirmed to fail the test, then removed) to prove the regex is not vacuously passing."
-  - "TEST_WRITING (US-5.4): task_breakdown v2 assigns all frontend test-source authoring to frontend-builder during IMPLEMENTATION rather than to this stage, so ac_test_matrix.md's 98 named test functions are prescriptive (binding on frontend-builder), not evidence of existing passing tests; RECONCILIATION must check existence-and-correctness once frontend-builder has run. Expected under approved planning, not a defect."
-  - "TEST_WRITING (US-5.4): AD-AC7's static no-delete-affordance assertion mechanism settled - primary proof is a source-wide Vite import.meta.glob(...,{query:'?raw'}) scan in frontend/src/api/adminApi.test.ts, backed by a structural no-export check and a screen-level regression guard."
-  - "TEST_WRITING (US-5.4): plan_review v2's Medium finding on authStore.tsx's untested CLEAR_SESSION-resets-scopes branch now has a named AppShell.test.tsx case (test_app_shell_clears_admin_nav_entries_after_a_clear_session_dispatch) for frontend-builder to implement."
-  - "FR-9 (scope-derived nav) is net-new: no jwt-decode/jose dependency or scopes logic exists yet in frontend/; ProtectedRoute.tsx currently gates on auth only."
-  - "FR-1 doesn't state that an unrecognized status/roles value renders verbatim (Low)."
-  - "FR-8, though rewritten in v2 for OD-1/OD-2, still doesn't carry the instruction to synthesize a stable audit-log row key across Load-more pages (Medium)."
-  - "FR-9 still omits that the scopes claim is re-derived on every refresh, cleared on logout, and never persisted (Medium)."
-  - "v2-only: FR-4's '(see FR-5)' pointer for the immutable-field problem does not resolve - FR-5 never mentions immutable-field (Low)."
-  - "v2-only: specification file ends with a stray leaked '</content>' tag after the Traceability Matrix (Low)."
-  - "AD-AC7's no-delete static-assertion mechanism (repo-wide search vs. MSW-handler-absence assertion) is deliberately left to test-writer's TEST_WRITING output - an intentional deferral, not a gap (unchanged v1->v2)."
-  - "[Medium] authStore.tsx's three new reducer branches (scopes set on SET_SESSION/TOKEN_REFRESHED, reset on CLEAR_SESSION) have no dedicated unit test; relies on T17's seeded-scopes assertions plus the 85% coverage floor instead. Carried forward unchanged from v1."
-  - "[Low] store/-before-hooks/ sequencing principle applied asymmetrically: task breakdown T17 (routes/ guards+layout) runs parallel to the hooks/ block rather than strictly after it. Not a layering violation, but inconsistent with the plan's own stated principle."
-  - "PR_PREPARATION (US-5.4): pr-preparer's own SKILL.md Result Envelope template names next_stage: READY_FOR_PR, but stage-map.yaml v2 (authoritative) records PR_PREPARATION.next: PR_CREATION, added by a later commit that postdates the skill doc's example. pr-preparer emitted PR_CREATION per stage-map.yaml; the skill doc's illustrative template is stale and should be updated separately."
-  - "PR_PREPARATION (US-5.4): docs/plans/US-5.4-implementation-plan.md v2 has an internal risk-numbering inconsistency (its Revision note and Architectural Change 1 cite the JWT-decoding dependency choice as 'Risk 2', but the plan's own Risks section lists it as risk 1). pr-summary follows the authoritative Risks section numbering. Not pr-preparer's file to fix; flagged for the plan's owner."
+  - "QUALITY_GATE (attempt 1, 2026-09-14T10:45:00Z): AgentTicketQueueScreen.tsx:182 React duplicate-key warning ('t-1') during a filter/cursor-reset test; FIXED at its MSW-fixture root cause during the attempt-2 IMPLEMENTATION loop-back (docs/catalog/US-5.5-pipeline-status.md), confirmed absent from QUALITY_GATE attempt 2's re-run output."
+  - "IMPLEMENTATION_VERIFICATION (Low): AgentTicketQueueScreen.tsx's primary GET /support/tickets call has no dedicated forced-403/4xx rendering test of its own (only the assign sub-action's 409/422 are tested on that screen); the status-agnostic rendering mechanism is proven correct elsewhere in this same diff. Test-coverage completeness gap, not a rule violation or functional defect."
+  - "IMPLEMENTATION_VERIFICATION (Low): no .css/Tailwind/styled-components stylesheet exists anywhere in frontend/ giving the 'reply--internal' className a visual rule — pre-existing, project-wide (true of TicketDetailScreen.tsx/US-5.3 and every prior Story), not introduced by this diff; the text-label half of the internal-note distinct-styling NFR is satisfied. Flagged for reconciliation-reviewer."
+  - "SECURITY_REVIEW (Low): AgentTicketQueueScreen.tsx:74 exposes the full untruncated assignee UUID via a `title` tooltip attribute, inconsistent with the documented shortened/truncated display (Resolution OD-1). Not a credential/token/PII leak (internal agent-account identifier, same audience already sees the truncated form) — advisory only."
+  - "RECONCILIATION (attempt 1, 2026-09-14T13:30:00Z, BLOCKING -> loop-back): AG-AC7/FR-8's '422 errors[] mapped onto matching form fields' clause is unimplemented in both AgentTicketQueueScreen.tsx and AgentTicketDetailScreen.tsx — neither calls the project's existing getFieldErrors() helper (apiErrorHelpers.ts) that seven other screens already use for this. Routed back to IMPLEMENTATION."
+  - "RECONCILIATION (non-blocking, carry into the same IMPLEMENTATION pass per reconciliation-reviewer's own recommendation): AG-AC1 ordering/no-count-shown untested; AG-AC2 queue-row-reflects-new-assignee-on-success untested; AG-AC4 internal-note-no-status-change (converse case) untested; AG-AC5 resolution_note 5000-char upper bound implemented but untested. All four closed in IMPLEMENTATION attempt 3 alongside the blocking AG-AC7 fix."
+  - "IMPLEMENTATION_VERIFICATION v2 (Low, new): wiring getFieldErrors()/FieldError into both agent screens also gates the pre-existing generic top-level error paragraph on the field-errors object being absent, so a 422 carrying fieldErrors now suppresses the generic detail text entirely. RECONCILIATION v2 ruled this satisfies AG-AC7 (independent genuine coverage of both clauses on different response shapes; byte-identical to the established convention on 7 pre-existing screens) - not a gap."
+  - "RECONCILIATION v2 (Low, all carried forward unchanged, none blocking): queue-screen GET /support/tickets has no dedicated forced-403 test (NFR-sourced, no numbered AC); FR-11's combined-nav-entries case has no single test (FR-11 traces to no AC); full assignee UUID in a title tooltip (AgentTicketQueueScreen.tsx:80); no stylesheet backs the internal-note distinct-styling class names anywhere in frontend/ (project-wide, pre-existing); a 422 test at AgentTicketQueueScreen.test.tsx:357 sets detail and errors[0].message identically, so it's redundant with rather than adding to the genuine detail-only coverage elsewhere."
+  - "OD-1-OD-5 RESOLVED 2026-09-14 (human decision, docs/decisions/US-5.5-open-decisions.md v2): OD-1 shortened-UUID assignee display; OD-2 raw-UUID assign-target/filter input; OD-3 navigation-state assignee handoff; OD-4 shared AppShell nav link; OD-5 single action button, no reason field/confirmation. All five folded into spec v2 FR-1/FR-2/FR-3/FR-6/FR-7/FR-11 as concrete behavior."
+  - "Spec review v2 (Medium): FR-3 does not specify rendered output for the unknown/stale assignee state on direct-URL entry."
+  - "Spec review v2 (Low): FR-6 does not restate queue invalidation for an assign/unassign initiated from the detail screen."
+  - "Spec review v2 (Low): FR-1 does not specify rendering for a null assignee_id."
+  - "Spec review v2 (Low, carried from v1): empty queue result state undescribed by FR-1."
+  - "Spec review v2 (Low, carried from v1): whitespace-only resolution_note boundary undescribed by FR-5/AG-AC5."
+  - "Impact analysis: ReplyRead.visibility absent from frontend/src/api/types.ts despite backend always returning it; new hooks/screens depend on this field existing."
+  - "Plan risk: React Hook Form defaultValues caching could leak a prior internal visibility choice into the next composer open unless onSuccess explicitly resets to public; mitigation + test assertion required."
+  - "All downstream design/impact/plan artifacts now regenerated as v2 against spec v2 (design_review, impact_analysis, implementation_plan, task_breakdown, plan_review). Root cause of the prior PLAN_REVIEW BLOCKED (OD-1-OD-5 unresolved in spec text) independently re-verified fixed."
+  - "Plan review v2 (Low): task_breakdown's ordering-rule floor policy statement is internally inconsistent for T10 (fixture-only, zero production diff - not a functional violation)."
+  - "Plan review v2 (Low, x3): queue empty-result state, whitespace-only resolution_note block, and assignee placeholder strings ('-'/'Unassigned') are plan-level choices closing spec-review v2's ambiguities, not FR-mandated text - flagged for test-writer/reconciliation-reviewer awareness."
+  - "Implementation plan v2: React Hook Form defaultValues visibility-leak risk (FR-4/NFR) mitigated via onSuccess reset({visibility:'public'}), with a required test assertion."
+  - "Impact analysis v2 (re-verified against current working tree): ReplyRead.visibility and CreateReplyRequest.visibility still absent from frontend/src/api/types.ts despite backend always returning/accepting it (app/modules/support/schemas.py:74); extending types.ts is a hard prerequisite for this Story's new hooks/screens."
+  - "Impact analysis v2: three new spec-review v2 ambiguities (FR-3 unknown/stale assignee rendering, FR-1 null assignee_id rendering, FR-6 detail-originated assign/unassign invalidation) land inside already-identified files, not expanding the file boundary."
+  - "PR_PREPARATION (commit hygiene, non-blocking): working tree mixes US-5.5's clean implementation file set with uncommitted US-5.4 archive-mode documentation changes on branch feat/us-5.4-admin-console-ui; no dedicated US-5.5 branch created yet. Flagged in docs/pr/US-5.5-pr-summary.md for human resolution before any push - not PR_PREPARATION's to resolve."
 
-started_at: "2026-09-13T00:00:00Z"
-updated_at: "2026-09-13T23:45:00Z"
+started_at: "2026-09-14T00:45:00Z"
+updated_at: "2026-09-14T17:15:00Z"
 completed_at: null
 archived_at: null
