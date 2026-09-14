@@ -91,6 +91,7 @@ describe("TicketDetailScreen", () => {
                 {
                   id: "r-1",
                   author_kind: "customer",
+                  visibility: "public",
                   body: "Any update?",
                   created_at: "2026-09-01T11:00:00Z",
                 },
@@ -162,7 +163,13 @@ describe("TicketDetailScreen", () => {
             detailBody({
               replies: {
                 items: [
-                  { id: "r-1", author_kind: "customer", body: "First", created_at: "2026-09-01T11:00:00Z" },
+                  {
+                    id: "r-1",
+                    author_kind: "customer",
+                    visibility: "public",
+                    body: "First",
+                    created_at: "2026-09-01T11:00:00Z",
+                  },
                 ],
                 next_cursor: "replies-cursor-2",
               },
@@ -174,7 +181,13 @@ describe("TicketDetailScreen", () => {
           detailBody({
             replies: {
               items: [
-                { id: "r-2", author_kind: "agent", body: "Older reply", created_at: "2026-09-01T09:00:00Z" },
+                {
+                  id: "r-2",
+                  author_kind: "agent",
+                  visibility: "public",
+                  body: "Older reply",
+                  created_at: "2026-09-01T09:00:00Z",
+                },
               ],
               next_cursor: null,
             },
@@ -462,6 +475,7 @@ describe("TicketDetailScreen", () => {
                 {
                   id: "r-1",
                   author_kind: "customer",
+                  visibility: "public",
                   body: '<img src="x" onerror="window.__pwned = true">',
                   created_at: "2026-09-01T11:00:00Z",
                 },
@@ -492,7 +506,13 @@ describe("TicketDetailScreen", () => {
           detailBody({
             replies: {
               items: [
-                { id: "r-1", author_kind: "customer", body: "Hello", created_at: "2026-09-01T11:00:00Z" },
+                {
+                  id: "r-1",
+                  author_kind: "customer",
+                  visibility: "public",
+                  body: "Hello",
+                  created_at: "2026-09-01T11:00:00Z",
+                },
               ],
               next_cursor: "replies-cursor-2",
             },

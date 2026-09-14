@@ -9,8 +9,17 @@ import { replyToTicket } from "../api/supportApi";
 import { ticketDetailQueryKey, ticketRepliesQueryKey } from "./useTicketDetail";
 import type { CreateReplyRequest, ReplyRead, ReplyThreadPage } from "../api/types";
 
+// US-5.5 Architectural Change 2: `visibility` is an additive, OPTIONAL field
+// on the mutation's own input — not a change to `useReplyToTicket(id)`'s
+// single-argument call signature. TicketDetailScreen.tsx's (US-5.3, customer)
+// `useForm<ReplyToTicketFormValues>()` never registers a `visibility` field,
+// so `values.visibility` stays `undefined` there and the payload omits the
+// key exactly as before this Story — this hook's customer-path behavior is
+// unchanged. The new agent composer (US-5.5, AgentTicketDetailScreen.tsx)
+// supplies an explicit `"public"`/`"internal"` value instead.
 export interface ReplyToTicketFormValues {
   body: string;
+  visibility?: "public" | "internal";
 }
 
 export function useReplyToTicket(id: string) {
@@ -18,9 +27,14 @@ export function useReplyToTicket(id: string) {
 
   return useMutation<ReplyRead, unknown, ReplyToTicketFormValues>({
     mutationFn: (values) => {
-      // FR-6: the composer offers no visibility control at all — never send
-      // `visibility`, always send an empty `attachment_ids` (Assumption #3).
+      // The customer path (visibility undefined) sends no `visibility` key
+      // at all, always an empty `attachment_ids` (Assumption #3). The agent
+      // path supplies an explicit value, included only when defined so the
+      // customer request body stays byte-for-byte identical to before.
       const payload: CreateReplyRequest = { body: values.body, attachment_ids: [] };
+      if (values.visibility !== undefined) {
+        payload.visibility = values.visibility;
+      }
       return replyToTicket(id, payload);
     },
     onSuccess: (reply) => {

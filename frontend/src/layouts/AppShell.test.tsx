@@ -135,6 +135,30 @@ describe("AppShell admin navigation (US-5.4)", () => {
     expect(screen.queryByRole("link", { name: /audit log/i })).not.toBeInTheDocument();
   });
 
+  it("test_app_shell_renders_the_agent_queue_nav_entry_when_scopes_include_tickets_read", () => {
+    // Arrange / Act: US-5.5 FR-11/Resolution OD-4.
+    renderWithProviders(<AppShell />, {
+      route: "/tickets",
+      isAuthenticated: true,
+      scopes: ["tickets:read"],
+    });
+
+    // Assert
+    expect(screen.getByRole("link", { name: /agent queue/i })).toHaveAttribute("href", "/agent/tickets");
+  });
+
+  it("test_app_shell_renders_no_agent_queue_nav_entry_when_scopes_carry_no_tickets_read_scope", () => {
+    // Arrange / Act
+    renderWithProviders(<AppShell />, {
+      route: "/tickets",
+      isAuthenticated: true,
+      scopes: [],
+    });
+
+    // Assert
+    expect(screen.queryByRole("link", { name: /agent queue/i })).not.toBeInTheDocument();
+  });
+
   it("test_app_shell_clears_admin_nav_entries_after_a_clear_session_dispatch", async () => {
     // Arrange: closes docs/reviews/plans/US-5.4-plan-review.md's Medium
     // finding that authStore.tsx's CLEAR_SESSION branch (scopes reset to
