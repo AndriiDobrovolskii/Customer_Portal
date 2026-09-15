@@ -2,7 +2,7 @@
 artifact_type: design_review
 story: US-5.5
 version: 2
-status: APPROVED
+status: ARCHIVED
 created_at: "2026-09-13T22:15:00Z"
 updated_at: "2026-09-14T05:20:00Z"
 produced_by: design-reviewer

@@ -2,7 +2,7 @@
 artifact_type: security_review
 story: US-5.5
 version: 2
-status: APPROVED
+status: ARCHIVED
 created_at: "2026-09-14T15:10:00Z"
 updated_at: "2026-09-14T15:10:00Z"
 produced_by: security-reviewer

@@ -2,7 +2,7 @@
 artifact_type: quality_gate_report
 story: US-5.5
 version: 3
-status: DRAFT
+status: ARCHIVED
 created_at: "2026-09-14T11:47:30Z"
 updated_at: "2026-09-14T11:47:30Z"
 produced_by: gate-enforcer

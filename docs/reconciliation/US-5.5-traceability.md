@@ -2,7 +2,7 @@
 artifact_type: traceability
 story: US-5.5
 version: 2
-status: APPROVED
+status: ARCHIVED
 created_at: "2026-09-14T13:30:00Z"
 updated_at: "2026-09-14T16:45:00Z"
 produced_by: reconciliation-reviewer
