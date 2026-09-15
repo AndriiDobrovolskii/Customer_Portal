@@ -12,7 +12,7 @@
 // import), so reading `mfaEnrollmentDeadline` off `useAuthStore()` directly
 // is not a new layering exception.
 import type { ReactNode } from "react";
-import { Link, Outlet } from "react-router-dom";
+import { Link, NavLink, Outlet } from "react-router-dom";
 import { LogoutControls } from "../components/LogoutControls";
 import { MfaEnrollmentBanner } from "../components/MfaEnrollmentBanner";
 import { useAuthStore } from "../store/authStore";
@@ -41,10 +41,20 @@ export function AppShell({ children }: AppShellProps) {
     <div className="app-shell">
       <header>
         <nav>
-          <Link to="/tickets">Tickets</Link>
-          {canReadAgentQueue && <Link to="/agent/tickets">Agent Queue</Link>}
-          {canReadUsers && <Link to="/admin/users">Users</Link>}
-          {canReadAudit && <Link to="/admin/audit-logs">Audit Log</Link>}
+          {/* US-5.6 FR-4/OD-1/OD-2: Home is a plain Link, never a NavLink —
+              it shares the identical "/tickets" target with the "Tickets"
+              entry below, and OD-2's resolution requires only "Tickets" to
+              ever carry the active marker there. A NavLink here would make
+              both entries active simultaneously on /tickets. */}
+          <Link to="/tickets">Home</Link>
+          <NavLink to="/tickets">Tickets</NavLink>
+          <NavLink to="/sessions">Sessions</NavLink>
+          <NavLink to="/settings/profile">Profile</NavLink>
+          <NavLink to="/settings/security">Security</NavLink>
+          <NavLink to="/settings/deactivate">Deactivate Account</NavLink>
+          {canReadAgentQueue && <NavLink to="/agent/tickets">Agent Queue</NavLink>}
+          {canReadUsers && <NavLink to="/admin/users">Users</NavLink>}
+          {canReadAudit && <NavLink to="/admin/audit-logs">Audit Log</NavLink>}
         </nav>
         <LogoutControls />
       </header>

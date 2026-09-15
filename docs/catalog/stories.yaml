@@ -301,7 +301,30 @@ stories:
       issue_url: https://github.com/AndriiDobrovolskii/Customer_Portal/issues/29
     delivered_by: { pr: null, note: null }
     note: >
-      Hard-blocked on US-4.4 - GET /support/tickets returns 403 to every
-      tickets:read/tickets:write holder today, so no part of this Story is
-      buildable until that ships. Reuses US-5.3's ticket detail/thread
-      components rather than duplicating them.
+      Delivered agent ticket queue (list/filter/assign/unassign) and agent
+      ticket detail (thread, reply with public/internal visibility, resolve,
+      close/reopen), consuming US-4.4's backend contract with no backend/API/DB
+      change. Reused US-5.3's ticket detail/thread components rather than
+      duplicating them. US-4.4 hard-blocker discharged 2026-09-08 (archived,
+      PR #32). Archived 2026-09-14; see docs/evidence/US-5.5-delivery-summary.md.
+
+  - id: US-5.6
+    retired_id: null
+    slug: global-navigation
+    path: docs/stories/US-5.6-global-navigation.md
+    epic: EPIC-5
+    title: Global Navigation
+    state: IN_PROGRESS
+    source:
+      type: local_only
+      repository: null
+      issue_number: null
+      issue_url: null
+    note: >
+      Authored directly by the requester (sbruhov@gmail.com), not synced from
+      a GitHub Issue - source.type is local_only per artifact-schema.md's
+      story exception. Closes three gaps in the AppShell nav already shared
+      across every authenticated route since US-5.1: incomplete link
+      coverage (US-5.2's account self-service screens have no nav entry),
+      no active-state indication, and no "Home" control. Activated
+      2026-09-15.

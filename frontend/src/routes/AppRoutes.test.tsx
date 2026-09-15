@@ -485,4 +485,35 @@ describe("AppRoutes (FE-AC10)", () => {
     // Assert
     expect(await screen.findByTestId("route-location")).toHaveTextContent("/login");
   });
+
+  // US-5.6 FR-1/FR-3, GN-AC1/GN-AC3: proves the shared nav persists,
+  // unchanged, across a real client-side route transition triggered by
+  // clicking a rendered nav entry. There is no `window.location` navigation
+  // to assert against in jsdom/RTL — client-side routing (no full page
+  // reload) is proven instead by (i) the target screen's own content
+  // rendering, and (ii) the nav's own stable link element still being the
+  // *same* DOM node immediately after, evidencing the surrounding
+  // AppShell/<nav> was not remounted, only the routed <Outlet /> content
+  // changed.
+  it("test_app_routes_clicking_a_nav_entry_routes_client_side_without_remounting_the_shared_nav", async () => {
+    // Arrange
+    server.use(
+      http.get(`/api/v1/support/tickets`, async () =>
+        HttpResponse.json({ items: [], next_cursor: null }, { status: 200 }),
+      ),
+      http.get(`/api/v1/auth/sessions`, async () => HttpResponse.json({ sessions: [] }, { status: 200 })),
+    );
+    const user = userEvent.setup();
+    renderWithProviders(<AppRoutes />, { route: "/tickets", isAuthenticated: true });
+    const ticketsNavLinkBeforeClick = await screen.findByRole("link", { name: /^tickets$/i });
+
+    // Act
+    await user.click(screen.getByRole("link", { name: /^sessions$/i }));
+
+    // Assert: the target screen renders via client-side routing, URL updates...
+    expect(await screen.findByTestId("route-location")).toHaveTextContent("/sessions");
+    // ...and the shared nav's own "Tickets" entry is still present and is
+    // the identical DOM node — not a fresh element from a remounted shell.
+    expect(screen.getByRole("link", { name: /^tickets$/i })).toBe(ticketsNavLinkBeforeClick);
+  });
 });

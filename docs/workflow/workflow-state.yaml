@@ -6,7 +6,8 @@
 
 version: 1
 
-story: US-5.5
+story: US-5.6
+
 workflow: story-delivery
 
 current_stage: PR_CREATION
@@ -21,11 +22,11 @@ last_invoked_skill: pr-preparer
 last_result:
   verdict: PASS
   stage: PR_PREPARATION
-  recorded_at: "2026-09-14T17:15:00Z"
+  recorded_at: "2026-09-15T17:39:00Z"
 
 last_artifacts:
   - type: pr_summary
-    path: docs/pr/US-5.5-pr-summary.md
+    path: docs/pr/US-5.6-pr-summary.md
     version: 1
 
 implementation_substep: null
@@ -33,54 +34,244 @@ implementation_substep: null
 pending_human_gate: null
 
 note: >
-  US-5.5 activated 2026-09-14. Story's own front matter records a hard
-  blocker on US-4.4 (agent queue + assignment backend) - US-4.4 is now
-  ARCHIVED (PR #32, merged), so the blocker is resolved.
-  Currently on branch feat/us-5.4-admin-console-ui with uncommitted US-5.4
-  archive-mode changes still pending commit - no US-5.5 branch created; per
-  branch policy this is reported, not resolved automatically.
-  Backfilled a front-matter DRAFT->APPROVED bump on docs/specifications/US-5.5-spec.md
-  (v2) and docs/reviews/specifications/US-5.5-spec-review.md (v2) on 2026-09-14
-  - missed at the 2026-09-14T03:15:00Z HUMAN_SPEC_APPROVAL transition, same
-  recurring gap seen on US-5.1 through US-5.4.
-  API_DESIGN re-run against spec v2 (independently re-derived, not assumed
-  from the prior v1-based NOT_APPLICABLE): NOT_APPLICABLE confirmed. Design
-  review, impact analysis, implementation plan, task breakdown, and plan
-  review still reference spec v1 and remain stale pending regeneration.
-  HUMAN_PR_APPROVAL approved 2026-09-14T17:00:00Z by sbruhov@gmail.com (no
-  comment); all four required artifacts (implementation_verification v2,
-  security_review v2, reconciliation v2, traceability v2) verified current
-  (DRAFT, not SUPERSEDED/ARCHIVED) with recorded PASS verdicts and no
-  blocking findings. Advanced to PR_PREPARATION.
+  US-5.6 activated 2026-09-15 by /so:start. Story authored directly by the
+  requester (local_only source, no GitHub Issue) - see docs/stories/US-5.6-global-navigation.md.
+  On branch feat/us-5.5-agent-console-ui (ahead 4 of its origin remote,
+  otherwise clean apart from the new untracked story file); per branch
+  policy (start-flow.md) this is reported, not resolved automatically - no
+  branch created or switched. CLARIFICATION passed 2026-09-15 with 4 Open
+  Decisions logged (none blocking SPECIFICATION); OD-1 must be resolved by
+  HUMAN_SPEC_APPROVAL per us-clarifier's report. SPECIFICATION passed
+  2026-09-15; all 4 Open Decisions carried into the spec's Open Questions as
+  still-open (none silently resolved). SPEC_REVIEW passed 2026-09-15, all 6
+  ACs covered, no contradictions/scope creep; 2 non-blocking findings (spec's
+  OD-1 restatement omits the staff-only-empty-list behavior from
+  open-decisions.md's OD-1 Impact clause; keyboard-nav NFR has no dedicated
+  enforcement mechanism). Reviewer flagged a US-5.5 precedent: Open Decisions
+  resolved at HUMAN_SPEC_APPROVAL must be written back into the spec's FR
+  text, not left in a decisions table only, or PLAN_REVIEW can BLOCK later.
+  2026-09-15: user resolved OD-1..OD-4 directly and had FR-2/FR-4/FR-5 and
+  the Verification table edited to record them (spec bumped to v2);
+  open-decisions.md updated to v2 with Resolution lines. HUMAN_SPEC_APPROVAL
+  gate APPROVED 2026-09-15T08:15:00Z by sbruhov@gmail.com (no comment);
+  required_artifacts verified current (specification v2, specification_review
+  v1, neither SUPERSEDED/ARCHIVED) with automated_verdict PASS and no
+  blocking findings. Advanced to API_DESIGN. Front-matter status on
+  specification and specification_review had not been bumped DRAFT->APPROVED
+  at the gate as artifact-lifecycle.md requires; corrected 2026-09-15 before
+  dispatching API_DESIGN. API_DESIGN (openapi-designer) returned
+  NOT_APPLICABLE 2026-09-15: spec's own API/Persistence Impact section states
+  no public API or persistence change, confirmed against FR-1..FR-6 and all
+  four resolved Open Decisions, consistent with prior US-5.x frontend
+  stories; no api_design/openapi artifacts produced. Advanced to DB_DESIGN.
+  DB_DESIGN (db-designer) also returned NOT_APPLICABLE 2026-09-15: no
+  entity/column/relationship implicated (nav active-state derives from URL,
+  scope-gating reads existing session data cosmetically); no
+  database_design/entity_model artifacts produced. Advanced to
+  DESIGN_REVIEW. Noted (non-blocking): open_decisions v2 remains status
+  DRAFT since HUMAN_SPEC_APPROVAL's required_artifacts named only
+  specification + specification_review, not open_decisions - expected per
+  gate config, not an omission. DESIGN_REVIEW (design-reviewer) returned
+  NOT_APPLICABLE 2026-09-15: both API_DESIGN and DB_DESIGN NOT_APPLICABLE
+  confirmed; produced the required stub design_review artifact stating both
+  API and database design are out of scope, no findings. Advanced to
+  IMPACT_ANALYSIS. IMPACT_ANALYSIS (impact-analyzer) PASSED 2026-09-15: blast
+  radius is one production file (AppShell.tsx) and no AppRoutes.tsx change;
+  test surface is AppShell.test.tsx + AppRoutes.test.tsx only, no new test
+  files; no cross-module ripple, no migration/schema impact. 3 non-blocking
+  findings: pre-existing route-path duplication between AppShell/AppRoutes
+  nav constants (not introduced by this Story, flagged for
+  planner/implementation-planner); specification_review v1 staleness vs
+  specification v2 assessed non-blocking (same finding db-designer already
+  flagged, now assessed twice); both of spec-review v1's own findings are
+  closed by spec v2 and should not be treated as open by planner. Advanced to
+  ARCHITECTURE_PLANNING. ARCHITECTURE_PLANNING (planner) PASSED 2026-09-15:
+  plan confines all production changes to AppShell.tsx (plain Home Link to
+  /tickets exempt from active-state, 4 new ungated NavLink entries,
+  Link->NavLink on existing entries with prefix matching, no `end` prop);
+  explicitly rejected a shared route-path constants module (would touch
+  AppRoutes.tsx which impact analysis marked no-change; US-5.5 precedent for
+  rejecting the analogous extraction) in favor of a behavioral cross-check
+  test for FR-6/GN-AC6. Test surface: AppShell.test.tsx + AppRoutes.test.tsx
+  only. Advanced to IMPLEMENTATION_PLANNING. IMPLEMENTATION_PLANNING
+  (implementation-planner) PASSED 2026-09-15: linear T1->T2->T3 task chain -
+  T1 AppShell.tsx+AppShell.test.tsx (frontend-builder), T2 AppRoutes.test.tsx
+  only (frontend-builder, test-only), T3 gate-enforcer. Single execution
+  skill (frontend-builder) per track:frontend, no parallel branches. Advanced
+  to PLAN_REVIEW. PLAN_REVIEW (plan-reviewer) PASSED 2026-09-15: every
+  impact-analysis item covered in the plan/task breakdown, no layering
+  violation, no scope creep (shared route-path constants module explicitly
+  considered and rejected). 3 non-blocking findings: carried-forward
+  spec_review v1 version-bookkeeping note (independently reassessed,
+  non-blocking); AppShell.tsx's AGENTS.md layer-row attribution, an open
+  question carried from US-5.1's own plan review, not re-litigated; a minor
+  incomplete-but-not-wrong MSW-coverage description in the plan's Testing
+  Strategy prose (spot-checked against mswHandlers.ts, no real gap). Advanced
+  to HUMAN_PLAN_APPROVAL - awaiting /so:approve or /so:reject. HUMAN_PLAN_APPROVAL
+  gate REJECTED 2026-09-15T13:30:00Z by sbruhov@gmail.com: "я маю випробувати
+  та побачити все те, що було описано в US 1.1 - US 4.4" (human wants to
+  exercise/see US-1.1..US-4.4 functionality before approving further planning
+  on US-5.6). Routed back to ARCHITECTURE_PLANNING per gate's on_reject; no
+  plan/task-breakdown content edited by the orchestrator itself. /so:next
+  2026-09-15T13:35:00Z: held at ARCHITECTURE_PLANNING without dispatching
+  planner or advancing - the on_reject target had no genuine planning task to
+  perform against this rejection reason; no history.jsonl transition recorded
+  at that point since no stage was actually processed. 2026-09-15T14:00:00Z:
+  user confirmed they only wanted to manually exercise/verify US-1.1..US-4.4
+  before continuing, no change to the US-5.6 plan required; re-entered
+  HUMAN_PLAN_APPROVAL with the same v1 implementation_plan/task_breakdown/
+  plan_review (none edited, still current) and automated_verdict PASS carried
+  forward from PLAN_REVIEW. NOT_APPLICABLE transition recorded
+  ARCHITECTURE_PLANNING->HUMAN_PLAN_APPROVAL (no skill re-invoked). Awaiting
+  /so:approve or /so:reject. HUMAN_PLAN_APPROVAL gate APPROVED
+  2026-09-15T14:15:00Z by sbruhov@gmail.com (no comment); required_artifacts
+  (implementation_plan v1, task_breakdown v1, plan_review v1) verified current
+  and unchanged, automated_verdict PASS, no blocking findings; front matter on
+  all three bumped DRAFT->APPROVED. Advanced to TEST_WRITING. TEST_WRITING
+  (test-writer) PASSED 2026-09-15: frontend-track read order (spec's own
+  Verification table as reference contract, no separate API/DB design since
+  both NOT_APPLICABLE upstream); produced test_strategy, ac_test_matrix
+  (every GN-AC1-6 plus a11y/a11y-keyboard rows mapped to a named test
+  function), test_generation_report. Test-only changes: AppShell.test.tsx
+  (2 existing zero-scope cases extended, 8 new cases added) and
+  AppRoutes.test.tsx (1 new case). tsc/eslint/prettier clean; vitest 50
+  tests: 39 pass / 11 fail, all 11 failures confined to the cases this pass
+  touched (expected TDD-red - AppShell.tsx production code not yet updated
+  by IMPLEMENTATION), 38 pre-existing plus 1 new axe case pass unchanged (no
+  regression). 2 non-blocking findings: the keyboard-activation test's final
+  Enter-on-anchor step has no in-repo precedent and hasn't executed yet
+  (fails earlier at the first Tab assertion pre-implementation; relies on
+  documented user-event@14.5.2 behavior, re-verify once IMPLEMENTATION
+  lands); OD-3 (flat list, no grouping) has no dedicated assertion, covered
+  only indirectly via role/name queries assuming no containing section. A
+  GN-AC6 cross-check defect (loop body had zero execution evidence
+  pre-implementation) was caught and fixed mid-pass via advisor review.
+  Advanced to IMPLEMENTATION. IMPLEMENTATION (frontend-builder, sole
+  sub-step per skills_by_track.frontend) PASSED 2026-09-15: T1 modified
+  AppShell.tsx only - Home stays a plain Link (OD-1/OD-2, never carries
+  aria-current), Tickets + the 3 existing scope-gated entries converted
+  Link->NavLink with no `end` prop (OD-4 prefix matching), 4 new ungated
+  NavLink entries (Sessions, Profile, Security, Deactivate Account) added
+  as flat siblings (OD-3); no new api/ or hooks/ import. T2: no production
+  change, AppRoutes.tsx confirmed untouched via empty diff --stat.
+  AppShell.test.tsx 19/19 pass (all 11 previously-failing cases now green),
+  AppRoutes.test.tsx 31/31 pass, type-check clean, prettier clean. 1
+  non-blocking finding: single-file vitest --coverage run exits non-zero
+  against the repo-wide 85% global floor when invoked on one file in
+  isolation (both files show 100/100/100/100 in their own per-module rows;
+  gate-enforcer's full-suite run is the authoritative coverage check).
+  Recorded in docs/catalog/US-5.6-pipeline-status.md. Advanced to
+  QUALITY_GATE. QUALITY_GATE (gate-enforcer) PASSED 2026-09-15: full
+  frontend gate from frontend/ - lint, format:check, type-check all clean
+  (exit 0); test:coverage 74 test files / 503 tests passed (run twice for a
+  genuine captured exit code), coverage 97.68% stmt / 94.55% branch /
+  86.47% fn / 97.68% line, both touched files 100/100/100/100. Runtime-rule
+  checks (AGENTS.md Frontend subsection) all PASS: no fetch/axios/api/
+  import or localStorage/sessionStorage in the diff, useAuthStore() usage
+  stayed read-only, no banned idioms (any/eslint-disable/console.*). No
+  bypass proposed or used. Produced implementation_report and
+  quality_gate_report. Advanced to IMPLEMENTATION_VERIFICATION.
+  IMPLEMENTATION_VERIFICATION (implementation-verifier) PASSED 2026-09-15:
+  §6.5 (migrations) and the ORM/eager-load/cache-TTL rows of §6.6 are N/A
+  by construction (frontend track, no ORM/migration/cache in this stack).
+  Independently re-verified (fresh greps/reads, not taken on gate-enforcer's
+  word) frontend layering, session-handling, and §6.7 doc-level analogues
+  across all 3 changed files: no fetch/axios/api/ import, no
+  localStorage/sessionStorage, read-only store usage unchanged, no banned
+  idioms, no dead nav links (all 8 to=/href targets cross-checked against
+  AppRoutes.tsx's registered routes), active-state uses aria-current not
+  colour-alone. §5 protected-route security cases N/A - no new
+  route/guard introduced. 2 non-blocking findings carried forward (OD-3
+  flat-list has no dedicated negative-structure assertion; pre-existing
+  AppShell/AppRoutes path-literal duplication, both explicitly scoped to
+  reconciliation-reviewer's AC remit, not AGENTS.md violations). Advanced
+  to SECURITY_REVIEW. SECURITY_REVIEW (security-reviewer) PASSED
+  2026-09-15: diff confined to AppShell.tsx (+20/-5) plus test-only
+  additions, confirmed via git diff --stat. Backend AGENTS.md §7 checks
+  1/2/4/5 (Argon2id, reversible encryption, extra="forbid", parameterized
+  SQL) N/A by construction - no such surface in frontend/. Own grep for
+  console.|localStorage|sessionStorage|dangerouslySetInnerHTML|eyJ across
+  all 3 changed files found one pre-existing US-5.3 sessionStorage.clear()
+  test-isolation call (not a token, not new); authStore.tsx untouched.
+  4 new ungated entries (Sessions, Profile, Security, Deactivate Account)
+  cross-checked against spec FR-2 - correctly ungated per spec (only Agent
+  Queue/Users/Audit Log remain scope-gated); 3 gated entries use
+  conditional JSX rendering, not CSS hiding, so unscoped DOM contains none
+  of those route strings. No §7 non-negotiable violated. Advanced to
+  RECONCILIATION. RECONCILIATION (reconciliation-reviewer) PASSED
+  2026-09-15: all 6 spec ACs (GN-AC1..GN-AC6) plus a11y/a11y-keyboard
+  Verification rows have a matrix row, an existing named test function
+  (verified by direct read), and assertions matching each AC's stated
+  behavior; no spec drift found comparing shipped AppShell.tsx against
+  spec v2/plan v1. Both explicit remit items resolved: OD-3's flat-list
+  gap is real against FR-2's fuller text but not against GN-AC2's own
+  verbatim wording (non-blocking, not a Fail); the a11y-keyboard test's
+  previously-unexecuted Enter-on-anchor step was independently re-run and
+  confirmed to execute and pass (AppShell.test.tsx + AppRoutes.test.tsx
+  50/50 passing, matching the 19/31 split reported upstream). Also
+  independently confirmed GN-AC2's completeness clause: all 8 unique nav
+  hrefs exactly match AppRoutes.tsx's top-level authenticated screens, no
+  missing 9th screen. 2 non-blocking findings (OD-3 negative-structure gap
+  recommended for test-writer if file touched again; pre-existing
+  AppShell/AppRoutes path-literal duplication, carried unchanged).
+  Advanced to HUMAN_PR_APPROVAL - awaiting /so:approve or /so:reject.
+  HUMAN_PR_APPROVAL gate APPROVED 2026-09-15T16:00:00Z by sbruhov@gmail.com
+  (no comment); required_artifacts (implementation_verification v1,
+  security_review v1, reconciliation v1, traceability v1) verified current
+  (all status DRAFT, none SUPERSEDED/ARCHIVED) with automated_verdict PASS
+  and no blocking findings. Advanced to PR_PREPARATION. PR_PREPARATION
+  (pr-preparer) PASSED 2026-09-15: independently reverified all four
+  required upstream gates from their own artifacts (quality_gate_report v1,
+  implementation_verification v1, security_review v1, reconciliation v1),
+  all PASS/current, no stale_reconciliation drift; .env.example needs no
+  change (frontend nav-only diff); commit hygiene confirmed clean (diff
+  confined to AppShell.tsx, AppShell.test.tsx, AppRoutes.test.tsx per the
+  implementation report, no unrelated files). Produced
+  docs/pr/US-5.6-pr-summary.md (v1, DRAFT) with drafted PR title, summary,
+  AC-backed test-plan checklist, and risk/rollback notes. 1 new non-blocking
+  finding: working branch feat/us-5.5-agent-console-ui carries unmerged
+  US-5.5 history (5 commits ahead of main) and no dedicated US-5.6 branch
+  exists yet - a human should settle (extend the US-5.5 PR vs. cut a fresh
+  branch off main) before PR_CREATION pushes anything; pre-existing from
+  Story activation, not introduced by this stage. Advanced to PR_CREATION.
+  Per PR_CREATION's run_policy and AGENTS.md section 10, story-orchestrator
+  never auto-dispatches PR_CREATION on a `continue` - it pushes a branch and
+  opens a real GitHub Pull Request, an externally-visible action on shared
+  state. Run ended here; PR_CREATION requires an explicit separate human
+  instruction (e.g. "create the PR for US-5.6"), and the branch-hygiene
+  finding above should be resolved first. 2026-09-15T17:45:00Z: user gave
+  the explicit instruction "create the PR for US-5.6". Presented the
+  branch-hygiene finding as a decision (fresh branch off main vs. commit on
+  feat/us-5.5-agent-console-ui as-is); user chose a fresh branch off main.
+  Created feat/us-5.6-global-navigation from origin/main (fetched first;
+  confirmed US-5.5's 2fbb560 is an ancestor of origin/main via PR #39,
+  merged as dc0b8a1; confirmed none of the 4 loose commits touch frontend/).
+  Moved the uncommitted US-5.6 changes over via git stash push/pop; the
+  frontend/ files applied with no conflict (confirmed clean base); 4
+  workflow-tracking files (stories.yaml, active-story.yaml, history.jsonl,
+  workflow-state.yaml) conflicted against origin/main's older content and
+  were resolved by hand, keeping the accurate current state (US-5.6
+  active/in-progress, history.jsonl's origin/main side was a strict prefix
+  of the stashed version so both were kept, no entries dropped).
 
 blocking_issues: []
 
 non_blocking_findings:
-  - "QUALITY_GATE (attempt 1, 2026-09-14T10:45:00Z): AgentTicketQueueScreen.tsx:182 React duplicate-key warning ('t-1') during a filter/cursor-reset test; FIXED at its MSW-fixture root cause during the attempt-2 IMPLEMENTATION loop-back (docs/catalog/US-5.5-pipeline-status.md), confirmed absent from QUALITY_GATE attempt 2's re-run output."
-  - "IMPLEMENTATION_VERIFICATION (Low): AgentTicketQueueScreen.tsx's primary GET /support/tickets call has no dedicated forced-403/4xx rendering test of its own (only the assign sub-action's 409/422 are tested on that screen); the status-agnostic rendering mechanism is proven correct elsewhere in this same diff. Test-coverage completeness gap, not a rule violation or functional defect."
-  - "IMPLEMENTATION_VERIFICATION (Low): no .css/Tailwind/styled-components stylesheet exists anywhere in frontend/ giving the 'reply--internal' className a visual rule — pre-existing, project-wide (true of TicketDetailScreen.tsx/US-5.3 and every prior Story), not introduced by this diff; the text-label half of the internal-note distinct-styling NFR is satisfied. Flagged for reconciliation-reviewer."
-  - "SECURITY_REVIEW (Low): AgentTicketQueueScreen.tsx:74 exposes the full untruncated assignee UUID via a `title` tooltip attribute, inconsistent with the documented shortened/truncated display (Resolution OD-1). Not a credential/token/PII leak (internal agent-account identifier, same audience already sees the truncated form) — advisory only."
-  - "RECONCILIATION (attempt 1, 2026-09-14T13:30:00Z, BLOCKING -> loop-back): AG-AC7/FR-8's '422 errors[] mapped onto matching form fields' clause is unimplemented in both AgentTicketQueueScreen.tsx and AgentTicketDetailScreen.tsx — neither calls the project's existing getFieldErrors() helper (apiErrorHelpers.ts) that seven other screens already use for this. Routed back to IMPLEMENTATION."
-  - "RECONCILIATION (non-blocking, carry into the same IMPLEMENTATION pass per reconciliation-reviewer's own recommendation): AG-AC1 ordering/no-count-shown untested; AG-AC2 queue-row-reflects-new-assignee-on-success untested; AG-AC4 internal-note-no-status-change (converse case) untested; AG-AC5 resolution_note 5000-char upper bound implemented but untested. All four closed in IMPLEMENTATION attempt 3 alongside the blocking AG-AC7 fix."
-  - "IMPLEMENTATION_VERIFICATION v2 (Low, new): wiring getFieldErrors()/FieldError into both agent screens also gates the pre-existing generic top-level error paragraph on the field-errors object being absent, so a 422 carrying fieldErrors now suppresses the generic detail text entirely. RECONCILIATION v2 ruled this satisfies AG-AC7 (independent genuine coverage of both clauses on different response shapes; byte-identical to the established convention on 7 pre-existing screens) - not a gap."
-  - "RECONCILIATION v2 (Low, all carried forward unchanged, none blocking): queue-screen GET /support/tickets has no dedicated forced-403 test (NFR-sourced, no numbered AC); FR-11's combined-nav-entries case has no single test (FR-11 traces to no AC); full assignee UUID in a title tooltip (AgentTicketQueueScreen.tsx:80); no stylesheet backs the internal-note distinct-styling class names anywhere in frontend/ (project-wide, pre-existing); a 422 test at AgentTicketQueueScreen.test.tsx:357 sets detail and errors[0].message identically, so it's redundant with rather than adding to the genuine detail-only coverage elsewhere."
-  - "OD-1-OD-5 RESOLVED 2026-09-14 (human decision, docs/decisions/US-5.5-open-decisions.md v2): OD-1 shortened-UUID assignee display; OD-2 raw-UUID assign-target/filter input; OD-3 navigation-state assignee handoff; OD-4 shared AppShell nav link; OD-5 single action button, no reason field/confirmation. All five folded into spec v2 FR-1/FR-2/FR-3/FR-6/FR-7/FR-11 as concrete behavior."
-  - "Spec review v2 (Medium): FR-3 does not specify rendered output for the unknown/stale assignee state on direct-URL entry."
-  - "Spec review v2 (Low): FR-6 does not restate queue invalidation for an assign/unassign initiated from the detail screen."
-  - "Spec review v2 (Low): FR-1 does not specify rendering for a null assignee_id."
-  - "Spec review v2 (Low, carried from v1): empty queue result state undescribed by FR-1."
-  - "Spec review v2 (Low, carried from v1): whitespace-only resolution_note boundary undescribed by FR-5/AG-AC5."
-  - "Impact analysis: ReplyRead.visibility absent from frontend/src/api/types.ts despite backend always returning it; new hooks/screens depend on this field existing."
-  - "Plan risk: React Hook Form defaultValues caching could leak a prior internal visibility choice into the next composer open unless onSuccess explicitly resets to public; mitigation + test assertion required."
-  - "All downstream design/impact/plan artifacts now regenerated as v2 against spec v2 (design_review, impact_analysis, implementation_plan, task_breakdown, plan_review). Root cause of the prior PLAN_REVIEW BLOCKED (OD-1-OD-5 unresolved in spec text) independently re-verified fixed."
-  - "Plan review v2 (Low): task_breakdown's ordering-rule floor policy statement is internally inconsistent for T10 (fixture-only, zero production diff - not a functional violation)."
-  - "Plan review v2 (Low, x3): queue empty-result state, whitespace-only resolution_note block, and assignee placeholder strings ('-'/'Unassigned') are plan-level choices closing spec-review v2's ambiguities, not FR-mandated text - flagged for test-writer/reconciliation-reviewer awareness."
-  - "Implementation plan v2: React Hook Form defaultValues visibility-leak risk (FR-4/NFR) mitigated via onSuccess reset({visibility:'public'}), with a required test assertion."
-  - "Impact analysis v2 (re-verified against current working tree): ReplyRead.visibility and CreateReplyRequest.visibility still absent from frontend/src/api/types.ts despite backend always returning/accepting it (app/modules/support/schemas.py:74); extending types.ts is a hard prerequisite for this Story's new hooks/screens."
-  - "Impact analysis v2: three new spec-review v2 ambiguities (FR-3 unknown/stale assignee rendering, FR-1 null assignee_id rendering, FR-6 detail-originated assign/unassign invalidation) land inside already-identified files, not expanding the file boundary."
-  - "PR_PREPARATION (commit hygiene, non-blocking): working tree mixes US-5.5's clean implementation file set with uncommitted US-5.4 archive-mode documentation changes on branch feat/us-5.4-admin-console-ui; no dedicated US-5.5 branch created yet. Flagged in docs/pr/US-5.5-pr-summary.md for human resolution before any push - not PR_PREPARATION's to resolve."
+  - "OD-1 (High): Home control target = /tickets, no dedicated dashboard screen - story's own Open Question #1; must be confirmed no later than HUMAN_SPEC_APPROVAL."
+  - "OD-2 (Medium): whether Home itself carries active-state styling given Assumption #2 vs #4 vs GN-AC5's singular 'distinguished from the others'."
+  - "OD-3 (Low): nav entry grouping/sectioning vs flat list - story's own Open Question #2."
+  - "OD-4 (Low): whether a parent nav entry shows active state on a nested child/detail route - NavLink prefix-match default is safe but should be deliberate."
+  - "[Medium] Spec's OD-1 restatement omits the staff-only-empty-list behavior required by open-decisions.md's OD-1 Impact clause."
+  - "[Low] 'Full keyboard navigation' NFR has no enforcement mechanism distinct from the generic axe a11y check."
+  - "[Low] specification_review v1 recorded reviewing specification v1; specification is now v2 (OD resolutions written back at HUMAN_SPEC_APPROVAL). Flagged by openapi-designer for DESIGN_REVIEW/IMPACT_ANALYSIS visibility; assessed non-blocking twice more (db-designer, impact-analyzer)."
+  - "Pre-existing route-path duplication between AppShell.tsx nav to= literals and AppRoutes.tsx path= literals (not introduced by this Story); this Story's FR-6 no-dead-links requirement is the first thing to cross-check them, may be worth extracting a shared constants source - left to planner/implementation-planner."
+  - "Keyboard-activation test's final Enter-on-anchor step has no in-repo precedent and hasn't executed yet (fails earlier, at the first Tab assertion, pre-implementation); relies on documented user-event@14.5.2 Enter-on-anchor behavior - re-verify once IMPLEMENTATION lands the Home/NavLink changes."
+  - "OD-3 (flat list, no grouping) has no dedicated test assertion - a negative structural property, covered only indirectly via role/name queries assuming no containing section."
+  - "[RECONCILIATION] OD-3's flat-list gap is real against FR-2's fuller text but not against GN-AC2's own verbatim AC wording - recommended for test-writer to close if AppShell.test.tsx is touched again, not a blocking gap today."
+  - "Pre-existing AppShell/AppRoutes path-literal duplication (not introduced by this Story) carried unchanged through IMPLEMENTATION_VERIFICATION, SECURITY_REVIEW, and RECONCILIATION; GN-AC6's behavioral cross-check test is the mitigation in place."
+  - "[PR_PREPARATION] Working branch feat/us-5.5-agent-console-ui was 5 commits ahead of main (US-5.5's merged feature commit plus US-5.4/US-5.5 archive and unrelated docs commits) and 4 ahead of its own origin remote; no dedicated feat/us-5.6-* branch existed. RESOLVED 2026-09-15T17:45:00Z by human decision (fresh branch off main): created feat/us-5.6-global-navigation from origin/main (which already has US-5.5's PR #39 merged as dc0b8a1), carried over only US-5.6's own changes via stash pop, leaving the 4 unrelated commits behind on feat/us-5.5-agent-console-ui untouched for separate handling."
 
-started_at: "2026-09-14T00:45:00Z"
-updated_at: "2026-09-14T17:15:00Z"
+started_at: "2026-09-15T00:10:00Z"
+updated_at: "2026-09-15T17:45:00Z"
 completed_at: null
 archived_at: null
