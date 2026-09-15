@@ -293,13 +293,13 @@ stories:
     path: docs/stories/US-5.5-agent-console-ui.md
     epic: EPIC-5
     title: Agent Console (Frontend)
-    state: IN_PROGRESS
+    state: ARCHIVED
     source:
       type: github_issue
       repository: AndriiDobrovolskii/Customer_Portal
       issue_number: 29
       issue_url: https://github.com/AndriiDobrovolskii/Customer_Portal/issues/29
-    delivered_by: { pr: null, note: null }
+    delivered_by: { pr: 39, note: "Merged into main 2026-09-14T16:37:43Z" }
     note: >
       Delivered agent ticket queue (list/filter/assign/unassign) and agent
       ticket detail (thread, reply with public/internal visibility, resolve,

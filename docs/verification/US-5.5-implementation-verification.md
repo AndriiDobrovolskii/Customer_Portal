@@ -2,7 +2,7 @@
 artifact_type: implementation_verification
 story: US-5.5
 version: 2
-status: APPROVED
+status: ARCHIVED
 created_at: "2026-09-14T11:51:39Z"
 updated_at: "2026-09-14T11:51:39Z"
 produced_by: implementation-verifier
