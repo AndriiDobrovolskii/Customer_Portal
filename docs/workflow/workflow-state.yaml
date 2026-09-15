@@ -22,12 +22,12 @@ last_invoked_skill: pr-preparer
 last_result:
   verdict: PASS
   stage: PR_PREPARATION
-  recorded_at: "2026-09-15T17:39:00Z"
+  recorded_at: "2026-09-15T18:00:00Z"
 
 last_artifacts:
   - type: pr_summary
     path: docs/pr/US-5.6-pr-summary.md
-    version: 1
+    version: 2
 
 implementation_substep: null
 
@@ -252,7 +252,26 @@ note: >
   workflow-state.yaml) conflicted against origin/main's older content and
   were resolved by hand, keeping the accurate current state (US-5.6
   active/in-progress, history.jsonl's origin/main side was a strict prefix
-  of the stashed version so both were kept, no entries dropped).
+  of the stashed version so both were kept, no entries dropped). Committed
+  99e5128 "feat: global navigation (US-5.6)" - 28 files, single commit
+  directly on origin/main. Began PR_CREATION (pr-creator) directly in the
+  interactive session per its own guidance (real push/PR-open side effect).
+  Staleness check per pr-creator's Workflow step 4: commit 99e5128 timestamp
+  2026-09-15T14:46:51Z lands after pr_summary's recorded updated_at
+  2026-09-15T14:39:40Z (the branch-hygiene fix required a new commit after
+  the summary was drafted) - CHANGES_REQUIRED, loop_back_stage:
+  PR_PREPARATION (key stale_pr_summary), per stage-map.yaml's loop_back for
+  PR_CREATION. No push or GitHub API call made. Routed back to
+  PR_PREPARATION to regenerate pr_summary against the current tree before
+  retrying PR_CREATION. PR_PREPARATION attempt 2 (pr-preparer) PASSED
+  2026-09-15T18:00:00Z: regenerated docs/pr/US-5.6-pr-summary.md as v2
+  against commit 99e5128 on feat/us-5.6-global-navigation; all four
+  upstream gates re-confirmed PASS at unchanged versions (stale_reconciliation
+  does not apply - security_review v1/reconciliation v1 already reviewed
+  this exact content); git diff origin/main..HEAD --stat confirmed the
+  expected 28-file set, no unrelated files, no leftover conflict markers.
+  Branch-hygiene finding now recorded RESOLVED, not carried forward as
+  still-open. Advanced back to PR_CREATION for retry.
 
 blocking_issues: []
 
@@ -270,6 +289,7 @@ non_blocking_findings:
   - "[RECONCILIATION] OD-3's flat-list gap is real against FR-2's fuller text but not against GN-AC2's own verbatim AC wording - recommended for test-writer to close if AppShell.test.tsx is touched again, not a blocking gap today."
   - "Pre-existing AppShell/AppRoutes path-literal duplication (not introduced by this Story) carried unchanged through IMPLEMENTATION_VERIFICATION, SECURITY_REVIEW, and RECONCILIATION; GN-AC6's behavioral cross-check test is the mitigation in place."
   - "[PR_PREPARATION] Working branch feat/us-5.5-agent-console-ui was 5 commits ahead of main (US-5.5's merged feature commit plus US-5.4/US-5.5 archive and unrelated docs commits) and 4 ahead of its own origin remote; no dedicated feat/us-5.6-* branch existed. RESOLVED 2026-09-15T17:45:00Z by human decision (fresh branch off main): created feat/us-5.6-global-navigation from origin/main (which already has US-5.5's PR #39 merged as dc0b8a1), carried over only US-5.6's own changes via stash pop, leaving the 4 unrelated commits behind on feat/us-5.5-agent-console-ui untouched for separate handling."
+  - "[PR_PREPARATION v2] pr_summary v2 was regenerated as an uncommitted working-tree change layered on top of commit 99e5128; that commit's own history still carries pr_summary v1 until a later commit updates it. Informational only - pr-creator reads the PR body from disk at push time, so it sees v2 regardless."
 
 started_at: "2026-09-15T00:10:00Z"
 updated_at: "2026-09-15T17:45:00Z"

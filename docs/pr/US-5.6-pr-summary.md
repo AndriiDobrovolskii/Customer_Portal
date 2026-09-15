@@ -1,10 +1,10 @@
 ---
 artifact_type: pr_summary
 story: US-5.6
-version: 1
+version: 2
 status: DRAFT
 created_at: "2026-09-15T14:39:40Z"
-updated_at: "2026-09-15T14:39:40Z"
+updated_at: "2026-09-15T18:00:00Z"
 produced_by: pr-preparer
 inputs:
   - path: docs/stories/US-5.6-global-navigation.md
@@ -32,11 +32,29 @@ supersedes: null
 
 # PR Summary: US-5.6 — Global Navigation (Frontend)
 
+**Regeneration note (attempt 2).** This is a re-run of `PR_PREPARATION`, not a first pass. `v1`
+(`created_at: 2026-09-15T14:39:40Z`) was drafted against the working tree while it still sat
+uncommitted on `feat/us-5.5-agent-console-ui`. Since then, per human decision at `PR_CREATION`
+(2026-09-15T17:45:00Z), the branch-hygiene finding `v1` flagged (this branch carried US-5.5's
+already-merged history) was resolved by cutting a fresh branch, `feat/us-5.6-global-navigation`,
+directly off `origin/main` (which already has US-5.5 merged as `dc0b8a1` via PR #39) and committing
+US-5.6's own changes there as a single commit, `99e5128`. `pr-creator`'s staleness check correctly
+found `v1` stale (its `updated_at` predates `99e5128`'s commit timestamp,
+`2026-09-15T14:46:51Z` — note this environment's clock reads earlier in the day than
+`workflow-state.yaml`'s own recorded event times, the same discrepancy already recorded in prior
+quality-gate reports) and looped back here (`stale_pr_summary`). Content below is re-verified
+against the current tree/commit, not copied from `v1`. The prior branch-hygiene finding is
+**RESOLVED**, not carried forward as open. This artifact's own `updated_at` below
+(`2026-09-15T18:00:00Z`) is deliberately stamped in `workflow-state.yaml`'s recorded-event time
+frame (the frame `pr-creator`'s staleness check compares against), not the environment's raw
+system clock — that keeps the staleness comparison against `99e5128`'s `14:46:51Z` unambiguous in
+either direction and avoids a second spurious `stale_pr_summary` loop.
+
 ## Gate Confirmation
 
-All four required upstream gates were read directly from their own artifacts (not taken on a
-verbal "it's all good") and each records verdict **PASS**, against the current, non-stale input
-versions:
+All four required upstream gates were read directly from their own artifacts this session (not
+taken on a verbal "it's all good"), and each still records verdict **PASS** at the same version as
+`v1` consumed — none has been re-run or revised since:
 
 | Gate | Artifact | Version | Verdict |
 |---|---|---|---|
@@ -46,35 +64,35 @@ versions:
 | `reconciliation-reviewer` | `docs/reviews/reconciliation/US-5.6-reconciliation.md` | v1 | PASS |
 
 `docs/workflow/workflow-state.yaml` (`story: US-5.6`, `current_stage: PR_PREPARATION`,
-`previous_stage: HUMAN_PR_APPROVAL`, `last_result.verdict: PASS` for `RECONCILIATION`) and
-`docs/workflow/active-story.yaml` (`active_story: US-5.6`) agree on the active story.
-`HUMAN_PR_APPROVAL` was recorded approved by `sbruhov@gmail.com` at `2026-09-15T16:00:00Z`
-against exactly these four artifacts at these versions (`implementation_verification` v1,
-`security_review` v1, `reconciliation` v1, `traceability` v1). Every front-matter
-`version`/`status` named in this artifact's own `inputs:` block was read directly off disk in
-this session, not carried from the resolved-path list handed to this stage: `story`
+`previous_stage: PR_CREATION`, `attempt: 2`, `last_result.verdict: CHANGES_REQUIRED` for
+`PR_CREATION`/`stale_pr_summary`) and `docs/workflow/active-story.yaml` (`active_story: US-5.6`)
+agree on the active story. `HUMAN_PR_APPROVAL` remains recorded approved by `sbruhov@gmail.com` at
+`2026-09-15T16:00:00Z` against exactly `implementation_verification` v1, `security_review` v1,
+`reconciliation` v1, `traceability` v1 — none of those four has changed since that approval, so it
+still covers what would ship. Every front-matter `version`/`status` named in this artifact's own
+`inputs:` block was read directly off disk this session: `story`
 (`docs/stories/US-5.6-global-navigation.md`, no front-matter version field, `track: frontend`),
 `specification` v2/APPROVED, `impact_analysis` v1/DRAFT, `implementation_plan` v1/APPROVED,
 `implementation_report` v1/DRAFT, `implementation_verification` v1/APPROVED, `security_review`
 v1/APPROVED, `reconciliation` v1/APPROVED, `traceability` v1/APPROVED — none is `SUPERSEDED` or
-`ARCHIVED`. `docs/decisions/US-5.6-open-decisions.md` v2 (read directly this session) confirms
-OD-1 through OD-4 all `RESOLVED` at `HUMAN_SPEC_APPROVAL` 2026-09-15; no unresolved blocking Open
-Decision remains in any `APPROVED` input this stage depends on. Every downstream *review* stage
-(`QUALITY_GATE`, `IMPLEMENTATION_VERIFICATION`, `SECURITY_REVIEW`, `RECONCILIATION`) passed on its
-first attempt with no loop-back — the one rejection this delivery saw was earlier and upstream of
-implementation: `HUMAN_PLAN_APPROVAL` was `REJECTED` 2026-09-15T13:30:00Z for a reason unrelated
-to plan content (the human wanted to manually exercise US-1.1–US-4.4 first), routed back to
-`ARCHITECTURE_PLANNING` (no plan/task-breakdown content was changed), then re-entered and
-`APPROVED` 2026-09-15T14:15:00Z against the same v1 `implementation_plan`/`task_breakdown`. No
-code-quality or review-driven loop-back occurred anywhere in this delivery.
+`ARCHIVED`. `docs/decisions/US-5.6-open-decisions.md` v2 confirms OD-1 through OD-4 all `RESOLVED`
+at `HUMAN_SPEC_APPROVAL` 2026-09-15; no unresolved blocking Open Decision remains in any `APPROVED`
+input this stage depends on.
 
-**`stale_reconciliation` check (this stage's only loop-back trigger):** `git diff --stat --
-frontend/` in this session shows the identical file set and line counts `security_review` v1
-already recorded from its own re-run (`AppShell.tsx` +20/-5, `AppShell.test.tsx` +225,
-`AppRoutes.test.tsx` +31 — 271 insertions/5 deletions total), and `git log --oneline -5` shows no
-commit landed after `RECONCILIATION`'s `recorded_at: "2026-09-15T15:30:00Z"` in
-`workflow-state.yaml`. The working tree has not moved since `reconciliation-reviewer` ran — its
-verdict still describes exactly what would ship. `stale_reconciliation` does not apply.
+**`stale_reconciliation` check (this stage's only loop-back trigger):** re-run against the current
+commit, not `v1`'s. `git show --stat 99e5128` (also `HEAD`) shows a single commit, authored
+2026-09-15T17:46:51+03:00, containing exactly the story's known file set: the full
+`docs/*US-5.6*` artifact set (including `docs/reviews/reconciliation/US-5.6-reconciliation.md`
+itself), `docs/catalog/stories.yaml`, `docs/workflow/active-story.yaml`,
+`docs/workflow/history.jsonl`, `docs/workflow/workflow-state.yaml`, and the three frontend files
+(`frontend/src/layouts/AppShell.tsx`, `frontend/src/layouts/AppShell.test.tsx`,
+`frontend/src/routes/AppRoutes.test.tsx`). `git diff origin/main..HEAD --stat` confirms the same
+28-file set, 271 insertions/5 deletions across the frontend files unchanged from what
+`security_review` v1 and `reconciliation` v1 already reviewed (`AppShell.tsx` +20/-5,
+`AppShell.test.tsx` +225, `AppRoutes.test.tsx` +31) — the content those two reviews evaluated is
+byte-for-byte what this commit ships; only its location (a new branch/commit) changed, not its
+substance. `reconciliation-reviewer`'s verdict still describes exactly what would ship.
+`stale_reconciliation` does not apply.
 
 ## PR Title
 
@@ -117,10 +135,12 @@ Linked story: `docs/stories/US-5.6-global-navigation.md`
 Linked spec: `docs/specifications/US-5.6-spec.md` (v2, APPROVED)
 Linked plan: `docs/plans/US-5.6-implementation-plan.md` (v1, APPROVED)
 
-Entire diff is confined to one production file, `frontend/src/layouts/AppShell.tsx` (+20/-5), plus
-test-only additions to `frontend/src/layouts/AppShell.test.tsx` (+225) and
-`frontend/src/routes/AppRoutes.test.tsx` (+31). No new dependency, no new configuration/setting,
-and no existing exported function signature changed shape.
+Ships as a single commit, `99e5128` ("feat: global navigation (US-5.6)"), on
+`feat/us-5.6-global-navigation`, based directly on `origin/main`. Its production diff is confined
+to one file, `frontend/src/layouts/AppShell.tsx` (+20/-5), plus test-only additions to
+`frontend/src/layouts/AppShell.test.tsx` (+225) and `frontend/src/routes/AppRoutes.test.tsx`
+(+31). No new dependency, no new configuration/setting, and no existing exported function
+signature changed shape.
 
 ## Test Plan
 
@@ -129,7 +149,7 @@ Built from `docs/reconciliation/US-5.6-traceability.md` (v1) and
 plus both Verification-table rows (`a11y`, `a11y-keyboard`) have a matrix row, a test function
 confirmed to exist verbatim in the working tree, and assertions confirmed by
 `reconciliation-reviewer` — reading the actual test files, not their names — to match each AC's
-stated behavior in Full.
+stated behavior in full.
 
 - [x] GN-AC1 `[gate]` — the shared nav is visible and unchanged across route transitions, no full
       page reload. Proven by DOM-node-identity assertion, not just a URL-string check.
@@ -152,7 +172,7 @@ stated behavior in Full.
       (`AppShell.test.tsx::test_app_shell_every_nav_href_resolves_to_a_real_registered_screen_under_full_scope`)
 - [x] a11y `[gate]` — `axe()` on the fully-scoped, authenticated nav asserts zero violations.
 - [x] a11y-keyboard `[gate]` — Tab/Shift-Tab reaches all 9 entries in document order; Enter
-      activates the focused link. Independently re-run by `reconciliation-reviewer` in this
+      activates the focused link. Independently re-run by `reconciliation-reviewer` in its own
       session (the one step `test-writer` had flagged as unexecuted pre-implementation) and
       confirmed passing.
 - [x] Full Definition-of-Done mechanical gate
@@ -163,9 +183,10 @@ stated behavior in Full.
       100/100/100/100 in their own per-module rows.
 - [x] Frontend runtime-rule substitutes independently re-verified three times this delivery (by
       `gate-enforcer`, `implementation-verifier`, and `security-reviewer`, each against the
-      current working tree): no `fetch`/`axios`/`api/` import introduced, no
-      `localStorage`/`sessionStorage` token handling, read-only `useAuthStore()` usage unchanged,
-      zero banned idioms (`console.*`, `any`, `eslint-disable`), no `dangerouslySetInnerHTML`.
+      working tree that is now committed unchanged as `99e5128`): no `fetch`/`axios`/`api/`
+      import introduced, no `localStorage`/`sessionStorage` token handling, read-only
+      `useAuthStore()` usage unchanged, zero banned idioms (`console.*`, `any`, `eslint-disable`),
+      no `dangerouslySetInnerHTML`.
 
 Coverage type split: integration only (React Testing Library + MSW where applicable), consistent
 with this Story adding no new hook or API function — both existing test files
@@ -192,9 +213,10 @@ Per `docs/plans/US-5.6-implementation-plan.md`'s Risks section:
 
 - **No backend/API/DB surface is touched** — the entire diff is nav markup in one file plus
   test-only additions; `AppRoutes.tsx` itself is unmodified (confirmed by an empty
-  `git diff --stat`). Rollback is a plain revert of the commit; no migration to reverse, no data
-  to backfill.
-- **No new dependency was added** — `frontend/package.json`/`package-lock.json` show no diff.
+  `git diff --stat` for that path within `git diff origin/main..HEAD`). Rollback is a plain revert
+  of the single commit `99e5128`; no migration to reverse, no data to backfill.
+- **No new dependency was added** — `git diff origin/main..HEAD --stat -- frontend/package.json
+  frontend/package-lock.json` is empty.
 - **Home/Tickets active-state ambiguity was the plan's own named implementation trap** (both
   target `/tickets`): closed by keeping Home a plain `Link`, never `NavLink`, directly asserted by
   a dedicated test (`test_app_shell_home_control_never_carries_aria_current_even_while_on_tickets`)
@@ -211,49 +233,58 @@ Per `docs/plans/US-5.6-implementation-plan.md`'s Risks section:
 
 ## `.env.example` Check
 
-**Confirmed current — no change required.** This Story adds no new configuration, setting, or
-dependency: `git diff --stat -- frontend/.env.example .env.example` returns empty, consistent
-with the story's own Out of Scope section (no new screen or backend endpoint) and independently
-confirmed by both `implementation-verifier` (§6.7 row, "N/A — no new setting") and
-`security-reviewer`.
+**Re-confirmed current — no change required.** This Story adds no new configuration, setting, or
+dependency: `git diff origin/main..HEAD --stat -- .env.example frontend/.env.example` returns
+empty against the current commit `99e5128`, consistent with the story's own Out of Scope section
+(no new screen or backend endpoint) and independently confirmed by both `implementation-verifier`
+(§6.7 row, "N/A — no new setting") and `security-reviewer`.
 
 ## Commit Hygiene Check (AGENTS.md §7.8)
 
-**US-5.6's own file set is clean; one pre-existing branch-state concern is flagged, not silently
-absorbed into this draft.**
+**Re-verified against the new single commit `99e5128` on `feat/us-5.6-global-navigation`; clean.**
 
-- `git status --porcelain -- frontend/` shows exactly 3 modified tracked files —
-  `frontend/src/layouts/AppShell.tsx`, `frontend/src/layouts/AppShell.test.tsx`,
-  `frontend/src/routes/AppRoutes.test.tsx` — matching `implementation_report` v1's file-set claim
-  exactly, and matching every Files-To-Modify row in `implementation_plan` v1. No file outside
-  that set changed under `frontend/`; no drive-by refactor found within the touched file (the
-  entire production diff is import + nav-markup changes, no unrelated logic altered).
-- Every other modified/untracked path in the working tree
-  (`docs/catalog/stories.yaml`, `docs/workflow/active-story.yaml`,
-  `docs/workflow/history.jsonl`, `docs/workflow/workflow-state.yaml`, and the full
-  `docs/{stories,specifications,reviews,decisions,evidence,impact-analysis,plans,tests,
-  verification,reconciliation,catalog}/US-5.6-*` artifact set) is this delivery's own
-  workflow/documentation output, owned by its producing skill per
-  `docs/workflow/artifact-paths.yaml` — not unrelated scope.
-- **Flagged, not resolved here:** the current branch, `feat/us-5.5-agent-console-ui`, is 5
-  commits ahead of `main` (`2fbb560`, `5e28235`, `fd62fc1`, `a426a1e`, `8563ae6` — the merged
-  US-5.5 feature commit plus US-5.4/US-5.5 archive and unrelated docs commits) and 4 ahead of its
-  own origin remote; no dedicated `feat/us-5.6-*` branch has been created. This is a pre-existing
-  branch-naming/history state carried from Story activation
-  (`docs/workflow/workflow-state.yaml`'s own `note` field already records this as reported, not
-  auto-resolved, per `start-flow.md` branch policy), not something this Story's implementation
-  introduced, and none of those prior commits touch this Story's own file set. It means a plain
-  `git push` from this branch today would carry US-5.5's already-committed history (not yet
-  merged into `main` via PR) along with this Story's new commit(s). Recommend confirming with the
-  user whether US-5.5 already has an open PR from this branch (in which case this Story's commit
-  would simply extend that same PR) or whether a fresh `feat/us-5.6-global-navigation` branch off
-  `main` should be cut before anything is pushed — this stage does not run `git` itself and takes
-  no action on it.
+- `git branch --show-current` confirms the active branch is `feat/us-5.6-global-navigation`.
+  `git merge-base --is-ancestor origin/main HEAD` confirms `HEAD` is a clean descendant of
+  `origin/main` (`dc0b8a1`) — a real, linear branch-off, not a stale/diverged base.
+- `git log --oneline -3` shows exactly one story commit, `99e5128` ("feat: global navigation
+  (US-5.6)"), directly on top of `dc0b8a1` (the already-merged US-5.5 PR #39). No stray WIP,
+  fixup, or merge-conflict-resolution commit exists on this branch.
+- `git diff origin/main..HEAD --stat` shows exactly 28 changed files: the three frontend files this
+  Story's `implementation_plan`/`implementation_report` name
+  (`frontend/src/layouts/AppShell.tsx`, `frontend/src/layouts/AppShell.test.tsx`,
+  `frontend/src/routes/AppRoutes.test.tsx`), plus `docs/catalog/stories.yaml`,
+  `docs/workflow/active-story.yaml`, `docs/workflow/history.jsonl`,
+  `docs/workflow/workflow-state.yaml`, and the full `docs/{stories,specifications,reviews,
+  decisions,evidence,impact-analysis,plans,tests,verification,reconciliation,catalog,pr}/US-5.6-*`
+  artifact set — this delivery's own workflow/documentation output, owned by its producing skill
+  per `docs/workflow/artifact-paths.yaml`, not unrelated scope. No file outside that set changed;
+  `frontend/package.json`/`package-lock.json` untouched (independently confirms no new
+  dependency); no drive-by refactor found within the touched production file (the entire diff is
+  import + nav-markup changes, no unrelated logic altered).
+- `git diff origin/main..HEAD | grep -nE "^<<<<<<<|^=======|^>>>>>>>"` returns no match — no
+  leftover conflict marker from the stash-pop/manual-resolve step that produced this commit
+  (`workflow-state.yaml`'s own note records four workflow-tracking files were hand-resolved during
+  that merge; this grep confirms none of the four, nor any other changed file, still carries a
+  marker).
+- **Prior finding RESOLVED, not carried forward:** `v1` of this draft flagged that the working
+  branch (`feat/us-5.5-agent-console-ui`) carried unmerged US-5.5 history alongside this Story's
+  changes. Per human decision recorded in `workflow-state.yaml` (2026-09-15T17:45:00Z), a fresh
+  branch, `feat/us-5.6-global-navigation`, was cut from `origin/main` (which already has US-5.5
+  merged as `dc0b8a1`) and only US-5.6's own changes were carried over and committed as `99e5128`.
+  The four loose commits that used to sit ahead of `main` on `feat/us-5.5-agent-console-ui` are not
+  ancestors of this branch and are not part of what this PR would ship — confirmed by this
+  session's own `git diff origin/main..HEAD --stat`, which shows only this Story's file set. This
+  is resolved history, not an open concern for this draft.
+- **Flagged, not blocking:** commit `99e5128` itself contains `pr_summary` **v1** (the version that
+  was current when the commit was made); this **v2** revision is, as of this write, an uncommitted
+  working-tree change layered on top. `pr-creator` reads the PR body from the file on disk at
+  push time, so the body it uses will be this v2 content regardless — but the pushed commit's own
+  history will carry v1 of this doc until a later commit (outside this stage's remit; this skill
+  does not commit) updates it. Not a hygiene defect in `99e5128` itself, since v1 was in fact
+  current when that commit was made.
 
 ---
 
 **This is drafted content only.** Pushing the branch or opening the Pull Request requires an
 explicit, separate human instruction to run `git push` / invoke `pr-creator` (`gh pr create` or
-the `github` MCP server) — this skill does not push, open, or merge anything itself. Given the
-branch-state flag above, that instruction should also settle how this Story's commit(s) relate to
-the existing `feat/us-5.5-agent-console-ui` branch before anything is pushed.
+the `github` MCP server) — this skill does not push, open, or merge anything itself.
