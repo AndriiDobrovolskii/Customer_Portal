@@ -10,28 +10,43 @@ story: US-5.6
 
 workflow: story-delivery
 
-current_stage: PR_CREATION
-previous_stage: PR_PREPARATION
-last_completed_stage: PR_PREPARATION
+current_stage: READY_FOR_PR
+previous_stage: PR_CREATION
+last_completed_stage: PR_CREATION
 
-status: IN_PROGRESS
+status: WAITING_FOR_HUMAN
 attempt: 1
 
-last_invoked_skill: pr-preparer
+last_invoked_skill: pr-creator
 
 last_result:
   verdict: PASS
-  stage: PR_PREPARATION
-  recorded_at: "2026-09-15T18:00:00Z"
+  stage: PR_CREATION
+  recorded_at: "2026-09-15T14:56:50Z"
 
 last_artifacts:
+  - type: pull_request
+    path: docs/pr/US-5.6-pr-record.md
+    version: 1
   - type: pr_summary
     path: docs/pr/US-5.6-pr-summary.md
     version: 2
 
 implementation_substep: null
 
-pending_human_gate: null
+pending_human_gate:
+  stage: READY_FOR_PR
+  status: PENDING
+  required_artifacts:
+    - type: pr_summary
+      path: docs/pr/US-5.6-pr-summary.md
+      version: 2
+    - type: pull_request
+      path: docs/pr/US-5.6-pr-record.md
+      version: 1
+  automated_verdict: PASS
+  blocking_findings: []
+  requested_at: "2026-09-15T14:56:50Z"
 
 note: >
   US-5.6 activated 2026-09-15 by /so:start. Story authored directly by the
@@ -271,7 +286,22 @@ note: >
   this exact content); git diff origin/main..HEAD --stat confirmed the
   expected 28-file set, no unrelated files, no leftover conflict markers.
   Branch-hygiene finding now recorded RESOLVED, not carried forward as
-  still-open. Advanced back to PR_CREATION for retry.
+  still-open. Advanced back to PR_CREATION for retry. PR_CREATION retry
+  (pr-creator, run directly in the interactive session per its own guidance
+  - a real push/PR-open side effect) 2026-09-15T14:56:50Z: staleness
+  re-check passed (commit 1fb4c20's real timestamp 14:53:50Z precedes
+  pr_summary v2's recorded updated_at 18:00:00Z). Resolved owner/repo from
+  git remote (AndriiDobrovolskii/Customer_Portal); head
+  feat/us-5.6-global-navigation, base main (repo default, confirmed via git
+  remote show origin). Pushed via git push -u origin HEAD; verified pushed
+  SHA 1fb4c20 matches origin/feat/us-5.6-global-navigation after fetch.
+  Checked for a stray existing open PR on this head branch (none) before
+  calling create_pull_request with title/body verbatim from pr_summary v2.
+  Opened PR #40 (https://github.com/AndriiDobrovolskii/Customer_Portal/pull/40),
+  mergeable_state clean, head SHA confirmed 1fb4c20, base SHA dc0b8a1, 28
+  files changed (+3588/-64). Wrote docs/pr/US-5.6-pr-record.md. Advanced to
+  READY_FOR_PR - awaiting /so:approve or /so:reject; a human reviews the
+  actual opened PR #40 and records readiness.
 
 blocking_issues: []
 
@@ -292,6 +322,6 @@ non_blocking_findings:
   - "[PR_PREPARATION v2] pr_summary v2 was regenerated as an uncommitted working-tree change layered on top of commit 99e5128; that commit's own history still carries pr_summary v1 until a later commit updates it. Informational only - pr-creator reads the PR body from disk at push time, so it sees v2 regardless."
 
 started_at: "2026-09-15T00:10:00Z"
-updated_at: "2026-09-15T17:45:00Z"
+updated_at: "2026-09-15T14:56:50Z"
 completed_at: null
 archived_at: null
